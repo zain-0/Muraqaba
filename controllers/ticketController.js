@@ -24,6 +24,23 @@ export const createTicket = async (req, res) => {
   }
 };
 
+export const getAllPendingTickets = async (req, res) => {
+  try {
+    const pendingTickets = await Ticket.findAll({ status: 'pending' })
+      .populate('busId')
+      .populate('vendorId') 
+      .populate('createdBy')
+      .populate('initialApprovedBy')
+
+      if (!pendingTickets) {
+        return res.status(404).json({ message: 'No pending tickets found' });
+      }
+    res.status(200).json(pendingTickets);
+  } catch (err) { 
+    res.status(500).json({ message: 'Error fetching pending tickets', error: err });
+  }
+};
+
 // Update the status of the ticket
 export const updateTicketStatus = async (req, res) => {
   try {

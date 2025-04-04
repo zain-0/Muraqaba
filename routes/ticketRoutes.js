@@ -10,7 +10,8 @@ import {
   getAllTickets, 
   getTicketById, 
   getMyTickets, 
-  getCompletedTickets 
+  getCompletedTickets,
+  getAllPendingTickets 
 } from '../controllers/ticketController.js';
 
 import authMiddleware from '../middleware/authMiddleware.js';
@@ -41,6 +42,9 @@ router.put('/invoice/reject/:id', authMiddleware, roleMiddleware(['supervisor'])
 
 // Route for viewing all tickets (Service Creator, Supervisor)
 router.get('/', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor']), getAllTickets);
+
+// Route for getting all the pending tickets (Supervisor, Service Creator)
+router.get('/pending', authMiddleware, roleMiddleware(['supervisor', 'serviceCreator']), getAllPendingTickets);
 
 // Route for viewing a specific ticket (Vendor can interact with their tickets)
 router.get('/:id', authMiddleware, getTicketById);
