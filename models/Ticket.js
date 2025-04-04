@@ -39,7 +39,7 @@ const TicketSchema = new mongoose.Schema(
             ref: 'Invoice', // Reference to an Invoice model, if you want a separate Invoice schema
             required: false, // Optional until vendor submits the invoice
         },
-        category: {
+        repairCategory: {
             type: String,
             enum: ['ELECTRICAL', 'MECHANICAL', 'AC REPAIR', 'ENGINE', 'BODY', 'BATTERY REPLACEMENT', 'TYRE REPLACEMENT'],
             required: function() {
