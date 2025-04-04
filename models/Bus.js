@@ -34,10 +34,7 @@ const BusSchema = new mongoose.Schema(
         ref: 'User',
         required: true,
       },
-      vendorName: {
-        type: String,
-        required: true, // store the username from the User model
-      },
+      
     },
     { timestamps: true }
   );

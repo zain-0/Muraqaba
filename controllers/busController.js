@@ -75,7 +75,6 @@ export const createBus = async (req, res) => {
       transmission,
       brakePad,
       vendor: vendorUser._id,
-      vendorName: vendorUser.username, // get the name from the vendor
     });
 
     await newBus.save();
