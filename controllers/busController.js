@@ -27,6 +27,8 @@ export const getBusById = async (req, res) => {
 
 
 
+import User from '../models/User.js'; // make sure this import exists
+
 export const createBus = async (req, res) => {
   try {
     const {
@@ -41,26 +43,25 @@ export const createBus = async (req, res) => {
       tyre,
       transmission,
       brakePad,
+      vendorId, // selected vendor passed in body
     } = req.body;
 
-    // Validate all required nested fields
-    const requiredNestedFields = [engine, ac, tyre, transmission, brakePad];
-    const names = ['engine', 'ac', 'tyre', 'transmission', 'brakePad'];
+    // Validate vendor
+    const vendorUser = await User.findById(vendorId);
+    if (!vendorUser) {
+      return res.status(404).json({ message: 'Vendor not found' });
+    }
 
-    for (let i = 0; i < requiredNestedFields.length; i++) {
-      const part = requiredNestedFields[i];
-      if (
-        !part ||
-        typeof part.serviceKm !== 'number' ||
-        typeof part.currentKm !== 'number'
-      ) {
+    // Validate nested parts
+    const parts = { engine, ac, tyre, transmission, brakePad };
+    for (const [key, value] of Object.entries(parts)) {
+      if (!value || typeof value.serviceKm !== 'number' || typeof value.currentKm !== 'number') {
         return res.status(400).json({
-          message: `Invalid or missing fields in ${names[i]} (must include numeric serviceKm and currentKm).`,
+          message: `Missing or invalid serviceKm/currentKm in ${key}`,
         });
       }
     }
 
-    // Create a new Bus document
     const newBus = new Bus({
       chassisNumber,
       fleetNumber,
@@ -73,9 +74,10 @@ export const createBus = async (req, res) => {
       tyre,
       transmission,
       brakePad,
+      vendor: vendorUser._id,
+      vendorName: vendorUser.username, // get the name from the vendor
     });
 
-    // Save to DB
     await newBus.save();
 
     res.status(201).json({
@@ -84,13 +86,10 @@ export const createBus = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-
-    // Duplicate entry handling
     if (err.code === 11000) {
       const field = Object.keys(err.keyValue)[0];
       return res.status(409).json({ message: `Duplicate value for ${field}` });
     }
-
     res.status(500).json({ message: 'Server error' });
   }
 };
