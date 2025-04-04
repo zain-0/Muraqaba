@@ -12,7 +12,7 @@ router.get('/', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 
 router.get('/:id', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), getBusById);
 
 // Route to create a new bus (requires authentication and specific roles)
-router.post('/', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor']), createBus);
+router.post('/create', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor']), createBus);
 
 
 export default router;

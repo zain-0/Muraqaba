@@ -19,7 +19,7 @@ const UserSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            enum: ['vendor', 'service_creator', 'supervisor', 'purchase_manager'],
+            enum: ['vendor', 'serviceCreator', 'supervisor', 'purchaseManager'],
             required: true,
         },
     },
