@@ -124,7 +124,55 @@
         }
     };
 
+    import bcrypt from 'bcryptjs';
+import User from '../models/User.js';
+
+export const createVendor = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // Validate input
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'All fields are required: name, email, password.' });
+    }
+
+    // Check if user with same email exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ message: 'Email already exists.' });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create new user with role: 'vendor'
+    const newVendor = new User({
+      name,
+      email,
+      password: hashedPassword,
+      role: 'vendor',
+    });
+
+    await newVendor.save();
+
+    res.status(201).json({
+      message: 'Vendor created successfully',
+      vendor: {
+        _id: newVendor._id,
+        name: newVendor.name,
+        email: newVendor.email,
+        role: newVendor.role,
+      },
+    });
+  } catch (error) {
+    console.error('Error creating vendor:', error);
+    res.status(500).json({ message: 'Server error while creating vendor.' });
+  }
+};
+
+
     export default {
+        createVendor,
         getVendorTickets,
         acknowledgeTicket,
         submitInvoice,

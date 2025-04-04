@@ -14,7 +14,7 @@ router.post('/acknowledge/:id', authMiddleware, roleMiddleware(['vendor']), vend
 // Route for submitting an invoice (Vendor)
 router.post('/invoice/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.submitInvoice);
 
-// Route for submitting a repair request (Vendor)
-router.post('/repair-request/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.submitRepairRequest);
+// Route for creating a vendor (serviceCreator)
+router.post('/create', authMiddleware, roleMiddleware(['serviceCreator']), vendorController.createVendor);
 
 export default router;
