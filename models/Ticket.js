@@ -49,7 +49,7 @@ const TicketSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ['pending', 'approved', 'acknowledged', 'invoice-submitted','invoice-accepted' ,'completed', 'invoice-rejected'],
+            enum: ['pending', 'approved', 'acknowledged', 'invoiceSubmitted','invoiceAccepted' ,'completed', 'invoiceRejected'],
             default: 'pending',
         },
         statusUpdated: {

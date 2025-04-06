@@ -65,11 +65,11 @@ export const getDashboard = async (req, res) => {
 // Dashboard for Service Creator
 const getServiceCreatorDashboard = async (userId) => {
     // Fetch relevant data for serviceCreator
-    const tickets = await Ticket.find({ serviceCreator: userId }); // Example query for tickets
+    const tickets = await Ticket.find(); // Example query for tickets
     return {
         totalTickets: tickets.length,
         pendingTickets: tickets.filter(ticket => ticket.status === 'pending').length,
-        inProgressTickets: tickets.filter(ticket => ticket.status === 'inProgress').length,
+        inProgressTickets: tickets.filter(ticket => ticket.status !== 'completed').length,
         completedTickets: tickets.filter(ticket => ticket.status === 'completed').length,
     };
 };
@@ -77,7 +77,7 @@ const getServiceCreatorDashboard = async (userId) => {
 // Dashboard for Supervisor
 const getSupervisorDashboard = async (userId) => {
     // Fetch relevant data for supervisor
-    const tickets = await Ticket.find({ supervisor: userId }); // Example query for tickets
+    const tickets = await Ticket.find(); // Example query for tickets
     return {
         totalTickets: tickets.length,
         approvedTickets: tickets.filter(ticket => ticket.status === 'approved').length,
@@ -86,20 +86,54 @@ const getSupervisorDashboard = async (userId) => {
 };
 
 // Dashboard for Vendor
+import mongoose from 'mongoose'; // Import mongoose for ObjectId conversion
+
+// Dashboard for Vendor
 const getVendorDashboard = async (userId) => {
-    // Fetch relevant data for vendor
-    const tickets = await Ticket.find({ vendor: userId }); // Example query for tickets
-    return {
-        totalTickets: tickets.length,
-        activeTickets: tickets.filter(ticket => ticket.status === 'active').length,
-        invoicesSubmitted: tickets.filter(ticket => ticket.invoiceStatus === 'submitted').length,
-    };
+    try {
+        // Log the userId to verify the input
+        console.log('Fetching dashboard for userId:', userId);
+
+        // Convert userId to ObjectId if necessary (use 'new' for ObjectId)
+        
+
+        // Fetch relevant data for vendor
+        const tickets = await Ticket.find({ vendorId: userId }).populate('busId'); // Populate busId to get bus details
+
+        // Log the fetched tickets to check the structure and values
+        console.log('Fetched tickets:', tickets);
+
+        // Check if no tickets are found and log a message
+        if (tickets.length === 0) {
+            console.log(`No tickets found for vendor with userId: ${userId}`);
+        }
+
+        // Calculate active tickets (those that are not 'completed')
+        const activeTickets = tickets.filter(ticket => ticket.status !== 'completed');
+        console.log('Active Tickets (not completed):', activeTickets);
+
+        // Calculate invoices submitted (those that have status 'invoiceSubmitted')
+        const invoicesSubmitted = tickets.filter(ticket => ticket.status === 'invoiceSubmitted');
+        console.log('Invoices Submitted:', invoicesSubmitted);
+
+        // Return the final result
+        return {
+            activeTickets,
+            invoicesSubmitted,
+            tickets, // Total tickets for the vendor
+        };
+    } catch (error) {
+        console.error('Error fetching vendor dashboard:', error);
+        throw error; // Throw error to handle it properly in the caller function
+    }
 };
+
+
 
 // Dashboard for Purchase Manager
 const getPurchaseManagerDashboard = async (userId) => {
     // Fetch relevant data for purchase manager (only completed tickets)
-    const tickets = await Ticket.find({ purchaseManager: userId, status: 'completed' });
+    const tickets = await Ticket.find({ status: 'completed' });
     return {
         totalCompletedTickets: tickets.length,
     };

@@ -70,7 +70,7 @@ const submitInvoice = async (req, res) => {
             //     return res.status(400).json({ message: 'Ticket must be acknowledged before submitting an invoice.' });
             // }
 
-        if(!(ticket.status === 'invoice-submitted' || ticket.status === 'acknowledged')){
+        if(!(ticket.status === 'invoiceSubmitted' || ticket.status === 'acknowledged')){
             return res.status(400).json({ message: 'You cannot Submit an Invoice right now' });
         }
 
@@ -89,7 +89,7 @@ const submitInvoice = async (req, res) => {
 
         // Update the ticket with the invoice reference
         ticket.invoice = newInvoice._id;
-        ticket.status = 'invoice-submitted'; // Change the ticket status to 'invoice-submitted'
+        ticket.status = 'invoiceSubmitted'; // Change the ticket status to 'invoiceSubmitted'
         await ticket.save();
 
         return res.status(201).json({ message: 'Invoice submitted successfully.', invoice: newInvoice });
@@ -195,7 +195,7 @@ export const completeTicket = async (req, res) => {
             return res.status(400).json({ message: 'Ticket is already completed.' });
         }
 
-        if (!(ticket.status === 'invoice-accepted')) {
+        if (!(ticket.status === 'invoiceAccepted')) {
             return res.status(400).json({ message: 'You cannot complete the ticket right now.' });
         }
 

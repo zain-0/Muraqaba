@@ -12,3 +12,4 @@ router.get('/profile', authMiddleware, getProfile);
 router.get('/dashboard', authMiddleware, getDashboard);
 
 export default router;  // Correctly exporting the router
+

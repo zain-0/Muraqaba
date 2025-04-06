@@ -107,7 +107,7 @@ export const submitInvoice = async (req, res) => {
       return res.status(404).json({ message: 'Ticket not found' });
     }
 
-    if ((ticket.status == 'acknowledged' || ticket.status == 'invoice-rejected')) {
+    if ((ticket.status == 'acknowledged' || ticket.status == 'invoiceRejected')) {
 
     const invoice = new Invoice({
       ticketId,
@@ -118,7 +118,7 @@ export const submitInvoice = async (req, res) => {
 
     await invoice.save();
 
-    ticket.status = 'invoice-submitted';
+    ticket.status = 'invoiceSubmitted';
     ticket.invoice = invoice._id;
     ticket.invoiceSubmittedAt = Date.now();
     ticket.invoiceApprovedBy = req.user._id; // Assuming the user submitting the invoice is the one making the request
@@ -227,7 +227,7 @@ export const acceptInvoice = async (req, res) => {
     await invoice.save();
 
     // Update the ticket status, assign invoice to ticket, and set invoice approval details
-    ticket.status = 'invoice-accepted';
+    ticket.status = 'invoiceAccepted';
     ticket.invoiceAcceptedAt = Date.now();
     ticket.invoiceApprovedBy = req.user._id;
     ticket.invoice = invoice._id; // Attach the invoice to the ticket
@@ -291,7 +291,7 @@ export const rejectInvoice = async (req, res) => {
       return res.status(400).json({ message: 'No ticket associated with this invoice' });
     }
 
-    ticket.status = 'invoice-rejected';
+    ticket.status = 'invoiceRejected';
     ticket.invoiceRejectedBy = req.user._id; // Assuming the user rejecting the invoice is the one making the request
     ticket.invoiceRejectedAt = new Date(); // optional timestamp
     ticket.updatedAt = Date.now();
