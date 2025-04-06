@@ -38,6 +38,9 @@
 
             // Change the ticket status to 'acknowledged'
             ticket.status = 'acknowledged';
+            ticket.acknowledgedAt = Date.now(); // Set the acknowledged timestamp
+            ticket.acknowledgedBy = req.user._id; // Assuming the user acknowledging the ticket is the one making the request
+            ticket.statusUpdated= Date.now(); // Update the status updated timestamp
             await ticket.save();
 
             return res.status(200).json({ message: 'Ticket acknowledged successfully.', ticket });
@@ -61,8 +64,12 @@
             }
 
             // Check if the ticket is acknowledged before submitting an invoice
-            if (ticket.status !== 'acknowledged') {
-                return res.status(400).json({ message: 'Ticket must be acknowledged before submitting an invoice.' });
+            // if (ticket.status !== 'acknowledged') {
+            //     return res.status(400).json({ message: 'Ticket must be acknowledged before submitting an invoice.' });
+            // }
+
+            if(!(ticket.status === 'invoice-submitted' || ticket.status === 'acknowledged')){
+                return res.status(400).json({ message: 'You cannot Submit an Invoice right now' });
             }
 
             // Create the invoice for this ticket
@@ -70,8 +77,9 @@
                 ticketId: ticket._id,
                 amount,
                 description,
-                status: 'pending', // Default status is 'pending'
-                createdBy: req.user._id, // Logged-in user (vendor)
+                status: 'invoice-Pending', // Default status is 'pending'
+                createdBy: req.user._id, 
+                vendorId: req.user._id// Logged-in user (vendor)
             });
 
             // Save the invoice
@@ -79,6 +87,7 @@
 
             // Update the ticket with the invoice reference
             ticket.invoice = newInvoice._id;
+            ticket.status = 'invoice-submitted'; // Change the ticket status to 'invoice-submitted'
             await ticket.save();
 
             return res.status(201).json({ message: 'Invoice submitted successfully.', invoice: newInvoice });
@@ -170,6 +179,39 @@ export const createVendor = async (req, res) => {
   }
 };
 
+export const completeTicket = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Find the ticket by its ID
+        const ticket = await Ticket.findById(id);
+
+        if (!ticket) {
+            return res.status(404).json({ message: 'Ticket not found.' });
+        }
+
+        // Check if the ticket is already completed or not
+        if (ticket.status === 'completed') {
+            return res.status(400).json({ message: 'Ticket is already completed.' });
+        }
+
+        if (!(ticket.status === 'invoice-accepted')) {
+            return res.status(400).json({ message: 'You cannot complete the ticket right now.' });
+        }
+
+        // Change the ticket status to 'completed'
+        ticket.status = 'completed';
+        ticket.completedAt = Date.now(); // Set the completed timestamp
+        ticket.statusUpdated= Date.now(); // Update the status updated timestamp
+        await ticket.save();
+
+        return res.status(200).json({ message: 'Ticket completed successfully.', ticket });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: 'Server error, please try again later.' });
+    }
+};
+
 
     export default {
         createVendor,
@@ -177,4 +219,5 @@ export const createVendor = async (req, res) => {
         acknowledgeTicket,
         submitInvoice,
         submitRepairRequest,
+        completeTicket
     };

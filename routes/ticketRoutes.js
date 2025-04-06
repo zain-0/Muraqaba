@@ -23,16 +23,16 @@ const router = express.Router();
 router.post('/create', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor']), createTicket);
 
 // Route for updating ticket status (Service Creator, Supervisor, Vendor)
-router.put('/update/:id', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 'vendor']), updateTicketStatus);
+// router.put('/update/:id', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 'vendor']), updateTicketStatus);
 
 // Route for approving a ticket (Initial Approval by Supervisor)
-router.put('/approve/:id', authMiddleware, roleMiddleware(['supervisor']), approveTicket);
+  router.put('/approve/:id', authMiddleware, roleMiddleware(['supervisor']), approveTicket);
 
 // Route for vendor to submit invoice (Vendor)
-router.put('/invoice/:id', authMiddleware, roleMiddleware(['vendor']), submitInvoice);
+ router.put('/invoice/:id', authMiddleware, roleMiddleware(['vendor']), submitInvoice);
 
 // Route for vendor to request repair (Vendor)
-router.put('/request-repair/:id', authMiddleware, roleMiddleware(['vendor']), submitRepairRequest);
+// router.put('/request-repair/:id', authMiddleware, roleMiddleware(['vendor']), submitRepairRequest);111
 
 // Route for invoice supervisor to accept invoice (Invoice Acceptance)
 router.put('/invoice/accept/:id', authMiddleware, roleMiddleware(['supervisor']), acceptInvoice);

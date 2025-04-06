@@ -12,9 +12,15 @@ router.get('/tickets', authMiddleware, roleMiddleware(['vendor']), vendorControl
 router.post('/acknowledge/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.acknowledgeTicket);
 
 // Route for submitting an invoice (Vendor)
-router.post('/invoice/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.submitInvoice);
+// router.post('/invoice/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.submitInvoice);
 
 // Route for creating a vendor (serviceCreator)
-router.post('/create', authMiddleware, roleMiddleware(['serviceCreator']), vendorController.createVendor);
+router.post('/create/', authMiddleware, roleMiddleware(['serviceCreator']), vendorController.createVendor);
 
+// router.post('/completed/:id', authMiddleware, roleMiddleware(['serviceCreator']), vendorController.completeVendor);
+
+
+router.put('/complete/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.completeTicket);
+// Route for getting all vendors (serviceCreator)
 export default router;
+

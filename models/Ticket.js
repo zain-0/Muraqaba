@@ -24,10 +24,11 @@ const TicketSchema = new mongoose.Schema(
             ref: 'User',
             required: true,
         },
-        initialApprovedBy: {
+        initialApprovedBy: {        
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User', // Reference to the User model (initial approval supervisor)
-            required: false, // Not required until ticket is initially approved
+            required: false,
+            default:null // Not required until ticket is initially approved
         },
         invoiceApprovedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -48,7 +49,7 @@ const TicketSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ['pending', 'approved', 'acknowledged', 'invoice', 'completed', 'invoice-rejected'],
+            enum: ['pending', 'approved', 'acknowledged', 'invoice-submitted','invoice-accepted' ,'completed', 'invoice-rejected'],
             default: 'pending',
         },
         statusUpdated: {
