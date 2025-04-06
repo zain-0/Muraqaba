@@ -219,5 +219,5 @@ export const completeTicket = async (req, res) => {
         acknowledgeTicket,
         submitInvoice,
         submitRepairRequest,
-        completeTicket
+        completeTicket,
     };
