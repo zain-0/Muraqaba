@@ -8,6 +8,7 @@ const router = express.Router();
 // Route for getting all tickets related to the vendor (Vendor)
 router.get('/tickets', authMiddleware, roleMiddleware(['vendor']), vendorController.getVendorTickets);
 
+
 // Route for acknowledging a ticket (Vendor)
 router.post('/acknowledge/:id', authMiddleware, roleMiddleware(['vendor']), vendorController.acknowledgeTicket);
 

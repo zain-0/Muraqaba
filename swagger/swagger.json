@@ -1,0 +1,848 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "API Documentation",
+    "version": "1.0.0",
+    "description": "This is the OpenAPI specification for the API."
+  },
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "summary": "Register a new user",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "email": { "type": "string" },
+                  "password": { "type": "string" },
+                  "role": { "type": "string" }
+                },
+                "required": ["name", "email", "password", "role"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "token": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "User already exists"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Login a user",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User logged in successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid credentials"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/user/profile": {
+      "get": {
+        "summary": "Get user profile",
+        "tags": ["User"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User profile retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "name": { "type": "string" },
+                        "email": { "type": "string" },
+                        "role": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/user/dashboard": {
+      "get": {
+        "summary": "Get user dashboard",
+        "tags": ["User"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Dashboard data retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dashboardData": {
+                      "type": "object",
+                      "properties": {
+                        "totalTickets": { "type": "integer" },
+                        "pendingTickets": { "type": "integer" },
+                        "inProgressTickets": { "type": "integer" },
+                        "completedTickets": { "type": "integer" },
+                        "approvedTickets": { "type": "integer" },
+                        "pendingApprovalTickets": { "type": "integer" },
+                        "activeTickets": { "type": "array", "items": { "type": "object" } },
+                        "invoicesSubmitted": { "type": "array", "items": { "type": "object" } },
+                        "totalCompletedTickets": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid role"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/buses": {
+      "get": {
+        "summary": "Get all buses",
+        "tags": ["Buses"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of all buses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Bus"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new bus",
+        "tags": ["Buses"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chassisNumber": { "type": "string" },
+                  "fleetNumber": { "type": "string" },
+                  "registrationNumber": { "type": "string" },
+                  "make": { "type": "string" },
+                  "model": { "type": "string" },
+                  "year": { "type": "integer" },
+                  "engine": { "type": "object" },
+                  "ac": { "type": "object" },
+                  "tyre": { "type": "object" },
+                  "transmission": { "type": "object" },
+                  "brakePad": { "type": "object" },
+                  "vendorId": { "type": "string" }
+                },
+                "required": ["chassisNumber", "fleetNumber", "registrationNumber", "make", "model", "year", "vendorId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Bus created successfully"
+          },
+          "400": {
+            "description": "Invalid input or duplicate value"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/buses/{id}": {
+      "get": {
+        "summary": "Get a bus by ID",
+        "tags": ["Buses"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the bus to retrieve"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bus details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bus not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/buses/create": {
+      "post": {
+        "summary": "Create a new bus",
+        "tags": ["Buses"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chassisNumber": { "type": "string" },
+                  "fleetNumber": { "type": "string" },
+                  "registrationNumber": { "type": "string" },
+                  "make": { "type": "string" },
+                  "model": { "type": "string" },
+                  "year": { "type": "integer" },
+                  "engine": { "type": "object" },
+                  "ac": { "type": "object" },
+                  "tyre": { "type": "object" },
+                  "transmission": { "type": "object" },
+                  "brakePad": { "type": "object" },
+                  "vendorId": { "type": "string" }
+                },
+                "required": ["chassisNumber", "fleetNumber", "registrationNumber", "make", "model", "year", "vendorId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Bus created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or validation error"
+          },
+          "409": {
+            "description": "Duplicate value error"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/repair-requests": {
+      "post": {
+        "summary": "Create a repair request",
+        "tags": ["Repair Requests"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "busId": { "type": "string" },
+                  "description": { "type": "string" },
+                  "repairCategory": { "type": "string" }
+                },
+                "required": ["busId", "description", "repairCategory"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Repair request created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "request": { "$ref": "#/components/schemas/RepairRequest" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required fields"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/repair-requests/pending": {
+      "get": {
+        "summary": "Get all pending repair requests",
+        "tags": ["Repair Requests"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of pending repair requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/RepairRequest" }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No pending repair requests found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/repair-requests/status/{id}": {
+      "put": {
+        "summary": "Update the status of a repair request",
+        "tags": ["Repair Requests"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the repair request to update"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string", "enum": ["resolved", "rejected"] }
+                },
+                "required": ["status"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repair request status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "request": { "$ref": "#/components/schemas/RepairRequest" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status"
+          },
+          "404": {
+            "description": "Repair request not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/tickets/create": {
+      "post": {
+        "summary": "Create a new ticket",
+        "tags": ["Tickets"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "busId": { "type": "string" },
+                  "serviceType": { "type": "string" },
+                  "vendorId": { "type": "string" },
+                  "description": { "type": "string" },
+                  "repairCategory": { "type": "string" }
+                },
+                "required": ["busId", "serviceType", "vendorId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ticket created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "ticket": { "$ref": "#/components/schemas/Ticket" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/tickets/pending": {
+      "get": {
+        "summary": "Get all pending tickets",
+        "tags": ["Tickets"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of pending tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Ticket" }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No pending tickets found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/tickets/approve/{id}": {
+      "put": {
+        "summary": "Approve a ticket",
+        "tags": ["Tickets"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the ticket to approve"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket approved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "ticket": { "$ref": "#/components/schemas/Ticket" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/tickets": {
+      "get": {
+        "summary": "Get all tickets",
+        "tags": ["Tickets"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of all tickets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Ticket" }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}": {
+      "get": {
+        "summary": "Get a ticket by ID",
+        "tags": ["Tickets"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the ticket to retrieve"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ticket"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/vendor/tickets": {
+      "get": {
+        "summary": "Get all tickets related to the vendor",
+        "tags": ["Vendor"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of tickets for the vendor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Ticket" }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No tickets found for this vendor."
+          },
+          "500": {
+            "description": "Server error, please try again later."
+          }
+        }
+      }
+    },
+    "/api/vendor/acknowledge/{id}": {
+      "post": {
+        "summary": "Acknowledge a ticket",
+        "tags": ["Vendor"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the ticket to acknowledge"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket acknowledged successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "ticket": { "$ref": "#/components/schemas/Ticket" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ticket is already acknowledged."
+          },
+          "404": {
+            "description": "Ticket not found."
+          },
+          "500": {
+            "description": "Server error, please try again later."
+          }
+        }
+      }
+    },
+    "/api/vendor/complete/{id}": {
+      "put": {
+        "summary": "Complete a ticket",
+        "tags": ["Vendor"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the ticket to complete"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "ticket": { "$ref": "#/components/schemas/Ticket" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "You cannot complete the ticket right now."
+          },
+          "404": {
+            "description": "Ticket not found."
+          },
+          "500": {
+            "description": "Server error, please try again later."
+          }
+        }
+      }
+    },
+    "/api/vendor/create": {
+      "post": {
+        "summary": "Create a new vendor",
+        "tags": ["Vendor"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                },
+                "required": ["name", "email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Vendor created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "vendor": {
+                      "type": "object",
+                      "properties": {
+                        "_id": { "type": "string" },
+                        "name": { "type": "string" },
+                        "email": { "type": "string" },
+                        "role": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "All fields are required: name, email, password."
+          },
+          "409": {
+            "description": "Email already exists."
+          },
+          "500": {
+            "description": "Server error while creating vendor."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Bus": {
+        "type": "object",
+        "properties": {
+          "chassisNumber": { "type": "string" },
+          "fleetNumber": { "type": "string" },
+          "registrationNumber": { "type": "string" },
+          "make": { "type": "string" },
+          "model": { "type": "string" },
+          "year": { "type": "integer" },
+          "engine": { "type": "object" },
+          "ac": { "type": "object" },
+          "tyre": { "type": "object" },
+          "transmission": { "type": "object" },
+          "brakePad": { "type": "object" },
+          "vendor": { "type": "string" }
+        }
+      },
+      "RepairRequest": {
+        "type": "object",
+        "properties": {
+          "busId": { "type": "string" },
+          "vendorId": { "type": "string" },
+          "description": { "type": "string" },
+          "repairCategory": { "type": "string" },
+          "status": { "type": "string" },
+          "resolvedAt": { "type": "string", "format": "date-time" },
+          "rejectedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Ticket": {
+        "type": "object",
+        "properties": {
+          "busId": { "type": "string" },
+          "serviceType": { "type": "string" },
+          "vendorId": { "type": "string" },
+          "description": { "type": "string" },
+          "repairCategory": { "type": "string" },
+          "status": { "type": "string" },
+          "createdBy": { "type": "string" },
+          "initialApprovedBy": { "type": "string" },
+          "invoice": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

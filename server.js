@@ -2,6 +2,8 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import swaggerUi from 'swagger-ui-express';
+import swaggerDocument from './swagger/swagger.json' assert { type: 'json' };
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
@@ -26,6 +28,9 @@ app.use(cookieParser());
 
 // Connect to MongoDB
 connectDB(); // Connects to the MongoDB database
+
+// Swagger setup
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Define Routes
 app.use('/api/auth', authRoutes);
