@@ -6,10 +6,10 @@ import roleMiddleware from '../middleware/roleMiddleware.js';
 const router = express.Router();
 
 // Route to get user profile details
-router.get('/profile', authMiddleware, getProfile);
+// router.get('/profile', authMiddleware, getProfile);
 
-// Route to view role-based dashboard
-router.get('/dashboard', authMiddleware, getDashboard);
+//  Route to view role-based dashboard
+// router.get('/dashboard', authMiddleware, getDashboard);
 
 export default router;  // Correctly exporting the router
 
