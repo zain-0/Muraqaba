@@ -5,6 +5,12 @@ import { registerUser, loginUser } from '../controllers/authController.js'; // I
 
 const router = express.Router();
 
+// Middleware to log API calls
+router.use((req, res, next) => {
+    console.log(`API Called: ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 // Register Route - POST /api/auth/register
 router.post('/register', registerUser);
 

@@ -5,6 +5,11 @@ import roleMiddleware from '../middleware/roleMiddleware.js';
 
 const router = express.Router();
 
+router.use((req, res, next) => {
+    console.log(`API Called: ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 // Vendor creates a repair request
 router.post('/', authMiddleware, roleMiddleware(['vendor',]), repairRequestController.createRepairRequest);
 

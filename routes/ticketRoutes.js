@@ -19,6 +19,12 @@ import roleMiddleware from '../middleware/roleMiddleware.js';
 
 const router = express.Router();
 
+// Middleware to log API calls
+router.use((req, res, next) => {
+    console.log(`API Called: ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 // Route for creating a new ticket (Service Creator, Supervisor)
 router.post('/create', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor']), createTicket);
 

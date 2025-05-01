@@ -5,6 +5,11 @@ import roleMiddleware from '../middleware/roleMiddleware.js';
 
 const router = express.Router();
 
+router.use((req, res, next) => {
+    console.log(`API Called: ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 // Route for getting all tickets related to the vendor (Vendor)
 router.get('/tickets', authMiddleware, roleMiddleware(['vendor']), vendorController.getVendorTickets);
 

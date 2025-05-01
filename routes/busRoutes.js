@@ -5,6 +5,12 @@ import roleMiddleware from '../middleware/roleMiddleware.js'; // Import your rol
 
 const router = express.Router();
 
+// Middleware to log API calls
+router.use((req, res, next) => {
+    console.log(`API Called: ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 // Route to get all buses (requires authentication and specific roles)
 router.get('/', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), getAllBuses);
 
