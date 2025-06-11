@@ -1,119 +1,126 @@
 import Ticket from '../models/Ticket.js';
 import Invoice from '../models/Invoice.js';
 import RepairRequest from '../models/RepairRequest.js';
+import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 
 // Create a new ticket
-export const createTicket = async (req, res) => {
-  try {
+export const createTicket = asyncHandler(async (req, res) => {
     const { busId, serviceType, vendorId, description, repairCategory } = req.body;
     const createdBy = req.user._id;
     
+    // Validate repair category is provided for repair tickets
+    if (serviceType === 'repair' && !repairCategory) {
+        throw new AppError('Repair category is required for repair tickets', 400);
+    }
 
     const newTicket = new Ticket({
-      busId,
-      serviceType,
-      vendorId,
-      createdBy,
-      description: serviceType === 'repair' ? description : undefined,
-      repairCategory: serviceType === 'repair' ? repairCategory : undefined,
-      
+        busId,
+        serviceType,
+        vendorId,
+        createdBy,
+        description: serviceType === 'repair' ? description : undefined,
+        repairCategory: serviceType === 'repair' ? repairCategory : undefined,
     });
 
     await newTicket.save();
+    await newTicket.populate(['busId', 'vendorId', 'createdBy']);
   
-    res.status(201).json({ message: 'Ticket created successfully', ticket: newTicket });
-  } catch (err) {
-    res.status(500).json({ message: 'Error creating ticket', error: err });
-  }
-};
+    res.status(201).json({ 
+        success: true,
+        message: 'Ticket created successfully', 
+        data: newTicket 
+    });
+});
 
-export const getAllPendingTickets = async (req, res) => {
-  try {
+export const getAllPendingTickets = asyncHandler(async (req, res) => {
     const pendingTickets = await Ticket.find({ status: 'pending' })
-      .populate('busId')
-      .populate('vendorId') 
-      .populate('createdBy')
-      .populate('initialApprovedBy')
+        .populate('busId')
+        .populate('vendorId', 'name email') 
+        .populate('createdBy', 'name email')
+        .populate('initialApprovedBy', 'name email');
 
-      if (!pendingTickets) {
-        return res.status(404).json({ message: 'No pending tickets found' });
-      }
-    res.status(200).json(pendingTickets);
-  } catch (error) { 
-    res.status(500).json({ message: 'Error fetching pending tickets', error: error });
-  }
-};
+    res.status(200).json({
+        success: true,
+        count: pendingTickets.length,
+        data: pendingTickets
+    });
+});
 
 // Update the status of the ticket
-export const updateTicketStatus = async (req, res) => {
-  try {
+export const updateTicketStatus = asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
     const { status } = req.body;
+    
     const ticket = await Ticket.findById(ticketId);
-
     if (!ticket) {
-      return res.status(404).json({ message: 'Ticket not found' });
+        throw new AppError('Ticket not found', 404);
     }
 
+    // Check permissions
     if (!['serviceCreator', 'supervisor', 'vendor'].includes(req.user.role)) {
-      return res.status(403).json({ message: 'You do not have permission to update this ticket' });
+        throw new AppError('You do not have permission to update this ticket', 403);
     }
 
     ticket.status = status;
-    ticket.updatedAt = Date.now();
+    ticket.statusUpdated = Date.now();
     await ticket.save();
 
-    res.status(200).json({ message: 'Ticket status updated successfully', ticket });
-  } catch (err) {
-    res.status(500).json({ message: 'Error updating ticket status', error: err });
-  }
-};
+    res.status(200).json({ 
+        success: true,
+        message: 'Ticket status updated successfully', 
+        data: ticket 
+    });
+});
 
 // Approve a ticket
-export const approveTicket = async (req, res) => {
-  try {
+export const approveTicket = asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
-      return res.status(404).json({ message: 'Ticket not found' });
+        throw new AppError('Ticket not found', 404);
+    }
+
+    // Check if ticket is in correct status for approval
+    if (ticket.status !== 'pending') {
+        throw new AppError('Only pending tickets can be approved', 400);
     }
 
     ticket.status = 'approved';
-    // approvedByUser = await User.findById(req.user._id);
-    ticket.initialApprovedBy = req.user._id;;
-    // console.log(ticket.initialApprovedBy);
-    // console.log('user:' + req.user._id);
+    ticket.initialApprovedBy = req.user._id;
     ticket.approvedAt = Date.now();
-    ticket.updatedAt = Date.now();
-    ticket.statusUpdated = Date.now(); // Update the status updated timestamp
+    ticket.statusUpdated = Date.now();
     await ticket.save();
 
-    res.status(200).json({ message: 'Ticket approved successfully', ticket });
-  } catch (err) {
-    res.status(500).json({ message: 'Error approving ticket', error: err });
-  }
-};
+    await ticket.populate(['busId', 'vendorId', 'createdBy', 'initialApprovedBy']);
+
+    res.status(200).json({ 
+        success: true,
+        message: 'Ticket approved successfully', 
+        data: ticket 
+    });
+});
 
 // Submit an invoice
-export const submitInvoice = async (req, res) => {
-  try {
+export const submitInvoice = asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
     const { amount, description } = req.body;
 
     const ticket = await Ticket.findById(ticketId);
-
     if (!ticket) {
-      return res.status(404).json({ message: 'Ticket not found' });
+        throw new AppError('Ticket not found', 404);
     }
 
-    if ((ticket.status == 'acknowledged' || ticket.status == 'invoiceRejected')) {
+    // Check if ticket status allows invoice submission
+    if (!(ticket.status === 'acknowledged' || ticket.status === 'invoiceRejected')) {
+        throw new AppError('Ticket must be acknowledged or previously rejected before submitting an invoice', 400);
+    }
 
     const invoice = new Invoice({
-      ticketId,
-      vendorId: ticket.vendorId,
-      amount,
-      description,
+        ticketId,
+        vendorId: ticket.vendorId,
+        amount,
+        description,
     });
 
     await invoice.save();
@@ -121,236 +128,192 @@ export const submitInvoice = async (req, res) => {
     ticket.status = 'invoiceSubmitted';
     ticket.invoice = invoice._id;
     ticket.invoiceSubmittedAt = Date.now();
-    ticket.invoiceApprovedBy = req.user._id; // Assuming the user submitting the invoice is the one making the request
-    ticket.updatedAt = Date.now();
+    ticket.statusUpdated = Date.now();
     await ticket.save();
 
-    res.status(200).json({ message: 'Invoice submitted successfully', invoice });
-  } else {
-    return res.status(400).json({ message: 'Ticket must be acknowledged before submitting an invoice or wait for the invoice to be accepted or rejected' });
-    }
-  } catch (err) {
-    res.status(500).json({ message: 'Error submitting invoice', error: err });
-  }
-};
+    res.status(200).json({ 
+        success: true,
+        message: 'Invoice submitted successfully', 
+        data: invoice 
+    });
+});
 
 // Submit a repair request
-export const submitRepairRequest = async (req, res) => {
-  try {
+export const submitRepairRequest = asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
     const { description, repairCategory } = req.body;
 
     const ticket = await Ticket.findById(ticketId);
-
     if (!ticket) {
-      return res.status(404).json({ message: 'Ticket not found' });
+        throw new AppError('Ticket not found', 404);
     }
 
     if (ticket.status !== 'acknowledged') {
-      return res.status(400).json({ message: 'Ticket must be acknowledged before submitting a repair request' });
+        throw new AppError('Ticket must be acknowledged before submitting a repair request', 400);
     }
 
     const repairRequest = new RepairRequest({
-      ticketId,
-      vendorId: ticket.vendorId,
-      description,
-      repairCategory,
+        ticketId,
+        vendorId: ticket.vendorId,
+        description,
+        repairCategory,
     });
 
     await repairRequest.save();
 
     ticket.status = 'repair-requested';
     ticket.repairRequest = repairRequest._id;
-    ticket.updatedAt = Date.now();
+    ticket.statusUpdated = Date.now();
     await ticket.save();
 
-    res.status(200).json({ message: 'Repair request submitted successfully', repairRequest });
-  } catch (err) {
-    res.status(500).json({ message: 'Error submitting repair request', error: err });
-  }
-};
+    res.status(200).json({ 
+        success: true,
+        message: 'Repair request submitted successfully', 
+        data: repairRequest 
+    });
+});
 
 // Accept the invoice
-// export const acceptInvoice = async (req, res) => {
-//   try {
-//     const invoiceId  = req.params.id;
-//     const invoice = await Invoice.findById(invoiceId);
-
-//     if (!invoice) {
-//       return res.status(400).json({ message: 'No invoice attached to this ticket' });
-//     }
-
-//     ticket=invoice.ticketId;
-//     if (!ticket) {
-//       return res.status(404).json({ message: 'Ticket not found' });
-//     }
-
-//     invoice.status = 'approved';
-//     invoice.approvedAt = Date.now();
-//     invoice.approvedBy = req.user._id; // Assuming the user accepting the invoice is the one making the request
-//     ticket.invoiceAcceptedAt = Date.now(); // optional timestamp
-//     ticket.invoiceApprovedBy = req.user._id; // Assuming the user accepting the invoice is the one making the request
-//     await invoice.save();
-
-//     ticket.status = 'invoice-accepted';
-//     ticket.invoiceAcceptedAt = Date.now();
-//     ticket.invoiceApprovedBy = req.user._id; // Assuming the user accepting the invoice is the one making the request
-//     ticket.invoiceApprovedBy = req.user._id; // Assuming the user accepting the invoice is the one making the request
-//     ticket.updatedAt = Date.now();
-//     await ticket.save();
-
-//     res.status(200).json({ message: 'Invoice accepted and ticket completed', ticket, invoice });
-//   } catch (err) {
-//     res.status(500).json({ message: 'Error accepting invoice', error: err });
-//   }
-// };
-export const acceptInvoice = async (req, res) => {
-  try {
+export const acceptInvoice = asyncHandler(async (req, res) => {
     const invoiceId = req.params.id;
     const invoice = await Invoice.findById(invoiceId);
 
     if (!invoice) {
-      return res.status(400).json({ message: 'Invoice not found' });
+        throw new AppError('Invoice not found', 404);
     }
 
-    const ticket = await Ticket.findById(invoice.ticketId); // Ensure you fetch the ticket by ID
-
+    const ticket = await Ticket.findById(invoice.ticketId);
     if (!ticket) {
-      return res.status(404).json({ message: 'Ticket not found' });
+        throw new AppError('Ticket not found', 404);
+    }
+
+    // Check if invoice is in correct status
+    if (invoice.status !== 'invoicePending') {
+        throw new AppError('Invoice has already been processed', 400);
     }
 
     invoice.status = 'approved';
     invoice.approvedAt = Date.now();
     invoice.approvedBy = req.user._id;
-
-    // Save the updated invoice
     await invoice.save();
 
-    // Update the ticket status, assign invoice to ticket, and set invoice approval details
+    // Update the ticket status
     ticket.status = 'invoiceAccepted';
     ticket.invoiceAcceptedAt = Date.now();
     ticket.invoiceApprovedBy = req.user._id;
-    ticket.invoice = invoice._id; // Attach the invoice to the ticket
-    ticket.updatedAt = Date.now();
-
-    // Save the updated ticket
+    ticket.invoice = invoice._id;
+    ticket.statusUpdated = Date.now();
     await ticket.save();
 
-    // Send response
-    res.status(200).json({ message: 'Invoice accepted and ticket updated', ticket, invoice });
-  } catch (err) {
-    res.status(500).json({ message: 'Error accepting invoice', error: err });
-  }
-};
+    res.status(200).json({ 
+        success: true,
+        message: 'Invoice accepted and ticket updated', 
+        data: { ticket, invoice } 
+    });
+});
 
 
 // Reject the invoice
-// export const rejectInvoice = async (req, res) => {
-//   try {
-//     const invoiceId = req.params.id;
-//     const invoice = await Invoice.findById(invoiceId);
-
-//     if (!invoice) {
-//       return res.status(404).json({ message: 'Invoice not found' });
-//     }
-
-//     invoice.status = 'rejected';
-//     await invoice.save();
-
-//     ticket=invoice.ticketId;
-//     if (!ticket) {  
-//       return res.status(400).json({ message: 'No invoice attached to this ticket' });
-//     }
-
-//     ticket.status = 'invoice-rejected';
-//     ticket.updatedAt = Date.now();
-//     await ticket.save();
-
-//     res.status(200).json({ message: 'Invoice rejected', ticket, invoice });
-//   } catch (err) {
-//     res.status(500).json({ message: 'Error rejecting invoice', error: err });
-//   }
-// };
-export const rejectInvoice = async (req, res) => {
-  try {
+export const rejectInvoice = asyncHandler(async (req, res) => {
     const invoiceId = req.params.id;
-    // console.log('Invoice ID:', invoiceId); // Log the invoice ID for debugging
     const invoice = await Invoice.findById(invoiceId);
 
     if (!invoice) {
-      return res.status(404).json({ message: 'Invoice not found' });
+        throw new AppError('Invoice not found', 404);
+    }
+
+    const ticket = await Ticket.findById(invoice.ticketId);
+    if (!ticket) {
+        throw new AppError('Ticket not found', 404);
+    }
+
+    // Check if invoice is in correct status
+    if (invoice.status !== 'invoicePending') {
+        throw new AppError('Invoice has already been processed', 400);
     }
 
     invoice.status = 'rejected';
-    invoice.rejectedAt = Date.now(); // optional timestamp
-    invoice.rejectedBy = req.user._id; // Assuming the user rejecting the invoice is the one making the request
+    invoice.rejectedAt = Date.now();
+    invoice.rejectedBy = req.user._id;
     await invoice.save();
 
-    const ticket = await Ticket.findById(invoice.ticketId); // ✅ properly fetch ticket
-    if (!ticket) {
-      return res.status(400).json({ message: 'No ticket associated with this invoice' });
-    }
-
     ticket.status = 'invoiceRejected';
-    ticket.invoiceRejectedBy = req.user._id; // Assuming the user rejecting the invoice is the one making the request
-    ticket.invoiceRejectedAt = new Date(); // optional timestamp
-    ticket.updatedAt = Date.now();
+    ticket.invoiceRejectedBy = req.user._id;
+    ticket.invoiceRejectedAt = Date.now();
+    ticket.statusUpdated = Date.now();
     await ticket.save();
 
-    res.status(200).json({ message: 'Invoice rejected', ticket, invoice });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Error rejecting invoice', error: err });
-  }
-};
+    res.status(200).json({ 
+        success: true,
+        message: 'Invoice rejected', 
+        data: { ticket, invoice } 
+    });
+});
 
 
 // Get all tickets
-export const getAllTickets = async (req, res) => {
-  try {
-    const tickets = await Ticket.find().populate('busId').populate('vendorId').populate('createdBy');
-    res.status(200).json(tickets);
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching tickets', error: err });
-  }
-};
+export const getAllTickets = asyncHandler(async (req, res) => {
+    const tickets = await Ticket.find()
+        .populate('busId')
+        .populate('vendorId', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('initialApprovedBy', 'name email')
+        .populate('invoiceApprovedBy', 'name email');
+    
+    res.status(200).json({
+        success: true,
+        count: tickets.length,
+        data: tickets
+    });
+});
 
 // Get a specific ticket by ID
-export const getTicketById = async (req, res) => {
-  try {
+export const getTicketById = asyncHandler(async (req, res) => {
     const ticketId = req.params.id;
     const ticket = await Ticket.findById(ticketId)
-      .populate('busId')
-      .populate('vendorId')
-      .populate('createdBy')
-      .populate('invoice');
+        .populate('busId')
+        .populate('vendorId', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('initialApprovedBy', 'name email')
+        .populate('acknowledgedBy', 'name email')
+        .populate('invoiceApprovedBy', 'name email')
+        .populate('invoice');
 
     if (!ticket) {
-      return res.status(404).json({ message: 'Ticket not found' });
+        throw new AppError('Ticket not found', 404);
     }
 
-    res.status(200).json(ticket);
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching ticket', error: err });
-  }
-};
+    res.status(200).json({
+        success: true,
+        data: ticket
+    });
+});
 
 // Get "my tickets"
-export const getMyTickets = async (req, res) => {
-  try {
-    const myTickets = await Ticket.find({ createdBy: req.user._id }).populate('busId').populate('vendorId');
-    res.status(200).json(myTickets);
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching my tickets', error: err });
-  }
-};
+export const getMyTickets = asyncHandler(async (req, res) => {
+    const myTickets = await Ticket.find({ createdBy: req.user._id })
+        .populate('busId')
+        .populate('vendorId', 'name email')
+        .populate('initialApprovedBy', 'name email');
+    
+    res.status(200).json({
+        success: true,
+        count: myTickets.length,
+        data: myTickets
+    });
+});
 
 // Get completed tickets
-export const getCompletedTickets = async (req, res) => {
-  try {
-    const completedTickets = await Ticket.find({ status: 'completed' }).populate('busId').populate('vendorId');
-    res.status(200).json(completedTickets);
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching completed tickets', error: err });
-  }
-};
+export const getCompletedTickets = asyncHandler(async (req, res) => {
+    const completedTickets = await Ticket.find({ status: 'completed' })
+        .populate('busId')
+        .populate('vendorId', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('invoice');
+    
+    res.status(200).json({
+        success: true,
+        count: completedTickets.length,
+        data: completedTickets
+    });
+});

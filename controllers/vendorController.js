@@ -1,223 +1,196 @@
     import Ticket from '../models/Ticket.js';
-    import Invoice from '../models/Invoice.js';
-    import RepairRequest from '../models/RepairRequest.js';
+import Invoice from '../models/Invoice.js';
+import RepairRequest from '../models/RepairRequest.js';
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
+import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 
-    // Controller to get all tickets related to the vendor
-const getVendorTickets = async (req, res) => {
-    try {
-        // Fetch all tickets where the vendorId matches the logged-in vendor's ID
-        const vendorTickets = await Ticket.find({ vendorId: req.user._id }).populate('busId').exec();
+// Controller to get all tickets related to the vendor
+export const getVendorTickets = asyncHandler(async (req, res) => {
+    // Fetch all tickets where the vendorId matches the logged-in vendor's ID
+    const vendorTickets = await Ticket.find({ vendorId: req.user._id })
+        .populate('busId')
+        .populate('createdBy', 'name email')
+        .populate('initialApprovedBy', 'name email');
 
-        if (vendorTickets.length === 0) {
-             return res.status(404).json({ message: 'No tickets found for this vendor.' });
-            }
+    res.status(200).json({
+        success: true,
+        count: vendorTickets.length,
+        data: vendorTickets
+    });
+});
 
-        return res.status(200).json(vendorTickets);
-    } catch (error) {
-            console.error(error);
-            return res.status(500).json({ message: 'Server error, please try again later.' });
-        }
-    };
+// Controller to acknowledge a ticket (change status to 'acknowledged')
+export const acknowledgeTicket = asyncHandler(async (req, res) => {
+    const { id } = req.params;
 
-    // Controller to acknowledge a ticket (change status to 'acknowledged')
-const acknowledgeTicket = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        // Find the ticket by its ID
-        const ticket = await Ticket.findById(id);
-
-        if (!ticket) {
-            return res.status(404).json({ message: 'Ticket not found.' });
-        }
-
-        // Check if the ticket is already acknowledged or not
-        if (ticket.status === 'acknowledged') {
-            return res.status(400).json({ message: 'Ticket is already acknowledged.' });
-        }
-
-        // Change the ticket status to 'acknowledged'
-        ticket.status = 'acknowledged';
-        ticket.acknowledgedAt = Date.now(); // Set the acknowledged timestamp
-        ticket.acknowledgedBy = req.user._id; // Assuming the user acknowledging the ticket is the one making the request
-        ticket.statusUpdated= Date.now(); // Update the status updated timestamp
-        await ticket.save();
-
-        return res.status(200).json({ message: 'Ticket acknowledged successfully.', ticket });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Server error, please try again later.' });
+    // Find the ticket by its ID
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+        throw new AppError('Ticket not found', 404);
     }
-};
 
-    // Controller to submit an invoice (after ticket is acknowledged)
-const submitInvoice = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { amount, description } = req.body;
-
-        // Find the ticket by its ID
-        const ticket = await Ticket.findById(id);
-
-        if (!ticket) {
-            return res.status(404).json({ message: 'Ticket not found.' });
-        }
-
-            // Check if the ticket is acknowledged before submitting an invoice
-            // if (ticket.status !== 'acknowledged') {
-            //     return res.status(400).json({ message: 'Ticket must be acknowledged before submitting an invoice.' });
-            // }
-
-        if(!(ticket.status === 'invoiceSubmitted' || ticket.status === 'acknowledged')){
-            return res.status(400).json({ message: 'You cannot Submit an Invoice right now' });
-        }
-
-        // Create the invoice for this ticket
-        const newInvoice = new Invoice({
-            ticketId: ticket._id,
-            amount,
-            description,
-            status: 'invoice-Pending', // Default status is 'pending'
-            createdBy: req.user._id, 
-            vendorId: req.user._id// Logged-in user (vendor)
-        });
-
-            // Save the invoice
-        await newInvoice.save();
-
-        // Update the ticket with the invoice reference
-        ticket.invoice = newInvoice._id;
-        ticket.status = 'invoiceSubmitted'; // Change the ticket status to 'invoiceSubmitted'
-        await ticket.save();
-
-        return res.status(201).json({ message: 'Invoice submitted successfully.', invoice: newInvoice });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Server error, please try again later.' });
-        }
-};
-
-    // Controller to submit a repair request (after ticket is acknowledged)
-const submitRepairRequest = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { description, repairCategory } = req.body;
-
-        // Find the ticket by its ID
-        const ticket = await Ticket.findById(id);
-
-        if (!ticket) {
-            return res.status(404).json({ message: 'Ticket not found.' });
-        }
-
-        // Check if the ticket is acknowledged before submitting a repair request
-        if (ticket.status !== 'acknowledged') {
-            return res.status(400).json({ message: 'Ticket must be acknowledged before submitting a repair request.' });
-        }
-
-        // Create the repair request
-        const newRepairRequest = new RepairRequest({
-            busId: ticket.busId, // The bus ID is from the ticket
-            vendorId: req.user._id, // The vendor is the logged-in user
-            description,
-            repairCategory,
-        });
-
-            // Save the repair request
-        await newRepairRequest.save();
-
-        return res.status(201).json({ message: 'Repair request submitted successfully.', request: newRepairRequest });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Server error, please try again later.' });
+    // Check if the ticket is in correct status for acknowledgment
+    if (ticket.status !== 'approved') {
+        throw new AppError('Ticket must be approved before it can be acknowledged', 400);
     }
-};
+
+    // Check if the ticket is already acknowledged
+    if (ticket.status === 'acknowledged') {
+        throw new AppError('Ticket is already acknowledged', 400);
+    }
+
+    // Change the ticket status to 'acknowledged'
+    ticket.status = 'acknowledged';
+    ticket.acknowledgedAt = Date.now();
+    ticket.acknowledgedBy = req.user._id;
+    ticket.statusUpdated = Date.now();
+    await ticket.save();    await ticket.populate(['busId', 'createdBy', 'acknowledgedBy']);
+
+    res.status(200).json({ 
+        success: true,
+        message: 'Ticket acknowledged successfully', 
+        data: ticket 
+    });
+});
+
+// Controller to submit an invoice (after ticket is acknowledged)
+export const submitInvoice = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { amount, description } = req.body;
+
+    // Find the ticket by its ID
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+        throw new AppError('Ticket not found', 404);
+    }
+
+    // Check if the ticket status allows invoice submission
+    if (!(ticket.status === 'acknowledged' || ticket.status === 'invoiceRejected')) {
+        throw new AppError('You cannot submit an invoice right now. Ticket must be acknowledged or previously rejected', 400);
+    }
+
+    // Create the invoice for this ticket
+    const newInvoice = new Invoice({
+        ticketId: ticket._id,
+        amount,
+        description,
+        vendorId: req.user._id
+    });
+
+    // Save the invoice
+    await newInvoice.save();
+
+    // Update the ticket with the invoice reference
+    ticket.invoice = newInvoice._id;
+    ticket.status = 'invoiceSubmitted';
+    ticket.invoiceSubmittedAt = Date.now();
+    ticket.statusUpdated = Date.now();
+    await ticket.save();    res.status(201).json({ 
+        success: true,
+        message: 'Invoice submitted successfully', 
+        data: newInvoice 
+    });
+});
+
+// Controller to submit a repair request (after ticket is acknowledged)
+export const submitRepairRequest = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { description, repairCategory } = req.body;
+
+    // Find the ticket by its ID
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+        throw new AppError('Ticket not found', 404);
+    }
+
+    // Check if the ticket is acknowledged before submitting a repair request
+    if (ticket.status !== 'acknowledged') {
+        throw new AppError('Ticket must be acknowledged before submitting a repair request', 400);
+    }
+
+    // Create the repair request
+    const newRepairRequest = new RepairRequest({
+        busId: ticket.busId,
+        vendorId: req.user._id,
+        description,
+        repairCategory,
+    });
+
+    // Save the repair request
+    await newRepairRequest.save();
+    await newRepairRequest.populate(['busId', 'vendorId']);
+
+    res.status(201).json({ 
+        success: true,
+        message: 'Repair request submitted successfully', 
+        data: newRepairRequest 
+    });
+});
 
 
-export const createVendor = async (req, res) => {
-  try {
+export const createVendor = asyncHandler(async (req, res) => {
     const { name, email, password } = req.body;
-
-    // Validate input
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'All fields are required: name, email, password.' });
-    }
 
     // Check if user with same email exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(409).json({ message: 'Email already exists.' });
+        throw new AppError('Email already exists', 409);
     }
 
     // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     // Create new user with role: 'vendor'
     const newVendor = new User({
-      name,
-      email,
-      password: hashedPassword,
-      role: 'vendor',
+        name,
+        email,
+        password: hashedPassword,
+        role: 'vendor',
     });
 
     await newVendor.save();
 
     res.status(201).json({
-      message: 'Vendor created successfully',
-      vendor: {
-        _id: newVendor._id,
-        name: newVendor.name,
-        email: newVendor.email,
-        role: newVendor.role,
-      },
+        success: true,
+        message: 'Vendor created successfully',
+        data: {
+            _id: newVendor._id,
+            name: newVendor.name,
+            email: newVendor.email,
+            role: newVendor.role,
+        },
     });
-  } catch (error) {
-    console.error('Error creating vendor:', error);
-    res.status(500).json({ message: 'Server error while creating vendor.' });
-  }
-};
+});
 
-export const completeTicket = async (req, res) => {
-    try {
-        const { id } = req.params;
+export const completeTicket = asyncHandler(async (req, res) => {
+    const { id } = req.params;
 
-        // Find the ticket by its ID
-        const ticket = await Ticket.findById(id);
-
-        if (!ticket) {
-            return res.status(404).json({ message: 'Ticket not found.' });
-        }
-
-        // Check if the ticket is already completed or not
-        if (ticket.status === 'completed') {
-            return res.status(400).json({ message: 'Ticket is already completed.' });
-        }
-
-        if (!(ticket.status === 'invoiceAccepted')) {
-            return res.status(400).json({ message: 'You cannot complete the ticket right now.' });
-        }
-
-        // Change the ticket status to 'completed'
-        ticket.status = 'completed';
-        ticket.completedAt = Date.now(); // Set the completed timestamp
-        ticket.statusUpdated= Date.now(); // Update the status updated timestamp
-        await ticket.save();
-
-        return res.status(200).json({ message: 'Ticket completed successfully.', ticket });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: 'Server error, please try again later.' });
+    // Find the ticket by its ID
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+        throw new AppError('Ticket not found', 404);
     }
-};
 
+    // Check if the ticket is already completed
+    if (ticket.status === 'completed') {
+        throw new AppError('Ticket is already completed', 400);
+    }
 
-    export default {
-        createVendor,
-        getVendorTickets,
-        acknowledgeTicket,
-        submitInvoice,
-        submitRepairRequest,
-        completeTicket
-    };
+    // Check if the ticket status allows completion
+    if (ticket.status !== 'invoiceAccepted') {
+        throw new AppError('You cannot complete the ticket right now. Invoice must be accepted first', 400);
+    }
+
+    // Change the ticket status to 'completed'
+    ticket.status = 'completed';
+    ticket.completedAt = Date.now();
+    ticket.statusUpdated = Date.now();
+    await ticket.save();    await ticket.populate(['busId', 'createdBy', 'acknowledgedBy']);
+
+    res.status(200).json({ 
+        success: true,
+        message: 'Ticket completed successfully', 
+        data: ticket 
+    });
+});

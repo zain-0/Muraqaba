@@ -1,7 +1,6 @@
-// routes/authRoutes.js
-
 import express from 'express';
-import { registerUser, loginUser } from '../controllers/authController.js'; // Import controller methods
+import { registerUser, loginUser } from '../controllers/authController.js';
+import { validateRegister, validateLogin } from '../middleware/validationMiddleware.js';
 
 const router = express.Router();
 
@@ -12,9 +11,9 @@ router.use((req, res, next) => {
 });
 
 // Register Route - POST /api/auth/register
-router.post('/register', registerUser);
+router.post('/register', validateRegister, registerUser);
 
 // Login Route - POST /api/auth/login
-router.post('/login', loginUser);
+router.post('/login', validateLogin, loginUser);
 
 export default router;

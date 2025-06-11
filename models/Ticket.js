@@ -59,13 +59,26 @@ const TicketSchema = new mongoose.Schema(
         approvedAt: {
             type: Date, // Timestamp of when the ticket was initially approved
             required: false,
-        },
-        acknowledgedAt: {
+        },        acknowledgedAt: {
             type: Date, // Timestamp of when the ticket was acknowledged by the vendor
+            required: false,
+        },
+        acknowledgedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User', // Reference to the User model (vendor who acknowledged)
             required: false,
         },
         invoiceSubmittedAt: {
             type: Date, // Timestamp of when the invoice was submitted by the vendor
+            required: false,
+        },
+        invoiceAcceptedAt: {
+            type: Date, // Timestamp of when the invoice was accepted
+            required: false,
+        },
+        invoiceRejectedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User', // Reference to the User model (supervisor who rejected invoice)
             required: false,
         },
         completedAt: {
@@ -86,8 +99,8 @@ TicketSchema.pre('save', async function (next) {
         try {
             // Find the bus by busId and set the vendorId automatically
             const bus = await Bus.findById(this.busId);
-            if (bus && bus.vendorId) {
-                this.vendorId = bus.vendorId; // Set vendorId based on bus vendor
+            if (bus && bus.vendor) {
+                this.vendorId = bus.vendor; // Set vendorId based on bus vendor (field is named 'vendor' in Bus model)
             }
             next();
         } catch (err) {
