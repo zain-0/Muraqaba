@@ -1,32 +1,74 @@
 import dotenv from 'dotenv';
 
-// Load environment variables from .env file
 dotenv.config();
 
+const required = ['MONGO_URI', 'JWT_SECRET'];
+const missing = required.filter((k) => !process.env[k]);
+if (missing.length) {
+  // Fail fast with a clear message instead of a confusing stack trace later.
+  console.error(`Missing required environment variables: ${missing.join(', ')}. See .env.example.`);
+  process.exit(1);
+}
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction && process.env.JWT_SECRET.length < 32) {
+  console.error('JWT_SECRET must be at least 32 characters in production.');
+  process.exit(1);
+}
+
+const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '24h';
+if (!/^\d+\s*(ms|s|m|h|d|w|y)?$/i.test(jwtExpiresIn)) {
+  console.error(`JWT_EXPIRES_IN "${jwtExpiresIn}" is not a valid duration (examples: 24h, 7d, 30m).`);
+  process.exit(1);
+}
+
+const parseList = (value, fallback) =>
+  (value ? value.split(',') : fallback).map((s) => s.trim()).filter(Boolean);
+
+const ALL_ROLES = ['vendor', 'serviceCreator', 'supervisor', 'purchaseManager'];
+
+/**
+ * TRUST_PROXY tells Express how many reverse proxies sit in front of the API (or a
+ * subnet such as "loopback" or "10.0.0.0/8"). Leave unset when the API is reached
+ * directly; otherwise clients could spoof X-Forwarded-For and dodge rate limits.
+ */
+const parseTrustProxy = (value) => {
+  if (!value || value === 'false' || value === '0') return false;
+  if (value === 'true') return 1;
+  return /^\d+$/.test(value) ? Number(value) : value;
+};
+
 const config = {
-  // MongoDB URI from environment variable
+  env: process.env.NODE_ENV || 'development',
+  isProduction,
+  port: Number(process.env.PORT) || 5000,
   mongoURI: process.env.MONGO_URI,
-
-  // JWT Secret for Authentication (if using JWT)
   jwtSecret: process.env.JWT_SECRET,
-
-  // Server Port (defaults to 5000 if not provided in .env)
-  port: process.env.PORT || 5000,
-
-  // API Version (can be used for versioning your API endpoints)
-  apiVersion: process.env.API_VERSION || 'v1',
-
-  // Mail Service Configurations (if applicable, e.g., for sending emails)
-  mailService: {
-    host: process.env.MAIL_HOST,
-    port: process.env.MAIL_PORT,
-    user: process.env.MAIL_USER,
-    password: process.env.MAIL_PASSWORD,
-    from: process.env.MAIL_FROM,
+  jwtExpiresIn,
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+  // Comma-separated list of allowed browser origins.
+  corsOrigins: parseList(process.env.FRONTEND_URL, ['http://localhost:3000', 'http://localhost:5173']),
+  // Requests per IP per window. Generous outside production so background refreshes in the UI do not trip it.
+  rateLimit: {
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+    max: Number(process.env.RATE_LIMIT_MAX) || (isProduction ? 300 : 5000),
   },
-
-  // Other configurations can be added as needed
-  someOtherSetting: process.env.SOME_OTHER_SETTING || 'default_value',
+  // Stricter limit for credential endpoints to slow down brute force attempts.
+  authRateLimit: {
+    windowMs: 15 * 60 * 1000,
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX) || (isProduction ? 20 : 500),
+  },
+  /**
+   * Self registration. Off by default in production: staff accounts come from the seed
+   * script or an administrator, and vendor accounts from a service creator. In development
+   * every role may self-register so the app can be tried without seeding.
+   */
+  allowPublicRegistration: (process.env.ALLOW_PUBLIC_REGISTRATION ?? (isProduction ? 'false' : 'true')) !== 'false',
+  selfRegisterRoles: parseList(process.env.SELF_REGISTER_ROLES, isProduction ? ['vendor'] : ALL_ROLES).filter((r) =>
+    ALL_ROLES.includes(r)
+  ),
+  bcryptRounds: 12,
 };
 
 export default config;

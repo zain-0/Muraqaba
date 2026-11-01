@@ -1,72 +1,79 @@
 import RepairRequest from '../models/RepairRequest.js';
+import Bus from '../models/Bus.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
+import { REPAIR_REQUEST_POPULATE, paginate } from '../utils/query.js';
 
-// Controller method to create a repair request (Vendor)
+const scopeForRole = (user) => (user.role === 'vendor' ? { vendorId: user._id } : {});
+
+// POST /api/repair-requests  (vendor, for a bus assigned to them)
 export const createRepairRequest = asyncHandler(async (req, res) => {
-    const { busId, description, repairCategory } = req.body;
+  const { busId, description, repairCategory } = req.body;
 
-    // Create a new repair request
-    const newRequest = new RepairRequest({
-        busId,
-        vendorId: req.user._id, // Vendor is the logged-in user
-        description,
-        repairCategory,
-    });
+  const bus = await Bus.findById(busId);
+  if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+  if (!bus.vendor.equals(req.user._id)) {
+    throw new AppError('You can only raise repair requests for buses assigned to you', 403, 'FORBIDDEN');
+  }
 
-    // Save the repair request to the database
-    await newRequest.save();
-    await newRequest.populate(['busId', 'vendorId']);
+  const request = await RepairRequest.create({
+    busId: bus._id,
+    vendorId: req.user._id,
+    description,
+    repairCategory,
+  });
+  await request.populate(REPAIR_REQUEST_POPULATE);
 
-    res.status(201).json({ 
-        success: true,
-        message: 'Repair request created successfully', 
-        data: newRequest 
-    });
+  res.status(201).json({
+    success: true,
+    message: 'Repair request sent. A service creator will review it and raise a ticket.',
+    data: request,
+  });
 });
 
-// Controller method to fetch all pending repair requests (Service Creator)
+// GET /api/repair-requests  (role-scoped; ?status=&page=&limit=)
+export const listRepairRequests = asyncHandler(async (req, res) => {
+  const filter = scopeForRole(req.user);
+  if (req.query.status) filter.status = req.query.status;
+  const result = await paginate(RepairRequest, filter, {
+    page: req.query.page,
+    limit: req.query.limit,
+    sort: req.query.sort,
+    populate: REPAIR_REQUEST_POPULATE,
+  });
+  res.json(result);
+});
+
+// GET /api/repair-requests/pending
 export const getPendingRepairRequests = asyncHandler(async (req, res) => {
-    const pendingRequests = await RepairRequest.find({ status: 'pending' })
-        .populate('busId')
-        .populate('vendorId', 'name email');
-
-    res.status(200).json({
-        success: true,
-        count: pendingRequests.length,
-        data: pendingRequests
-    });
+  const result = await paginate(RepairRequest, { ...scopeForRole(req.user), status: 'pending' }, {
+    page: req.query.page,
+    limit: req.query.limit,
+    sort: req.query.sort,
+    populate: REPAIR_REQUEST_POPULATE,
+  });
+  res.json(result);
 });
 
-// Controller method to update the status of a repair request (Service Creator)
+// PUT /api/repair-requests/:id/status  {status: resolved|rejected, note}
 export const updateRepairRequestStatus = asyncHandler(async (req, res) => {
-    const { id } = req.params;
-    const { status } = req.body;
+  const { status, note } = req.body;
+  const request = await RepairRequest.findById(req.params.id);
+  if (!request) throw new AppError('Repair request not found', 404, 'NOT_FOUND');
+  if (request.status !== 'pending') {
+    throw new AppError(`This request was already ${request.status}`, 409, 'INVALID_STATE');
+  }
 
-    // Ensure the status is either 'resolved' or 'rejected'
-    if (!['resolved', 'rejected'].includes(status)) {
-        throw new AppError('Invalid status. Must be either "resolved" or "rejected"', 400);
-    }
+  request.status = status;
+  request.resolutionNote = note || undefined;
+  if (status === 'resolved') {
+    request.resolvedBy = req.user._id;
+    request.resolvedAt = new Date();
+  } else {
+    request.rejectedBy = req.user._id;
+    request.rejectedAt = new Date();
+  }
+  await request.save();
+  await request.populate(REPAIR_REQUEST_POPULATE);
 
-    // Find and update the repair request
-    const updatedRequest = await RepairRequest.findByIdAndUpdate(
-        id,
-        { 
-            status, 
-            resolvedAt: status === 'resolved' ? new Date() : null, 
-            rejectedAt: status === 'rejected' ? new Date() : null 
-        },
-        { new: true }
-    ).populate(['busId', 'vendorId']);
-
-    if (!updatedRequest) {
-        throw new AppError('Repair request not found', 404);
-    }
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Repair request status updated', 
-        data: updatedRequest 
-    });
+  res.json({ success: true, message: status === 'rejected' ? 'Repair request declined' : 'Repair request resolved', data: request });
 });
-
-

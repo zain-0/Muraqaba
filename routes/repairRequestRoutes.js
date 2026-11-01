@@ -1,27 +1,29 @@
 import express from 'express';
-import { 
-    createRepairRequest, 
-    getPendingRepairRequests, 
-    updateRepairRequestStatus 
+import {
+  createRepairRequest,
+  listRepairRequests,
+  getPendingRepairRequests,
+  updateRepairRequestStatus,
 } from '../controllers/repairRequestController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
-import { validateRepairRequest, validateObjectId, validateStatus } from '../middleware/validationMiddleware.js';
+import {
+  validateRepairRequest,
+  validateRepairRequestStatus,
+  validateRepairRequestListQuery,
+  validateObjectId,
+} from '../middleware/validationMiddleware.js';
 
 const router = express.Router();
 
-router.use((req, res, next) => {
-    console.log(`API Called: ${req.method} ${req.originalUrl}`);
-    next();
-});
+router.use(authMiddleware);
 
-// Vendor creates a repair request
-router.post('/', authMiddleware, roleMiddleware(['vendor']), validateRepairRequest, createRepairRequest);
+const REVIEWERS = ['serviceCreator', 'supervisor'];
 
-// Service Creator views all pending repair requests
-router.get('/pending', authMiddleware, roleMiddleware(['serviceCreator','supervisor']), getPendingRepairRequests);
-
-// Service Creator updates the status of a repair request (pending -> resolved/rejected)
-router.put('/status/:id', authMiddleware, roleMiddleware(['serviceCreator','supervisor']), validateObjectId, validateStatus, updateRepairRequestStatus);
+router.post('/', roleMiddleware(['vendor']), validateRepairRequest, createRepairRequest);
+router.get('/', validateRepairRequestListQuery, listRepairRequests);
+router.get('/pending', validateRepairRequestListQuery, getPendingRepairRequests);
+router.put('/:id/status', roleMiddleware(REVIEWERS), validateObjectId, validateRepairRequestStatus, updateRepairRequestStatus);
+router.put('/status/:id', roleMiddleware(REVIEWERS), validateObjectId, validateRepairRequestStatus, updateRepairRequestStatus); // legacy path
 
 export default router;

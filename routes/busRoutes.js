@@ -1,24 +1,20 @@
 import express from 'express';
-import { getAllBuses, getBusById, createBus } from '../controllers/busController.js';
+import { getAllBuses, getBusById, createBus, updateBus } from '../controllers/busController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
-import { validateBusCreate, validateObjectId } from '../middleware/validationMiddleware.js';
+import { validateBusCreate, validateBusUpdate, validateObjectId } from '../middleware/validationMiddleware.js';
 
 const router = express.Router();
 
-// Middleware to log API calls
-router.use((req, res, next) => {
-    console.log(`API Called: ${req.method} ${req.originalUrl}`);
-    next();
-});
+router.use(authMiddleware);
 
-// Route to get all buses (requires authentication and specific roles)
-router.get('/', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), getAllBuses);
+const MANAGERS = ['serviceCreator', 'supervisor'];
 
-// Route to get a single bus by ID (requires authentication and specific roles)
-router.get('/:id', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), validateObjectId, getBusById);
-
-// Route to create a new bus (requires authentication and specific roles)
-router.post('/create', authMiddleware, roleMiddleware(['serviceCreator', 'supervisor']), validateBusCreate, createBus);
+// Vendors see only their own buses; everyone else sees the fleet.
+router.get('/', getAllBuses);
+router.post('/', roleMiddleware(MANAGERS), validateBusCreate, createBus);
+router.post('/create', roleMiddleware(MANAGERS), validateBusCreate, createBus); // legacy path
+router.get('/:id', validateObjectId, getBusById);
+router.put('/:id', roleMiddleware(MANAGERS), validateObjectId, validateBusUpdate, updateBus);
 
 export default router;

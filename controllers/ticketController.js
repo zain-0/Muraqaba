@@ -1,319 +1,266 @@
+import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
+import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
 import RepairRequest from '../models/RepairRequest.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
+import { TICKET_POPULATE, paginate } from '../utils/query.js';
 
-// Create a new ticket
+// Statuses the purchase manager is concerned with (anything that has an invoice).
+const PURCHASE_MANAGER_STATUSES = ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'];
+
+/**
+ * Build the Mongo filter a user is allowed to see, combined with optional query filters.
+ * Operator objects built here are server-controlled, so they are marked trusted; the global
+ * sanitizeFilter setting still neutralises operators smuggled in through user input.
+ */
+const buildListFilter = (user, q = {}) => {
+  const filter = {};
+  if (user.role === 'vendor') filter.vendorId = user._id;
+  if (user.role === 'purchaseManager') filter.status = mongoose.trusted({ $in: PURCHASE_MANAGER_STATUSES });
+  if (q.status) {
+    if (user.role === 'purchaseManager' && !PURCHASE_MANAGER_STATUSES.includes(q.status)) {
+      filter.status = mongoose.trusted({ $in: [] }); // outside this role's scope: return nothing rather than leak
+    } else {
+      filter.status = q.status;
+    }
+  }
+  if (q.busId) filter.busId = q.busId;
+  if (q.mine) filter.createdBy = user._id;
+  return filter;
+};
+
+const loadTicket = async (id) => {
+  const ticket = await Ticket.findById(id);
+  if (!ticket) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+  return ticket;
+};
+
+const assertVendorOwns = (ticket, user) => {
+  if (!ticket.vendorId.equals(user._id)) {
+    throw new AppError('This ticket is assigned to a different vendor', 403, 'FORBIDDEN');
+  }
+};
+
+const assertStatus = (ticket, allowed, explanation) => {
+  const list = Array.isArray(allowed) ? allowed : [allowed];
+  if (!list.includes(ticket.status)) {
+    throw new AppError(explanation, 409, 'INVALID_STATE');
+  }
+};
+
+const respond = async (res, ticket, message, status = 200) => {
+  await ticket.populate(TICKET_POPULATE);
+  res.status(status).json({ success: true, message, data: ticket });
+};
+
+// POST /api/tickets
 export const createTicket = asyncHandler(async (req, res) => {
-    const { busId, serviceType, vendorId, description, repairCategory } = req.body;
-    const createdBy = req.user._id;
-    
-    // Validate repair category is provided for repair tickets
-    if (serviceType === 'repair' && !repairCategory) {
-        throw new AppError('Repair category is required for repair tickets', 400);
+  const { busId, serviceType, repairCategory, description, repairRequestId } = req.body;
+
+  const bus = await Bus.findById(busId);
+  if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+
+  let repairRequest = null;
+  if (repairRequestId) {
+    repairRequest = await RepairRequest.findById(repairRequestId);
+    if (!repairRequest) throw new AppError('Repair request not found', 404, 'NOT_FOUND');
+    if (repairRequest.status !== 'pending') {
+      throw new AppError('This repair request has already been handled', 409, 'INVALID_STATE');
     }
-
-    const newTicket = new Ticket({
-        busId,
-        serviceType,
-        vendorId,
-        createdBy,
-        description: serviceType === 'repair' ? description : undefined,
-        repairCategory: serviceType === 'repair' ? repairCategory : undefined,
-    });
-
-    await newTicket.save();
-    await newTicket.populate(['busId', 'vendorId', 'createdBy']);
-  
-    res.status(201).json({ 
-        success: true,
-        message: 'Ticket created successfully', 
-        data: newTicket 
-    });
-});
-
-export const getAllPendingTickets = asyncHandler(async (req, res) => {
-    const pendingTickets = await Ticket.find({ status: 'pending' })
-        .populate('busId')
-        .populate('vendorId', 'name email') 
-        .populate('createdBy', 'name email')
-        .populate('initialApprovedBy', 'name email');
-
-    res.status(200).json({
-        success: true,
-        count: pendingTickets.length,
-        data: pendingTickets
-    });
-});
-
-// Update the status of the ticket
-export const updateTicketStatus = asyncHandler(async (req, res) => {
-    const ticketId = req.params.id;
-    const { status } = req.body;
-    
-    const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
+    if (!repairRequest.busId.equals(bus._id)) {
+      throw new AppError('The repair request is for a different bus', 400, 'BUS_MISMATCH');
     }
+  }
 
-    // Check permissions
-    if (!['serviceCreator', 'supervisor', 'vendor'].includes(req.user.role)) {
-        throw new AppError('You do not have permission to update this ticket', 403);
-    }
+  const ticket = new Ticket({
+    busId: bus._id,
+    serviceType,
+    repairCategory: serviceType === 'repair' ? repairCategory : undefined,
+    description: description || repairRequest?.description,
+    vendorId: bus.vendor, // the vendor assigned to the bus does the work
+    createdBy: req.user._id,
+    repairRequest: repairRequest?._id,
+  });
+  ticket.history.push({ status: 'pending', by: req.user._id, note: 'Ticket created' });
 
-    ticket.status = status;
-    ticket.statusUpdated = Date.now();
-    await ticket.save();
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Ticket status updated successfully', 
-        data: ticket 
-    });
-});
-
-// Approve a ticket
-export const approveTicket = asyncHandler(async (req, res) => {
-    const ticketId = req.params.id;
-    const ticket = await Ticket.findById(ticketId);
-
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
-    }
-
-    // Check if ticket is in correct status for approval
-    if (ticket.status !== 'pending') {
-        throw new AppError('Only pending tickets can be approved', 400);
-    }
-
-    ticket.status = 'approved';
-    ticket.initialApprovedBy = req.user._id;
-    ticket.approvedAt = Date.now();
-    ticket.statusUpdated = Date.now();
-    await ticket.save();
-
-    await ticket.populate(['busId', 'vendorId', 'createdBy', 'initialApprovedBy']);
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Ticket approved successfully', 
-        data: ticket 
-    });
-});
-
-// Submit an invoice
-export const submitInvoice = asyncHandler(async (req, res) => {
-    const ticketId = req.params.id;
-    const { amount, description } = req.body;
-
-    const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
-    }
-
-    // Check if ticket status allows invoice submission
-    if (!(ticket.status === 'acknowledged' || ticket.status === 'invoiceRejected')) {
-        throw new AppError('Ticket must be acknowledged or previously rejected before submitting an invoice', 400);
-    }
-
-    const invoice = new Invoice({
-        ticketId,
-        vendorId: ticket.vendorId,
-        amount,
-        description,
-    });
-
-    await invoice.save();
-
-    ticket.status = 'invoiceSubmitted';
-    ticket.invoice = invoice._id;
-    ticket.invoiceSubmittedAt = Date.now();
-    ticket.statusUpdated = Date.now();
-    await ticket.save();
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Invoice submitted successfully', 
-        data: invoice 
-    });
-});
-
-// Submit a repair request
-export const submitRepairRequest = asyncHandler(async (req, res) => {
-    const ticketId = req.params.id;
-    const { description, repairCategory } = req.body;
-
-    const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
-    }
-
-    if (ticket.status !== 'acknowledged') {
-        throw new AppError('Ticket must be acknowledged before submitting a repair request', 400);
-    }
-
-    const repairRequest = new RepairRequest({
-        ticketId,
-        vendorId: ticket.vendorId,
-        description,
-        repairCategory,
-    });
-
+  // Claim the request first: if two people answer it at once, the version check stops
+  // the second before a duplicate ticket is written.
+  if (repairRequest) {
+    repairRequest.status = 'resolved';
+    repairRequest.ticketId = ticket._id;
+    repairRequest.resolvedBy = req.user._id;
+    repairRequest.resolvedAt = new Date();
+    repairRequest.resolutionNote = 'Repair ticket raised';
     await repairRequest.save();
+  }
+  await ticket.save();
 
-    ticket.status = 'repair-requested';
-    ticket.repairRequest = repairRequest._id;
-    ticket.statusUpdated = Date.now();
-    await ticket.save();
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Repair request submitted successfully', 
-        data: repairRequest 
-    });
+  await respond(res, ticket, 'Ticket created and sent for supervisor approval', 201);
 });
 
-// Accept the invoice
-export const acceptInvoice = asyncHandler(async (req, res) => {
-    const invoiceId = req.params.id;
-    const invoice = await Invoice.findById(invoiceId);
-
-    if (!invoice) {
-        throw new AppError('Invoice not found', 404);
-    }
-
-    const ticket = await Ticket.findById(invoice.ticketId);
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
-    }
-
-    // Check if invoice is in correct status
-    if (invoice.status !== 'invoicePending') {
-        throw new AppError('Invoice has already been processed', 400);
-    }
-
-    invoice.status = 'approved';
-    invoice.approvedAt = Date.now();
-    invoice.approvedBy = req.user._id;
-    await invoice.save();
-
-    // Update the ticket status
-    ticket.status = 'invoiceAccepted';
-    ticket.invoiceAcceptedAt = Date.now();
-    ticket.invoiceApprovedBy = req.user._id;
-    ticket.invoice = invoice._id;
-    ticket.statusUpdated = Date.now();
-    await ticket.save();
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Invoice accepted and ticket updated', 
-        data: { ticket, invoice } 
-    });
+// GET /api/tickets  (role-scoped; supports ?status=&busId=&mine=&page=&limit=)
+export const listTickets = asyncHandler(async (req, res) => {
+  const result = await paginate(Ticket, buildListFilter(req.user, req.query), {
+    page: req.query.page,
+    limit: req.query.limit,
+    sort: req.query.sort,
+    populate: TICKET_POPULATE,
+  });
+  res.json(result);
 });
 
-
-// Reject the invoice
-export const rejectInvoice = asyncHandler(async (req, res) => {
-    const invoiceId = req.params.id;
-    const invoice = await Invoice.findById(invoiceId);
-
-    if (!invoice) {
-        throw new AppError('Invoice not found', 404);
-    }
-
-    const ticket = await Ticket.findById(invoice.ticketId);
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
-    }
-
-    // Check if invoice is in correct status
-    if (invoice.status !== 'invoicePending') {
-        throw new AppError('Invoice has already been processed', 400);
-    }
-
-    invoice.status = 'rejected';
-    invoice.rejectedAt = Date.now();
-    invoice.rejectedBy = req.user._id;
-    await invoice.save();
-
-    ticket.status = 'invoiceRejected';
-    ticket.invoiceRejectedBy = req.user._id;
-    ticket.invoiceRejectedAt = Date.now();
-    ticket.statusUpdated = Date.now();
-    await ticket.save();
-
-    res.status(200).json({ 
-        success: true,
-        message: 'Invoice rejected', 
-        data: { ticket, invoice } 
+const listWithStatus = (status) =>
+  asyncHandler(async (req, res) => {
+    const result = await paginate(Ticket, buildListFilter(req.user, { ...req.query, status }), {
+      page: req.query.page,
+      limit: req.query.limit,
+      sort: req.query.sort,
+      populate: TICKET_POPULATE,
     });
-});
+    res.json(result);
+  });
 
+// GET /api/tickets/pending
+export const getAllPendingTickets = listWithStatus('pending');
+// GET /api/tickets/completed
+export const getCompletedTickets = listWithStatus('completed');
 
-// Get all tickets
-export const getAllTickets = asyncHandler(async (req, res) => {
-    const tickets = await Ticket.find()
-        .populate('busId')
-        .populate('vendorId', 'name email')
-        .populate('createdBy', 'name email')
-        .populate('initialApprovedBy', 'name email')
-        .populate('invoiceApprovedBy', 'name email');
-    
-    res.status(200).json({
-        success: true,
-        count: tickets.length,
-        data: tickets
-    });
-});
-
-// Get a specific ticket by ID
-export const getTicketById = asyncHandler(async (req, res) => {
-    const ticketId = req.params.id;
-    const ticket = await Ticket.findById(ticketId)
-        .populate('busId')
-        .populate('vendorId', 'name email')
-        .populate('createdBy', 'name email')
-        .populate('initialApprovedBy', 'name email')
-        .populate('acknowledgedBy', 'name email')
-        .populate('invoiceApprovedBy', 'name email')
-        .populate('invoice');
-
-    if (!ticket) {
-        throw new AppError('Ticket not found', 404);
-    }
-
-    res.status(200).json({
-        success: true,
-        data: ticket
-    });
-});
-
-// Get "my tickets"
+// GET /api/tickets/my-tickets
 export const getMyTickets = asyncHandler(async (req, res) => {
-    const myTickets = await Ticket.find({ createdBy: req.user._id })
-        .populate('busId')
-        .populate('vendorId', 'name email')
-        .populate('initialApprovedBy', 'name email');
-    
-    res.status(200).json({
-        success: true,
-        count: myTickets.length,
-        data: myTickets
-    });
+  const result = await paginate(Ticket, buildListFilter(req.user, { ...req.query, mine: true }), {
+    page: req.query.page,
+    limit: req.query.limit,
+    sort: req.query.sort,
+    populate: TICKET_POPULATE,
+  });
+  res.json(result);
 });
 
-// Get completed tickets
-export const getCompletedTickets = asyncHandler(async (req, res) => {
-    const completedTickets = await Ticket.find({ status: 'completed' })
-        .populate('busId')
-        .populate('vendorId', 'name email')
-        .populate('createdBy', 'name email')
-        .populate('invoice');
-    
-    res.status(200).json({
-        success: true,
-        count: completedTickets.length,
-        data: completedTickets
-    });
+// GET /api/tickets/:id
+export const getTicketById = asyncHandler(async (req, res) => {
+  const ticket = await Ticket.findById(req.params.id).populate(TICKET_POPULATE);
+  if (!ticket) throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+
+  const vendorRef = ticket.vendorId?._id || ticket.vendorId;
+  if (req.user.role === 'vendor' && !vendorRef.equals(req.user._id)) {
+    // Respond as if it does not exist so vendors cannot enumerate other vendors' tickets.
+    throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+  }
+  if (req.user.role === 'purchaseManager' && !PURCHASE_MANAGER_STATUSES.includes(ticket.status)) {
+    // Same scope as the list: purchasing only sees tickets that have an invoice.
+    throw new AppError('Ticket not found', 404, 'NOT_FOUND');
+  }
+
+  // Every invoice ever submitted for this ticket, oldest first, so the UI can show rejections and resubmissions.
+  const invoices = await Invoice.find({ ticketId: ticket._id }).sort({ createdAt: 1 });
+
+  res.json({ success: true, data: { ...ticket.toJSON(), invoices } });
+});
+
+// PUT /api/tickets/:id/approve  (supervisor)
+export const approveTicket = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertStatus(ticket, 'pending', `Only pending tickets can be approved (this one is ${ticket.status})`);
+  ticket.transition('approved', req.user._id, req.body?.note);
+  await ticket.save();
+  await respond(res, ticket, 'Ticket approved. The vendor has been asked to acknowledge it.');
+});
+
+// PUT /api/tickets/:id/acknowledge  (vendor who owns the ticket)
+export const acknowledgeTicket = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertVendorOwns(ticket, req.user);
+  assertStatus(ticket, 'approved', `A ticket must be approved before it can be acknowledged (this one is ${ticket.status})`);
+  ticket.transition('acknowledged', req.user._id, req.body?.note);
+  await ticket.save();
+  await respond(res, ticket, 'Ticket acknowledged. Submit an invoice when the work is done.');
+});
+
+// POST /api/tickets/:id/invoice  (vendor who owns the ticket)
+export const submitInvoice = asyncHandler(async (req, res) => {
+  const { amount, description, invoiceNumber } = req.body;
+  const ticket = await loadTicket(req.params.id);
+  assertVendorOwns(ticket, req.user);
+  assertStatus(
+    ticket,
+    ['acknowledged', 'invoiceRejected'],
+    `An invoice can only be submitted after the ticket is acknowledged or after a rejection (this one is ${ticket.status})`
+  );
+
+  const invoice = new Invoice({
+    ticketId: ticket._id,
+    vendorId: req.user._id,
+    amount,
+    description,
+    invoiceNumber: invoiceNumber || undefined,
+  });
+
+  // Save the ticket first: if a concurrent submission already moved it, the version
+  // check rejects this one and no orphan invoice is written.
+  ticket.invoice = invoice._id;
+  ticket.transition('invoiceSubmitted', req.user._id, invoiceNumber ? `Invoice ${invoiceNumber}` : undefined);
+  await ticket.save();
+  await invoice.save();
+  await respond(res, ticket, 'Invoice submitted for supervisor review', 201);
+});
+
+// PUT /api/tickets/:id/cancel  (a supervisor, or whoever raised the ticket, while it is still pending)
+export const cancelTicket = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  const isCreator = ticket.createdBy.equals(req.user._id);
+  if (req.user.role !== 'supervisor' && !isCreator) {
+    throw new AppError('Only a supervisor or the person who raised the ticket can cancel it', 403, 'FORBIDDEN');
+  }
+  assertStatus(ticket, 'pending', `Only pending tickets can be cancelled (this one is ${ticket.status})`);
+  ticket.transition('cancelled', req.user._id, req.body.reason);
+  await ticket.save();
+  await respond(res, ticket, 'Ticket cancelled');
+});
+
+// PUT /api/tickets/:id/invoice/accept  (supervisor)
+export const acceptInvoice = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertStatus(ticket, 'invoiceSubmitted', `There is no invoice awaiting review on this ticket (status ${ticket.status})`);
+  const invoice = await Invoice.findById(ticket.invoice);
+  if (!invoice) throw new AppError('Invoice record is missing', 500, 'INVOICE_MISSING');
+  if (invoice.status !== 'invoicePending') throw new AppError('Invoice has already been processed', 409, 'INVALID_STATE');
+
+  invoice.status = 'approved';
+  invoice.approvedAt = new Date();
+  invoice.approvedBy = req.user._id;
+  await invoice.save();
+
+  ticket.transition('invoiceAccepted', req.user._id, req.body?.note);
+  await ticket.save();
+  await respond(res, ticket, 'Invoice accepted. The vendor can now close the ticket.');
+});
+
+// PUT /api/tickets/:id/invoice/reject  (supervisor)
+export const rejectInvoice = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertStatus(ticket, 'invoiceSubmitted', `There is no invoice awaiting review on this ticket (status ${ticket.status})`);
+  const invoice = await Invoice.findById(ticket.invoice);
+  if (!invoice) throw new AppError('Invoice record is missing', 500, 'INVOICE_MISSING');
+  if (invoice.status !== 'invoicePending') throw new AppError('Invoice has already been processed', 409, 'INVALID_STATE');
+
+  invoice.status = 'rejected';
+  invoice.rejectedAt = new Date();
+  invoice.rejectedBy = req.user._id;
+  invoice.rejectionReason = req.body?.reason || undefined;
+  await invoice.save();
+
+  ticket.transition('invoiceRejected', req.user._id, req.body?.reason);
+  await ticket.save();
+  await respond(res, ticket, 'Invoice rejected. The vendor has been asked to resubmit.');
+});
+
+// PUT /api/tickets/:id/complete  (vendor who owns the ticket)
+export const completeTicket = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertVendorOwns(ticket, req.user);
+  assertStatus(ticket, 'invoiceAccepted', `The invoice must be accepted before the ticket can be closed (this one is ${ticket.status})`);
+  ticket.transition('completed', req.user._id, req.body?.note);
+  await ticket.save();
+  await respond(res, ticket, 'Ticket completed');
 });

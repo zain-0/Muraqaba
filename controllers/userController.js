@@ -1,124 +1,128 @@
-// Import necessary models
-import User from '../models/User.js';
+import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
+import Bus from '../models/Bus.js';
+import RepairRequest from '../models/RepairRequest.js';
+import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 
-// Get User Profile - Returns different data based on role
+// GET /api/users/profile
 export const getProfile = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const user = await User.findById(userId).select('-password');
-
-    if (!user) {
-        throw new AppError('User not found', 404);
-    }
-
-    res.status(200).json({ 
-        success: true,
-        data: user,
-        message: 'Profile retrieved successfully'
-    });
+  res.json({ success: true, data: req.user, message: 'Profile retrieved successfully' });
 });
 
-// Get User Dashboard - Different dashboard content based on the user's role
+/** Count tickets grouped by status for the given filter. */
+const countByStatus = async (filter) => {
+  const rows = await Ticket.aggregate([{ $match: filter }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
+  const counts = {
+    pending: 0,
+    approved: 0,
+    acknowledged: 0,
+    invoiceSubmitted: 0,
+    invoiceAccepted: 0,
+    invoiceRejected: 0,
+    completed: 0,
+    cancelled: 0,
+  };
+  rows.forEach((r) => {
+    counts[r._id] = r.n;
+  });
+  counts.total = rows.reduce((sum, r) => sum + r.n, 0);
+  return counts;
+};
+
+const busesNeedingService = async (filter) => {
+  const buses = await Bus.find(filter).select('engine ac tyre transmission brakePad');
+  return buses.filter((b) => b.partsDue.length > 0).length;
+};
+
+const serviceCreatorDashboard = async (user) => {
+  const [mine, all, buses, busesDue, pendingRepairRequests] = await Promise.all([
+    countByStatus({ createdBy: user._id }),
+    countByStatus({}),
+    Bus.countDocuments(),
+    busesNeedingService({}),
+    RepairRequest.countDocuments({ status: 'pending' }),
+  ]);
+  return {
+    role: user.role,
+    tickets: all,
+    myTickets: mine,
+    fleet: { buses, busesNeedingService: busesDue },
+    repairRequests: { pending: pendingRepairRequests },
+    // Things only this role can move forward.
+    actionRequired: pendingRepairRequests + busesDue,
+  };
+};
+
+const supervisorDashboard = async (user) => {
+  const [tickets, pendingRepairRequests, buses, busesDue] = await Promise.all([
+    countByStatus({}),
+    RepairRequest.countDocuments({ status: 'pending' }),
+    Bus.countDocuments(),
+    busesNeedingService({}),
+  ]);
+  return {
+    role: user.role,
+    tickets,
+    fleet: { buses, busesNeedingService: busesDue },
+    repairRequests: { pending: pendingRepairRequests },
+    actionRequired: tickets.pending + tickets.invoiceSubmitted + pendingRepairRequests,
+  };
+};
+
+const vendorDashboard = async (user) => {
+  const [tickets, buses, busesDue, repairRequests] = await Promise.all([
+    countByStatus({ vendorId: user._id }),
+    Bus.countDocuments({ vendor: user._id }),
+    busesNeedingService({ vendor: user._id }),
+    RepairRequest.aggregate([{ $match: { vendorId: user._id } }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
+  ]);
+  const rr = { pending: 0, resolved: 0, rejected: 0 };
+  repairRequests.forEach((r) => {
+    rr[r._id] = r.n;
+  });
+  return {
+    role: user.role,
+    tickets,
+    fleet: { buses, busesNeedingService: busesDue },
+    repairRequests: rr,
+    actionRequired: tickets.approved + tickets.acknowledged + tickets.invoiceRejected + tickets.invoiceAccepted,
+  };
+};
+
+const purchaseManagerDashboard = async (user) => {
+  const [tickets, amounts] = await Promise.all([
+    // Same scope as the purchase manager's ticket list: only tickets that have an invoice.
+    countByStatus({
+      status: mongoose.trusted({ $in: ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'] }),
+    }),
+    Invoice.aggregate([
+      { $group: { _id: '$status', n: { $sum: 1 }, amount: { $sum: '$amount' } } },
+    ]),
+  ]);
+  const invoices = { pending: { count: 0, amount: 0 }, approved: { count: 0, amount: 0 }, rejected: { count: 0, amount: 0 } };
+  amounts.forEach((r) => {
+    const key = r._id === 'invoicePending' ? 'pending' : r._id;
+    invoices[key] = { count: r.n, amount: r.amount };
+  });
+  return {
+    role: user.role,
+    tickets,
+    invoices,
+    actionRequired: 0, // read-only role
+  };
+};
+
+// GET /api/users/dashboard
 export const getDashboard = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const user = await User.findById(userId);
-
-    if (!user) {
-        throw new AppError('User not found', 404);
-    }
-
-    let dashboardData;
-
-    switch (user.role) {
-        case 'serviceCreator':
-            dashboardData = await getServiceCreatorDashboard(userId);
-            break;
-        case 'supervisor':
-            dashboardData = await getSupervisorDashboard(userId);
-            break;
-        case 'vendor':
-            dashboardData = await getVendorDashboard(userId);
-            break;
-        case 'purchaseManager':
-            dashboardData = await getPurchaseManagerDashboard(userId);
-            break;
-        default:
-            throw new AppError('Invalid user role', 400);
-    }
-
-    res.status(200).json({ 
-        success: true,
-        data: dashboardData,
-        message: 'Dashboard data retrieved successfully'
-    });
+  const builders = {
+    serviceCreator: serviceCreatorDashboard,
+    supervisor: supervisorDashboard,
+    vendor: vendorDashboard,
+    purchaseManager: purchaseManagerDashboard,
+  };
+  const build = builders[req.user.role];
+  if (!build) throw new AppError('Invalid user role', 400, 'INVALID_ROLE');
+  const data = await build(req.user);
+  res.json({ success: true, data, message: 'Dashboard data retrieved successfully' });
 });
-
-// Helper functions for each role's dashboard
-
-// Dashboard for Service Creator
-const getServiceCreatorDashboard = async (userId) => {
-    const tickets = await Ticket.find({ createdBy: userId });
-    return {
-        totalTickets: tickets.length,
-        pendingTickets: tickets.filter(ticket => ticket.status === 'pending').length,
-        approvedTickets: tickets.filter(ticket => ticket.status === 'approved').length,
-        acknowledgedTickets: tickets.filter(ticket => ticket.status === 'acknowledged').length,
-        completedTickets: tickets.filter(ticket => ticket.status === 'completed').length,
-    };
-};
-
-// Dashboard for Supervisor
-const getSupervisorDashboard = async (userId) => {
-    const tickets = await Ticket.find();
-    return {
-        totalTickets: tickets.length,
-        pendingTickets: tickets.filter(ticket => ticket.status === 'pending').length,
-        approvedTickets: tickets.filter(ticket => ticket.status === 'approved').length,
-        invoiceSubmittedTickets: tickets.filter(ticket => ticket.status === 'invoiceSubmitted').length,
-        invoiceAcceptedTickets: tickets.filter(ticket => ticket.status === 'invoiceAccepted').length,
-        completedTickets: tickets.filter(ticket => ticket.status === 'completed').length,
-    };
-};
-
-// Dashboard for Vendor
-const getVendorDashboard = async (userId) => {
-    try {
-        const tickets = await Ticket.find({ vendorId: userId }).populate('busId');
-
-        if (tickets.length === 0) {
-            console.log(`No tickets found for vendor with userId: ${userId}`);
-        }
-
-        const activeTickets = tickets.filter(ticket => ticket.status !== 'completed');
-        const invoicesSubmitted = tickets.filter(ticket => ticket.status === 'invoiceSubmitted');
-        const acknowledgedTickets = tickets.filter(ticket => ticket.status === 'acknowledged');
-        const approvedTickets = tickets.filter(ticket => ticket.status === 'approved');
-
-        return {
-            totalTickets: tickets.length,
-            approvedTickets: approvedTickets.length,
-            acknowledgedTickets: acknowledgedTickets.length,
-            activeTickets: activeTickets.length,
-            invoicesSubmitted: invoicesSubmitted.length,
-            completedTickets: tickets.filter(ticket => ticket.status === 'completed').length,
-        };
-    } catch (error) {
-        console.error('Error fetching vendor dashboard:', error);
-        throw error;
-    }
-};
-
-// Dashboard for Purchase Manager
-const getPurchaseManagerDashboard = async (userId) => {
-    const completedTickets = await Ticket.find({ status: 'completed' });
-    const invoiceAcceptedTickets = await Ticket.find({ status: 'invoiceAccepted' });
-    
-    return {
-        totalCompletedTickets: completedTickets.length,
-        invoiceAcceptedTickets: invoiceAcceptedTickets.length,
-        totalProcessedAmount: completedTickets.reduce((total, ticket) => {
-            return ticket.invoice ? total + (ticket.invoice.amount || 0) : total;
-        }, 0),
-    };
-};

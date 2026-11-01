@@ -1,92 +1,84 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import config from '../config/config.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 
-// Register user
-export const registerUser = asyncHandler(async (req, res) => {
-    const { name, email, password, role } = req.body;
-    
-    console.log('Registration request:', { name, email, role });
+const signToken = (user) =>
+  jwt.sign({ id: String(user._id), role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-        throw new AppError('User already exists with this email', 400);
-    }
-
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Create a new user
-    const newUser = new User({
-        name,
-        email,
-        password: hashedPassword,
-        role,
-    });
-
-    // Save the user to the database
-    await newUser.save();
-
-    // Generate a JWT token
-    const token = jwt.sign(
-        { id: newUser._id, role: newUser.role }, 
-        process.env.JWT_SECRET, 
-        { expiresIn: '24h' }
-    );
-
-    // Send response with the token
-    res.status(201).json({ 
-        success: true,
-        message: 'User registered successfully', 
-        token,
-        user: {
-            id: newUser._id,
-            name: newUser.name,
-            email: newUser.email,
-            role: newUser.role
-        }
-    });
+const publicUser = (user) => ({
+  id: user._id,
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
 });
 
-// Login user
-export const loginUser = asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
-    
-    console.log('Login request for email:', email);
+// Compared against when the email is unknown, so login takes the same time either way
+// and the response cannot be used to probe which emails have accounts.
+const DUMMY_HASH = await bcrypt.hash(`not-a-real-password-${Date.now()}`, config.bcryptRounds);
 
-    // Find user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-        console.log('User not found for email:', email);
-        throw new AppError('Invalid credentials', 401);
-    }
+const registrationConfig = () => ({
+  enabled: config.allowPublicRegistration && config.selfRegisterRoles.length > 0,
+  roles: config.allowPublicRegistration ? config.selfRegisterRoles : [],
+});
 
-    // Check if password matches
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-        console.log('Password mismatch for user:', email);
-        throw new AppError('Invalid credentials', 401);
-    }
+// GET /api/auth/config  (public: lets the sign-up page show only what is allowed)
+export const authConfig = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: { registration: registrationConfig() } });
+});
 
-    // Generate JWT token
-    const token = jwt.sign(
-        { id: user._id, role: user.role }, 
-        process.env.JWT_SECRET, 
-        { expiresIn: '24h' }
+// POST /api/auth/register
+export const registerUser = asyncHandler(async (req, res) => {
+  const { name, email, password, role } = req.body;
+  const registration = registrationConfig();
+
+  if (!registration.enabled) {
+    throw new AppError('Self registration is disabled. Ask an administrator for an account.', 403, 'REGISTRATION_DISABLED');
+  }
+  if (!registration.roles.includes(role)) {
+    throw new AppError(
+      `Accounts with the ${role} role are created by an administrator. You can self register as: ${registration.roles.join(', ')}.`,
+      403,
+      'ROLE_NOT_SELF_REGISTRABLE',
+      [{ field: 'role', message: 'Not available for self registration' }]
     );
+  }
 
-    console.log('Login successful for user:', email);
-    
-    res.json({ 
-        success: true,
-        token,
-        user: {
-            id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role
-        }
-    });
+  const existing = await User.findOne({ email });
+  if (existing) {
+    throw new AppError('An account with this email already exists', 409, 'DUPLICATE', [
+      { field: 'email', message: 'Already in use' },
+    ]);
+  }
+
+  const hashed = await bcrypt.hash(password, config.bcryptRounds);
+  const user = await User.create({ name, email, password: hashed, role });
+
+  res.status(201).json({
+    success: true,
+    message: 'Account created',
+    token: signToken(user),
+    user: publicUser(user),
+  });
+});
+
+// POST /api/auth/login
+export const loginUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  const user = await User.findOne({ email }).select('+password');
+  const matches = await bcrypt.compare(password, user ? user.password : DUMMY_HASH);
+  // Same message for unknown email and wrong password so the endpoint does not reveal which accounts exist.
+  if (!user || !matches) {
+    throw new AppError('Incorrect email or password', 401, 'INVALID_CREDENTIALS');
+  }
+
+  res.json({ success: true, token: signToken(user), user: publicUser(user) });
+});
+
+// GET /api/auth/me
+export const me = asyncHandler(async (req, res) => {
+  res.json({ success: true, user: publicUser(req.user), data: publicUser(req.user) });
 });

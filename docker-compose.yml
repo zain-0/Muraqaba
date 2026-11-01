@@ -1,0 +1,45 @@
+# Local infrastructure for Muraqaba.
+#
+#   docker compose up -d                 # MongoDB only (run the API with `npm run dev`)
+#   docker compose --profile full up -d  # MongoDB + the API container
+#   docker compose down                  # stop; data stays in the muraqaba_mongo_data volume
+#   docker compose down -v               # stop and wipe data
+services:
+  mongo:
+    image: mongo:7
+    container_name: muraqaba-mongo
+    restart: unless-stopped
+    # Bound to localhost only: the database has no authentication and must not be
+    # reachable from other machines. The api service talks to it over the compose network.
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - muraqaba_mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    profiles: ["full"]
+    build: .
+    container_name: muraqaba-api
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/muraqaba
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+      SELF_REGISTER_ROLES: ${SELF_REGISTER_ROLES:-vendor}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+    ports:
+      - "5000:5000"
+
+volumes:
+  muraqaba_mongo_data:

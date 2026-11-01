@@ -1,19 +1,24 @@
 import express from 'express';
-import { registerUser, loginUser } from '../controllers/authController.js';
+import rateLimit from 'express-rate-limit';
+import { registerUser, loginUser, me, authConfig } from '../controllers/authController.js';
 import { validateRegister, validateLogin } from '../middleware/validationMiddleware.js';
+import authMiddleware from '../middleware/authMiddleware.js';
+import config from '../config/config.js';
 
 const router = express.Router();
 
-// Middleware to log API calls
-router.use((req, res, next) => {
-    console.log(`API Called: ${req.method} ${req.originalUrl}`);
-    next();
+// Tighter limit on credential endpoints to slow brute force attempts.
+const authLimiter = rateLimit({
+  windowMs: config.authRateLimit.windowMs,
+  max: config.authRateLimit.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, code: 'RATE_LIMITED', message: 'Too many attempts. Please wait a few minutes and try again.' },
 });
 
-// Register Route - POST /api/auth/register
-router.post('/register', validateRegister, registerUser);
-
-// Login Route - POST /api/auth/login
-router.post('/login', validateLogin, loginUser);
+router.get('/config', authConfig);
+router.post('/register', authLimiter, validateRegister, registerUser);
+router.post('/login', authLimiter, validateLogin, loginUser);
+router.get('/me', authMiddleware, me);
 
 export default router;
