@@ -10,8 +10,6 @@ const RepairRequestSchema = new mongoose.Schema(
     description: { type: String, required: true, trim: true, maxlength: 1000 },
     repairCategory: { type: String, enum: REPAIR_CATEGORIES, required: true },
     status: { type: String, enum: REPAIR_REQUEST_STATUSES, default: 'pending', index: true },
-    // Set when a service creator or supervisor raises a repair ticket for this request.
-    ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' },
     resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     resolvedAt: Date,
     rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

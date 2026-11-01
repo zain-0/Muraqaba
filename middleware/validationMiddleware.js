@@ -29,7 +29,7 @@ const MAX_PAGE = 100000;
 
 const email = () => str('email', 'Email').trim().toLowerCase().isEmail().withMessage('Enter a valid email address');
 const password = () =>
-  str('password', 'Password').isLength({ min: 8, max: 128 }).withMessage('Password must be at least 8 characters');
+  str('password', 'Password').isLength({ min: 6, max: 128 }).withMessage('Password must be at least 6 characters');
 const name = () => str('name', 'Name').trim().isLength({ min: 2, max: 80 }).withMessage('Name must be between 2 and 80 characters');
 const note = (field = 'note') =>
   body(field).optional({ values: 'falsy' }).isString().withMessage('Note must be text').trim().isLength({ max: 500 }).withMessage('Note is too long (500 characters max)');
@@ -50,14 +50,13 @@ export const validateLogin = [
 
 export const validateVendorCreate = [name(), email(), password(), handleValidationErrors];
 
-const partRules = (part, { optional = false } = {}) =>
-  ['serviceKm', 'currentKm'].map((k) => {
-    const rule = body(`${part}.${k}`);
-    return (optional ? rule.optional() : rule)
+const partRules = (part) =>
+  ['serviceKm', 'currentKm'].map((k) =>
+    body(`${part}.${k}`)
       .isFloat({ min: 0, max: MAX_NUMBER })
       .withMessage(`${part}.${k} must be a number of kilometres (0 or more)`)
-      .toFloat();
-  });
+      .toFloat()
+  );
 
 export const validateBusCreate = [
   str('chassisNumber', 'Chassis number').trim().notEmpty().withMessage('Chassis number is required'),
@@ -71,19 +70,6 @@ export const validateBusCreate = [
     .toInt(),
   str('vendorId', 'Vendor').isMongoId().withMessage('Choose the vendor responsible for this bus'),
   ...BUS_PARTS.flatMap((p) => partRules(p)),
-  handleValidationErrors,
-];
-
-export const validateBusUpdate = [
-  body('make').optional().isString().trim().notEmpty().withMessage('Make cannot be empty'),
-  body('model').optional().isString().trim().notEmpty().withMessage('Model cannot be empty'),
-  body('year')
-    .optional()
-    .isInt({ min: 1900, max: new Date().getFullYear() + 1 })
-    .withMessage('Enter a valid year')
-    .toInt(),
-  body('vendorId').optional().isString().isMongoId().withMessage('Invalid vendor'),
-  ...BUS_PARTS.flatMap((p) => partRules(p, { optional: true })),
   handleValidationErrors,
 ];
 
@@ -102,7 +88,6 @@ export const validateTicketCreate = [
     .trim()
     .isLength({ max: 1000 })
     .withMessage('Description must be 1000 characters or fewer'),
-  body('repairRequestId').optional({ values: 'falsy' }).isString().isMongoId().withMessage('Invalid repair request'),
   handleValidationErrors,
 ];
 
@@ -112,18 +97,13 @@ export const validateInvoiceSubmit = [
   body('amount').isFloat({ min: 0, max: MAX_NUMBER }).withMessage('Amount must be 0 or more').toFloat(),
   str('description', 'Description')
     .trim()
-    .isLength({ min: 3, max: 1000 })
-    .withMessage('Describe the work invoiced (3 to 1000 characters)'),
+    .isLength({ min: 10, max: 500 })
+    .withMessage('Description must be between 10 and 500 characters'),
   body('invoiceNumber').optional({ values: 'falsy' }).isString().trim().isLength({ max: 60 }).withMessage('Invoice number is too long'),
   handleValidationErrors,
 ];
 
 export const validateInvoiceReject = [note('reason'), handleValidationErrors];
-
-export const validateTicketCancel = [
-  str('reason', 'Reason').trim().isLength({ min: 3, max: 500 }).withMessage('Give a short reason for cancelling (3 to 500 characters)'),
-  handleValidationErrors,
-];
 
 export const validateRepairRequest = [
   str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),

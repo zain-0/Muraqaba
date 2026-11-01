@@ -10,7 +10,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 // Directory of vendors, for assigning buses.
-router.get('/', roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), listVendors);
+router.get('/', roleMiddleware(['serviceCreator', 'supervisor']), listVendors);
 
 // Create a vendor account (service creator only).
 router.post('/', roleMiddleware(['serviceCreator']), validateVendorCreate, createVendor);

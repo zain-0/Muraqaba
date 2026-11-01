@@ -8,3 +8,5 @@ npm-debug.log
 .claude
 tests
 *.md
+.data
+.playwright-mcp

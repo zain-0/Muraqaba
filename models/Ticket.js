@@ -18,11 +18,10 @@ export const TICKET_STATUSES = [
   'invoiceAccepted', // supervisor accepted the invoice; vendor can close the ticket
   'invoiceRejected', // supervisor rejected the invoice; vendor must resubmit
   'completed', // vendor closed the ticket after invoice acceptance
-  'cancelled', // withdrawn while still pending (by a supervisor or the person who raised it)
 ];
 
-// Statuses that end the lifecycle.
-export const CLOSED_STATUSES = ['completed', 'cancelled'];
+// Status that ends the lifecycle.
+export const CLOSED_STATUSES = ['completed'];
 
 const HistoryEntrySchema = new mongoose.Schema(
   {
@@ -51,9 +50,6 @@ const TicketSchema = new mongoose.Schema(
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
 
-    // Set when this ticket was raised to answer a repair request from the vendor.
-    repairRequest: { type: mongoose.Schema.Types.ObjectId, ref: 'RepairRequest' },
-
     status: { type: String, enum: TICKET_STATUSES, default: 'pending', index: true },
     history: { type: [HistoryEntrySchema], default: [] },
 
@@ -68,9 +64,6 @@ const TicketSchema = new mongoose.Schema(
     invoiceRejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     invoiceRejectedAt: Date,
     completedAt: Date,
-    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    cancelledAt: Date,
-    cancellationReason: { type: String, trim: true, maxlength: 500 },
     statusUpdated: Date,
   },
   // optimisticConcurrency: two requests that load the same ticket and both try to save
@@ -113,11 +106,6 @@ TicketSchema.methods.transition = function transition(status, userId, note) {
       break;
     case 'completed':
       this.completedAt = now;
-      break;
-    case 'cancelled':
-      this.cancelledBy = userId;
-      this.cancelledAt = now;
-      this.cancellationReason = note;
       break;
     default:
       break;

@@ -11,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROLES = ['vendor', 'serviceCreator', 'supervisor', 'purchaseManager'];
 const SERVICE_TYPES = ['minor', 'major', 'repair', 'other'];
 const REPAIR_CATEGORIES = ['ELECTRICAL', 'MECHANICAL', 'AC REPAIR', 'ENGINE', 'BODY', 'BATTERY REPLACEMENT', 'TYRE REPLACEMENT'];
-const TICKET_STATUSES = ['pending', 'approved', 'acknowledged', 'invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed', 'cancelled'];
+const TICKET_STATUSES = ['pending', 'approved', 'acknowledged', 'invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'];
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const objectId = { type: 'string', example: '64b7f0c2e1d2a9b1c8a4f123' };
@@ -106,7 +106,7 @@ const ticket = {
     acknowledgedBy: user, acknowledgedAt: { type: 'string', format: 'date-time' },
     invoiceSubmittedAt: { type: 'string', format: 'date-time' }, invoiceApprovedBy: user, invoiceAcceptedAt: { type: 'string', format: 'date-time' },
     invoiceRejectedBy: user, invoiceRejectedAt: { type: 'string', format: 'date-time' }, completedAt: { type: 'string', format: 'date-time' },
-    repairRequest: objectId, createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+    createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   },
 };
 const repairRequest = {
@@ -114,7 +114,7 @@ const repairRequest = {
   properties: {
     _id: objectId, busId: bus, vendorId: user, description: { type: 'string' },
     repairCategory: { type: 'string', enum: REPAIR_CATEGORIES }, status: { type: 'string', enum: ['pending', 'resolved', 'rejected'] },
-    ticketId: objectId, resolvedBy: user, resolvedAt: { type: 'string', format: 'date-time' },
+    resolvedBy: user, resolvedAt: { type: 'string', format: 'date-time' },
     rejectedBy: user, rejectedAt: { type: 'string', format: 'date-time' }, resolutionNote: { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' },
   },
@@ -181,7 +181,7 @@ const spec = {
     '/api/users/profile': { get: op('Users', 'Current user profile', ROLES, { response: envelope(ref('User')) }) },
     '/api/users/dashboard': { get: op('Users', 'Role specific counters, including actionRequired', ROLES, { response: envelope({ type: 'object', additionalProperties: true }) }) },
     '/api/vendors': {
-      get: op('Vendors', 'List vendors with bus counts', ['serviceCreator', 'supervisor', 'purchaseManager'], { response: listEnvelope(ref('User')), more: pick(403) }),
+      get: op('Vendors', 'List vendors with bus counts', ['serviceCreator', 'supervisor'], { response: listEnvelope(ref('User')), more: pick(403) }),
       post: op('Vendors', 'Create a vendor account', ['serviceCreator'], {
         body: { type: 'object', required: ['name', 'email', 'password'], properties: { name: { type: 'string' }, ...credentials.properties } },
         response: envelope(ref('User')), status: 201, more: pick(400, 403, 409),
@@ -192,14 +192,7 @@ const spec = {
       get: op('Buses', 'List buses (vendors see only their own)', ROLES, { response: listEnvelope(ref('Bus')) }),
       post: op('Buses', 'Add a bus to the fleet', ['serviceCreator', 'supervisor'], { body: ref('BusInput'), response: envelope(ref('Bus')), status: 201, more: pick(400, 403, 404, 409) }),
     },
-    '/api/buses/{id}': {
-      get: op('Buses', 'Bus details with open ticket count', ROLES, { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }),
-      put: op('Buses', 'Update details, odometer readings or assigned vendor', ['serviceCreator', 'supervisor'], {
-        params: [idParam],
-        body: { type: 'object', properties: { make: { type: 'string' }, model: { type: 'string' }, year: { type: 'integer' }, vendorId: objectId, engine: part, ac: part, tyre: part, transmission: part, brakePad: part } },
-        response: envelope(ref('Bus')), more: pick(400, 403, 404),
-      }),
-    },
+    '/api/buses/{id}': { get: op('Buses', 'Bus details with open ticket count', ['serviceCreator', 'supervisor', 'purchaseManager'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }) },
     '/api/tickets': {
       get: op('Tickets', 'List tickets visible to the caller', ROLES, { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(400) }),
       post: op('Tickets', 'Raise a ticket (vendor is taken from the bus)', ['serviceCreator', 'supervisor'], {
@@ -209,7 +202,6 @@ const spec = {
             busId: objectId, serviceType: { type: 'string', enum: SERVICE_TYPES },
             repairCategory: { type: 'string', enum: REPAIR_CATEGORIES, description: 'Required when serviceType is repair' },
             description: { type: 'string', maxLength: 1000 },
-            repairRequestId: { ...objectId, description: 'Optional: resolve and link a pending repair request for the same bus' },
           },
         },
         response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409),
@@ -220,12 +212,6 @@ const spec = {
     '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: pageQuery, response: listEnvelope(ref('Ticket')) }) },
     '/api/tickets/{id}': { get: op('Tickets', 'Ticket detail with full invoice history', ROLES, { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 404) }) },
     '/api/tickets/{id}/approve': { put: op('Tickets', 'Approve a pending ticket', ['supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
-    '/api/tickets/{id}/cancel': {
-      put: op('Tickets', 'Cancel a pending ticket (supervisor, or whoever raised it)', ['supervisor', 'serviceCreator'], {
-        params: [idParam], body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', minLength: 3, maxLength: 500 } } },
-        response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409),
-      }),
-    },
     '/api/tickets/{id}/acknowledge': { put: op('Tickets', 'Vendor accepts an approved ticket', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
     '/api/tickets/{id}/invoice': {
       post: op('Tickets', 'Vendor submits (or resubmits) an invoice', ['vendor'], {
@@ -243,13 +229,12 @@ const spec = {
     },
     '/api/tickets/{id}/complete': { put: op('Tickets', 'Vendor closes the ticket after invoice acceptance', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
     '/api/repair-requests': {
-      get: op('Repair Requests', 'List repair requests visible to the caller', ROLES, { query: [{ name: 'status', in: 'query', schema: { type: 'string', enum: ['pending', 'resolved', 'rejected'] } }, ...pageQuery], response: listEnvelope(ref('RepairRequest')) }),
       post: op('Repair Requests', 'Vendor flags a problem on one of their buses', ['vendor'], {
         body: { type: 'object', required: ['busId', 'description', 'repairCategory'], properties: { busId: objectId, description: { type: 'string', minLength: 10 }, repairCategory: { type: 'string', enum: REPAIR_CATEGORIES } } },
         response: envelope(ref('RepairRequest')), status: 201, more: pick(400, 403, 404),
       }),
     },
-    '/api/repair-requests/pending': { get: op('Repair Requests', 'Pending repair requests', ROLES, { query: pageQuery, response: listEnvelope(ref('RepairRequest')) }) },
+    '/api/repair-requests/pending': { get: op('Repair Requests', 'Pending repair requests', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('RepairRequest')) }) },
     '/api/repair-requests/{id}/status': {
       put: op('Repair Requests', 'Resolve or reject a pending request', ['serviceCreator', 'supervisor'], {
         params: [idParam], body: { type: 'object', required: ['status'], properties: { status: { type: 'string', enum: ['resolved', 'rejected'] }, note: { type: 'string', maxLength: 500 } } },

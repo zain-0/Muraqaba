@@ -12,7 +12,6 @@ import {
   acceptInvoice,
   rejectInvoice,
   completeTicket,
-  cancelTicket,
 } from '../controllers/ticketController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
@@ -20,7 +19,6 @@ import {
   validateTicketCreate,
   validateInvoiceSubmit,
   validateInvoiceReject,
-  validateTicketCancel,
   validateTransitionNote,
   validateObjectId,
   validateTicketListQuery,
@@ -47,7 +45,6 @@ router.get('/:id', validateObjectId, getTicketById);
 
 // Lifecycle transitions
 router.put('/:id/approve', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, approveTicket);
-router.put('/:id/cancel', roleMiddleware(['supervisor', 'serviceCreator']), validateObjectId, validateTicketCancel, cancelTicket);
 router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateTransitionNote, acknowledgeTicket);
 router.post('/:id/invoice', roleMiddleware(['vendor']), validateObjectId, validateInvoiceSubmit, submitInvoice);
 router.put('/:id/invoice/accept', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, acceptInvoice);

@@ -6,15 +6,14 @@ Backend for Muraqaba, a maintenance ticketing system for bus fleets. Express 5, 
 
 | Role | What they do |
 | --- | --- |
-| serviceCreator | Creates vendor accounts, adds buses (each assigned to a vendor), raises maintenance tickets, reviews vendor repair requests |
+| serviceCreator | Creates vendor accounts, adds buses (each assigned to a vendor), raises maintenance tickets, marks vendor repair requests resolved or rejected |
 | supervisor | Approves tickets, accepts or rejects invoices, can also add buses and raise tickets |
-| vendor | Acknowledges approved tickets for their buses, submits invoices, closes completed tickets, raises repair requests |
+| vendor | Self-registers or is added by a service creator. Acknowledges approved tickets for their buses, submits invoices, closes completed tickets, raises repair requests |
 | purchaseManager | Read-only view of invoiced and completed tickets and totals |
 
 Ticket lifecycle:
 
 ```
-pending ──cancel (supervisor or creator)──▶ cancelled
 pending ──approve (supervisor)──▶ approved ──acknowledge (vendor)──▶ acknowledged
    ──submit invoice (vendor)──▶ invoiceSubmitted ──accept (supervisor)──▶ invoiceAccepted ──complete (vendor)──▶ completed
                                         └──reject (supervisor)──▶ invoiceRejected ──resubmit (vendor)──▶ invoiceSubmitted
@@ -71,24 +70,23 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | POST | /api/auth/login | public | Get a JWT |
 | GET | /api/auth/me | any | Current user |
 | GET | /api/users/dashboard | any | Role-specific counters and `actionRequired` |
-| GET | /api/vendors | creator, supervisor, purchasing | Vendor directory with bus counts |
+| GET | /api/vendors | creator, supervisor | Vendor directory with bus counts |
 | POST | /api/vendors | creator | Create vendor account |
-| GET | /api/buses | any | Fleet (vendors: own buses only) |
+| GET | /api/buses | any | Fleet (vendors: own buses only, for the fault form) |
 | POST | /api/buses | creator, supervisor | Add a bus |
-| GET/PUT | /api/buses/:id | any / creator, supervisor | Details (with `partsDue`, `openTickets`) / update readings or vendor |
+| GET | /api/buses/:id | creator, supervisor, purchasing | Details with `openTickets` |
 | GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&sort=oldest` |
-| POST | /api/tickets | creator, supervisor | Raise ticket (`repairRequestId` optional) |
+| POST | /api/tickets | creator, supervisor | Raise ticket |
 | GET | /api/tickets/:id | any | Detail with `history` and all `invoices` |
 | PUT | /api/tickets/:id/approve | supervisor | pending → approved |
-| PUT | /api/tickets/:id/cancel | supervisor, or whoever raised it | pending → cancelled (`reason` required) |
 | PUT | /api/tickets/:id/acknowledge | vendor (owner) | approved → acknowledged |
 | POST | /api/tickets/:id/invoice | vendor (owner) | acknowledged or invoiceRejected → invoiceSubmitted |
 | PUT | /api/tickets/:id/invoice/accept | supervisor | invoiceSubmitted → invoiceAccepted |
 | PUT | /api/tickets/:id/invoice/reject | supervisor | invoiceSubmitted → invoiceRejected (`reason`) |
 | PUT | /api/tickets/:id/complete | vendor (owner) | invoiceAccepted → completed |
-| GET | /api/repair-requests | any | Role-scoped list, `?status=` |
+| GET | /api/repair-requests/pending | creator, supervisor | Pending requests |
 | POST | /api/repair-requests | vendor | Flag a problem on an assigned bus |
-| PUT | /api/repair-requests/:id/status | creator, supervisor | Resolve or reject (`note`) |
+| PUT | /api/repair-requests/:id/status | creator, supervisor | Resolve or reject |
 
 ## Production notes
 

@@ -21,7 +21,6 @@ const countByStatus = async (filter) => {
     invoiceAccepted: 0,
     invoiceRejected: 0,
     completed: 0,
-    cancelled: 0,
   };
   rows.forEach((r) => {
     counts[r._id] = r.n;

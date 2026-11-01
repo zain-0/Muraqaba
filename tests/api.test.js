@@ -160,7 +160,6 @@ describe('Muraqaba API', () => {
       assert.equal(created.status, 201, JSON.stringify(created.body));
       ctx.bus1 = created.body.data;
       assert.equal(ctx.bus1.vendor._id, users.vendor1.id);
-      assert.deepEqual(ctx.bus1.partsDue.sort(), ['tyre']);
       assertNoSecrets(created.body);
 
       const second = await api('POST', '/buses', { token: users.supervisor.token, body: busPayload('B', users.vendor2.id) });
@@ -184,27 +183,24 @@ describe('Muraqaba API', () => {
       assert.equal(vendorCannotCreate.status, 403);
     });
 
-    test('vendors only see their own buses', async () => {
+    test('vendors get only their own buses in the list and cannot open bus pages', async () => {
       const v1 = await api('GET', '/buses', { token: users.vendor1.token });
       assert.ok(v1.body.data.every((b) => b.vendor._id === users.vendor1.id));
       assert.ok(v1.body.data.some((b) => b._id === ctx.bus1._id));
 
-      const v2Direct = await api('GET', `/buses/${ctx.bus1._id}`, { token: users.vendor2.token });
-      assert.equal(v2Direct.status, 404);
+      const page = await api('GET', `/buses/${ctx.bus1._id}`, { token: users.vendor1.token });
+      assert.equal(page.status, 403);
 
       const manager = await api('GET', `/buses/${ctx.bus1._id}`, { token: users.purchasing.token });
       assert.equal(manager.status, 200);
       assert.equal(typeof manager.body.data.openTickets, 'number');
     });
 
-    test('updates odometer readings', async () => {
-      const res = await api('PUT', `/buses/${ctx.bus1._id}`, {
-        token: users.creator.token,
-        body: { tyre: { currentKm: 0 } },
-      });
-      assert.equal(res.status, 200);
-      assert.equal(res.body.data.tyre.currentKm, 0);
-      assert.deepEqual(res.body.data.partsDue, []);
+    test('buses cannot be edited and the vendor directory is not open to purchasing', async () => {
+      const edit = await api('PUT', `/buses/${ctx.bus1._id}`, { token: users.creator.token, body: { make: 'X' } });
+      assert.equal(edit.status, 404);
+      const purchasing = await api('GET', '/vendors', { token: users.purchasing.token });
+      assert.equal(purchasing.status, 403);
     });
   });
 
@@ -338,7 +334,7 @@ describe('Muraqaba API', () => {
   });
 
   describe('repair requests', () => {
-    test('vendor raises a request only for their own buses', async () => {
+    test('vendor raises a request only for their own buses; other roles cannot', async () => {
       const otherBus = await api('POST', '/repair-requests', {
         token: users.vendor2.token,
         body: { busId: ctx.bus1._id, repairCategory: 'MECHANICAL', description: 'Grinding noise from the front axle.' },
@@ -366,63 +362,46 @@ describe('Muraqaba API', () => {
       assert.equal(creatorCannotRaise.status, 403);
     });
 
-    test('vendors only list their own requests; reviewers list all pending', async () => {
-      const v2 = await api('GET', '/repair-requests', { token: users.vendor2.token });
-      assert.ok(!v2.body.data.some((r) => r._id === ctx.request1._id));
+    test('only reviewers can list pending requests', async () => {
+      const vendor = await api('GET', '/repair-requests/pending', { token: users.vendor1.token });
+      assert.equal(vendor.status, 403);
+      const purchasing = await api('GET', '/repair-requests/pending', { token: users.purchasing.token });
+      assert.equal(purchasing.status, 403);
 
       const pending = await api('GET', '/repair-requests/pending', { token: users.creator.token });
       assert.ok(pending.body.data.some((r) => r._id === ctx.request1._id));
       assertNoSecrets(pending.body, 'repair request list');
     });
 
-    test('raising a ticket from a request resolves and links it', async () => {
-      const wrongBus = await api('POST', '/tickets', {
-        token: users.creator.token,
-        body: { busId: ctx.bus2._id, serviceType: 'repair', repairCategory: 'MECHANICAL', repairRequestId: ctx.request1._id },
-      });
-      assert.equal(wrongBus.status, 400);
-      assert.equal(wrongBus.body.code, 'BUS_MISMATCH');
-
-      const res = await api('POST', '/tickets', {
-        token: users.creator.token,
-        body: { busId: ctx.bus1._id, serviceType: 'repair', repairCategory: 'MECHANICAL', repairRequestId: ctx.request1._id },
-      });
-      assert.equal(res.status, 201, JSON.stringify(res.body));
-      assert.equal(res.body.data.description, ctx.request1.description);
-      assert.equal(res.body.data.repairRequest._id, ctx.request1._id);
-
-      const list = await api('GET', '/repair-requests?status=resolved', { token: users.vendor1.token });
-      const resolved = list.body.data.find((r) => r._id === ctx.request1._id);
-      assert.ok(resolved);
-      assert.equal(resolved.ticketId._id, res.body.data._id);
-
-      const again = await api('POST', '/tickets', {
-        token: users.creator.token,
-        body: { busId: ctx.bus1._id, serviceType: 'repair', repairCategory: 'MECHANICAL', repairRequestId: ctx.request1._id },
-      });
-      assert.equal(again.status, 409);
-    });
-
-    test('reviewers can reject a request once', async () => {
+    test('reviewers resolve or reject a request once, and it leaves the pending list', async () => {
       const vendorCannot = await api('PUT', `/repair-requests/${ctx.request2._id}/status`, {
         token: users.vendor1.token,
         body: { status: 'rejected' },
       });
       assert.equal(vendorCannot.status, 403);
 
-      const res = await api('PUT', `/repair-requests/${ctx.request2._id}/status`, {
-        token: users.supervisor.token,
-        body: { status: 'rejected', note: 'Cosmetic, defer to next major service.' },
+      const resolved = await api('PUT', `/repair-requests/${ctx.request1._id}/status`, {
+        token: users.creator.token,
+        body: { status: 'resolved' },
       });
-      assert.equal(res.status, 200);
-      assert.equal(res.body.data.status, 'rejected');
-      assert.equal(res.body.data.rejectedBy._id, users.supervisor.id);
+      assert.equal(resolved.status, 200);
+      assert.equal(resolved.body.data.status, 'resolved');
+
+      const rejected = await api('PUT', `/repair-requests/${ctx.request2._id}/status`, {
+        token: users.supervisor.token,
+        body: { status: 'rejected' },
+      });
+      assert.equal(rejected.status, 200);
+      assert.equal(rejected.body.data.rejectedBy._id, users.supervisor.id);
 
       const twice = await api('PUT', `/repair-requests/${ctx.request2._id}/status`, {
         token: users.supervisor.token,
         body: { status: 'resolved' },
       });
       assert.equal(twice.status, 409);
+
+      const pending = await api('GET', '/repair-requests/pending', { token: users.creator.token });
+      assert.ok(!pending.body.data.some((r) => r._id === ctx.request1._id || r._id === ctx.request2._id));
     });
   });
 
@@ -491,13 +470,16 @@ describe('Muraqaba API', () => {
     });
 
     test('non-finite numbers are rejected', async () => {
-      const bus = await api('PUT', `/buses/${ctx.bus2._id}`, { token: users.creator.token, body: { engine: { serviceKm: '1e400' } } });
+      const bus = await api('POST', '/buses', {
+        token: users.creator.token,
+        body: {
+          fleetNumber: `INF-${run}`, chassisNumber: `INFC-${run}`, registrationNumber: `INFR-${run}`, make: 'Hino', model: 'RK8J', year: 2020,
+          vendorId: users.vendor1.id,
+          engine: { serviceKm: '1e400', currentKm: 0 }, ac: { serviceKm: 1, currentKm: 0 }, tyre: { serviceKm: 1, currentKm: 0 },
+          transmission: { serviceKm: 1, currentKm: 0 }, brakePad: { serviceKm: 1, currentKm: 0 },
+        },
+      });
       assert.equal(bus.status, 400);
-    });
-
-    test('a bus update without a body is a no-op, not a crash', async () => {
-      const res = await fetch(`${BASE}/buses/${ctx.bus2._id}`, { method: 'PUT', headers: { Authorization: `Bearer ${users.creator.token}` } });
-      assert.equal(res.status, 200);
     });
 
     test('simultaneous invoice submissions: exactly one wins and no orphan invoices remain', async () => {
@@ -508,7 +490,7 @@ describe('Muraqaba API', () => {
 
       const attempts = await Promise.all(
         [1, 2, 3].map((n) =>
-          api('POST', `/tickets/${ticket._id}/invoice`, { token: users.vendor2.token, body: { amount: 100 * n, description: `Attempt ${n}` } })
+          api('POST', `/tickets/${ticket._id}/invoice`, { token: users.vendor2.token, body: { amount: 100 * n, description: `Invoice attempt ${n}` } })
         )
       );
       const statuses = attempts.map((a) => a.status).sort();
@@ -519,31 +501,6 @@ describe('Muraqaba API', () => {
       assert.equal(detail.body.data.invoices.length, 1);
     });
 
-    test('pending tickets can be cancelled by a supervisor or their creator, once, with a reason', async () => {
-      const bus = await newBus('CXL', users.vendor2.id);
-      const ticket = await newTicket(bus._id);
-
-      const noReason = await api('PUT', `/tickets/${ticket._id}/cancel`, { token: users.supervisor.token, body: {} });
-      assert.equal(noReason.status, 400);
-      const vendor = await api('PUT', `/tickets/${ticket._id}/cancel`, { token: users.vendor2.token, body: { reason: 'Not needed' } });
-      assert.equal(vendor.status, 403);
-
-      const ok = await api('PUT', `/tickets/${ticket._id}/cancel`, { token: users.supervisor.token, body: { reason: 'Raised by mistake' } });
-      assert.equal(ok.status, 200, JSON.stringify(ok.body));
-      assert.equal(ok.body.data.status, 'cancelled');
-      assert.equal(ok.body.data.cancellationReason, 'Raised by mistake');
-
-      const again = await api('PUT', `/tickets/${ticket._id}/cancel`, { token: users.supervisor.token, body: { reason: 'Raised by mistake' } });
-      assert.equal(again.status, 409);
-    });
-
-    test('a bus with open tickets cannot be reassigned to another vendor', async () => {
-      const bus = await newBus('MOVE', users.vendor2.id);
-      await newTicket(bus._id);
-      const res = await api('PUT', `/buses/${bus._id}`, { token: users.creator.token, body: { vendorId: users.vendor1.id } });
-      assert.equal(res.status, 409);
-      assert.equal(res.body.code, 'OPEN_TICKETS');
-    });
   });
 
   describe('dashboards and misc', () => {
@@ -551,7 +508,6 @@ describe('Muraqaba API', () => {
       for (const key of ['creator', 'supervisor', 'vendor1', 'purchasing']) {
         const res = await api('GET', '/users/dashboard', { token: users[key].token });
         assert.equal(res.status, 200, key);
-        assert.equal(typeof res.body.data.actionRequired, 'number', key);
         assert.ok(res.body.data.tickets, key);
       }
       const vendor = await api('GET', '/users/dashboard', { token: users.vendor1.token });

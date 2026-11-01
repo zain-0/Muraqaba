@@ -59,22 +59,22 @@ async function main() {
 
   const buses = await Bus.create([
     {
-      fleetNumber: 'BUS-101', chassisNumber: 'CH-101-AX', registrationNumber: 'LEA-1011', make: 'Hino', model: 'RK8J', year: 2019,
+      fleetNumber: 'BUS-101', chassisNumber: 'CH-101-AX', registrationNumber: 'DXB-1011', make: 'Hino', model: 'RK8J', year: 2019,
       engine: part(15000, 14200), ac: part(10000, 3200), tyre: part(40000, 38900), transmission: part(60000, 21000), brakePad: part(20000, 20500),
       vendor: vendor1._id,
     },
     {
-      fleetNumber: 'BUS-102', chassisNumber: 'CH-102-BX', registrationNumber: 'LEA-1022', make: 'Yutong', model: 'ZK6122', year: 2021,
+      fleetNumber: 'BUS-102', chassisNumber: 'CH-102-BX', registrationNumber: 'DXB-1022', make: 'Yutong', model: 'ZK6122', year: 2021,
       engine: part(15000, 4000), ac: part(10000, 9800), tyre: part(40000, 12000), transmission: part(60000, 8000), brakePad: part(20000, 6000),
       vendor: vendor1._id,
     },
     {
-      fleetNumber: 'BUS-103', chassisNumber: 'CH-103-CX', registrationNumber: 'LEA-1033', make: 'Isuzu', model: 'LT134', year: 2018,
+      fleetNumber: 'BUS-103', chassisNumber: 'CH-103-CX', registrationNumber: 'DXB-1033', make: 'Isuzu', model: 'LT134', year: 2018,
       engine: part(15000, 7600), ac: part(10000, 500), tyre: part(40000, 31000), transmission: part(60000, 59000), brakePad: part(20000, 11000),
       vendor: vendor2._id,
     },
     {
-      fleetNumber: 'BUS-104', chassisNumber: 'CH-104-DX', registrationNumber: 'LEA-1044', make: 'Hino', model: 'AK1J', year: 2022,
+      fleetNumber: 'BUS-104', chassisNumber: 'CH-104-DX', registrationNumber: 'DXB-1044', make: 'Hino', model: 'AK1J', year: 2022,
       engine: part(15000, 1200), ac: part(10000, 800), tyre: part(40000, 2500), transmission: part(60000, 1200), brakePad: part(20000, 900),
       vendor: vendor2._id,
     },
@@ -139,16 +139,15 @@ async function main() {
   await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'BATTERY REPLACEMENT', description: 'Bus failed to start twice this week; battery not holding charge.', stage: 'pending', createdDaysAgo: 1 });
   await makeTicket({ bus: bus102, serviceType: 'minor', description: 'Scheduled minor service: oil, filters, fluid top-up.', stage: 'approved', createdDaysAgo: 3 });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'AC REPAIR', description: 'Rear AC unit blowing warm air on afternoon routes.', stage: 'acknowledged', createdDaysAgo: 5 });
-  await makeTicket({ bus: bus101, serviceType: 'major', description: 'Major service at 14,000 km: engine, transmission inspection, brake pads.', stage: 'invoiceSubmitted', createdDaysAgo: 9, amount: 185000 });
-  await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Dashboard warning lights flickering intermittently.', stage: 'invoiceRejected', createdDaysAgo: 12, amount: 42000 });
-  await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'TYRE REPLACEMENT', description: 'Replace both rear tyres, tread below legal limit.', stage: 'invoiceAccepted', createdDaysAgo: 15, amount: 96000 });
-  await makeTicket({ bus: bus102, serviceType: 'other', description: 'Interior deep clean and seat repairs after charter.', stage: 'completed', createdDaysAgo: 20, amount: 28000 });
-  await makeTicket({ bus: bus104, serviceType: 'minor', description: 'First minor service for new vehicle.', stage: 'completed', createdDaysAgo: 30, amount: 35000 });
+  await makeTicket({ bus: bus101, serviceType: 'major', description: 'Major service at 14,000 km: engine, transmission inspection, brake pads.', stage: 'invoiceSubmitted', createdDaysAgo: 9, amount: 4800 });
+  await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Dashboard warning lights flickering intermittently.', stage: 'invoiceRejected', createdDaysAgo: 12, amount: 1200 });
+  await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'TYRE REPLACEMENT', description: 'Replace both rear tyres, tread below legal limit.', stage: 'invoiceAccepted', createdDaysAgo: 15, amount: 2600 });
+  await makeTicket({ bus: bus102, serviceType: 'other', description: 'Interior deep clean and seat repairs after charter.', stage: 'completed', createdDaysAgo: 20, amount: 750 });
+  await makeTicket({ bus: bus104, serviceType: 'minor', description: 'First minor service for new vehicle.', stage: 'completed', createdDaysAgo: 30, amount: 900 });
 
   await RepairRequest.create([
     { busId: bus101._id, vendorId: vendor1._id, repairCategory: 'MECHANICAL', description: 'Grinding noise from the front axle under braking; needs inspection before weekend routes.' },
     { busId: bus103._id, vendorId: vendor2._id, repairCategory: 'BODY', description: 'Rear bumper cracked after depot reversing incident; water getting into the engine bay.' },
-    { busId: bus102._id, vendorId: vendor1._id, repairCategory: 'ENGINE', description: 'Coolant level dropping every two days, possible hose leak.', status: 'rejected', rejectedBy: creator._id, rejectedAt: daysAgo(4), resolutionNote: 'Covered by the upcoming minor service.' },
   ]);
 
   console.log('\nSeed complete. Demo accounts (password: %s):', PASSWORD);

@@ -12,10 +12,8 @@ export const TICKET_POPULATE = [
   { path: 'acknowledgedBy', select: USER_FIELDS },
   { path: 'invoiceApprovedBy', select: USER_FIELDS },
   { path: 'invoiceRejectedBy', select: USER_FIELDS },
-  { path: 'cancelledBy', select: USER_FIELDS },
   { path: 'invoice' },
   { path: 'history.by', select: USER_FIELDS },
-  { path: 'repairRequest', select: 'description repairCategory status createdAt' },
 ];
 
 export const REPAIR_REQUEST_POPULATE = [
@@ -23,7 +21,6 @@ export const REPAIR_REQUEST_POPULATE = [
   { path: 'vendorId', select: USER_FIELDS },
   { path: 'resolvedBy', select: USER_FIELDS },
   { path: 'rejectedBy', select: USER_FIELDS },
-  { path: 'ticketId', select: 'status serviceType repairCategory createdAt' },
 ];
 
 export const BUS_POPULATE = [{ path: 'vendor', select: USER_FIELDS }];

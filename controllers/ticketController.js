@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
-import RepairRequest from '../models/RepairRequest.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { TICKET_POPULATE, paginate } from '../utils/query.js';
 
@@ -56,44 +55,20 @@ const respond = async (res, ticket, message, status = 200) => {
 
 // POST /api/tickets
 export const createTicket = asyncHandler(async (req, res) => {
-  const { busId, serviceType, repairCategory, description, repairRequestId } = req.body;
+  const { busId, serviceType, repairCategory, description } = req.body;
 
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
-
-  let repairRequest = null;
-  if (repairRequestId) {
-    repairRequest = await RepairRequest.findById(repairRequestId);
-    if (!repairRequest) throw new AppError('Repair request not found', 404, 'NOT_FOUND');
-    if (repairRequest.status !== 'pending') {
-      throw new AppError('This repair request has already been handled', 409, 'INVALID_STATE');
-    }
-    if (!repairRequest.busId.equals(bus._id)) {
-      throw new AppError('The repair request is for a different bus', 400, 'BUS_MISMATCH');
-    }
-  }
 
   const ticket = new Ticket({
     busId: bus._id,
     serviceType,
     repairCategory: serviceType === 'repair' ? repairCategory : undefined,
-    description: description || repairRequest?.description,
+    description,
     vendorId: bus.vendor, // the vendor assigned to the bus does the work
     createdBy: req.user._id,
-    repairRequest: repairRequest?._id,
   });
   ticket.history.push({ status: 'pending', by: req.user._id, note: 'Ticket created' });
-
-  // Claim the request first: if two people answer it at once, the version check stops
-  // the second before a duplicate ticket is written.
-  if (repairRequest) {
-    repairRequest.status = 'resolved';
-    repairRequest.ticketId = ticket._id;
-    repairRequest.resolvedBy = req.user._id;
-    repairRequest.resolvedAt = new Date();
-    repairRequest.resolutionNote = 'Repair ticket raised';
-    await repairRequest.save();
-  }
   await ticket.save();
 
   await respond(res, ticket, 'Ticket created and sent for supervisor approval', 201);
@@ -203,19 +178,6 @@ export const submitInvoice = asyncHandler(async (req, res) => {
   await ticket.save();
   await invoice.save();
   await respond(res, ticket, 'Invoice submitted for supervisor review', 201);
-});
-
-// PUT /api/tickets/:id/cancel  (a supervisor, or whoever raised the ticket, while it is still pending)
-export const cancelTicket = asyncHandler(async (req, res) => {
-  const ticket = await loadTicket(req.params.id);
-  const isCreator = ticket.createdBy.equals(req.user._id);
-  if (req.user.role !== 'supervisor' && !isCreator) {
-    throw new AppError('Only a supervisor or the person who raised the ticket can cancel it', 403, 'FORBIDDEN');
-  }
-  assertStatus(ticket, 'pending', `Only pending tickets can be cancelled (this one is ${ticket.status})`);
-  ticket.transition('cancelled', req.user._id, req.body.reason);
-  await ticket.save();
-  await respond(res, ticket, 'Ticket cancelled');
 });
 
 // PUT /api/tickets/:id/invoice/accept  (supervisor)

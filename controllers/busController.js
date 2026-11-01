@@ -54,37 +54,3 @@ export const createBus = asyncHandler(async (req, res) => {
 
   res.status(201).json({ success: true, message: 'Bus added to the fleet', data: bus });
 });
-
-// PUT /api/buses/:id
-// Partial update: details, odometer readings per part, or the assigned vendor.
-export const updateBus = asyncHandler(async (req, res) => {
-  const bus = await Bus.findById(req.params.id);
-  if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
-
-  ['make', 'model', 'year'].forEach((k) => {
-    if (req.body[k] !== undefined) bus[k] = req.body[k];
-  });
-  BUS_PARTS.forEach((p) => {
-    if (req.body[p]) {
-      if (req.body[p].serviceKm !== undefined) bus[p].serviceKm = req.body[p].serviceKm;
-      if (req.body[p].currentKm !== undefined) bus[p].currentKm = req.body[p].currentKm;
-    }
-  });
-  if (req.body.vendorId && !bus.vendor.equals(req.body.vendorId)) {
-    const vendor = await assertVendorExists(req.body.vendorId);
-    // Tickets keep the vendor they were raised with, so a bus cannot change hands mid-job.
-    const open = await Ticket.countDocuments({ busId: bus._id, status: mongoose.trusted({ $nin: CLOSED_STATUSES }) });
-    if (open > 0) {
-      throw new AppError(
-        `This bus has ${open} open ticket${open === 1 ? '' : 's'}. Complete or cancel them before assigning it to another vendor.`,
-        409,
-        'OPEN_TICKETS'
-      );
-    }
-    bus.vendor = vendor._id;
-  }
-
-  await bus.save();
-  await bus.populate(BUS_POPULATE);
-  res.json({ success: true, message: 'Bus updated', data: bus });
-});

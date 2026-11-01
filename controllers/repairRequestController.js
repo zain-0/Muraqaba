@@ -3,8 +3,6 @@ import Bus from '../models/Bus.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { REPAIR_REQUEST_POPULATE, paginate } from '../utils/query.js';
 
-const scopeForRole = (user) => (user.role === 'vendor' ? { vendorId: user._id } : {});
-
 // POST /api/repair-requests  (vendor, for a bus assigned to them)
 export const createRepairRequest = asyncHandler(async (req, res) => {
   const { busId, description, repairCategory } = req.body;
@@ -25,27 +23,14 @@ export const createRepairRequest = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    message: 'Repair request sent. A service creator will review it and raise a ticket.',
+    message: 'Repair request sent for review.',
     data: request,
   });
 });
 
-// GET /api/repair-requests  (role-scoped; ?status=&page=&limit=)
-export const listRepairRequests = asyncHandler(async (req, res) => {
-  const filter = scopeForRole(req.user);
-  if (req.query.status) filter.status = req.query.status;
-  const result = await paginate(RepairRequest, filter, {
-    page: req.query.page,
-    limit: req.query.limit,
-    sort: req.query.sort,
-    populate: REPAIR_REQUEST_POPULATE,
-  });
-  res.json(result);
-});
-
-// GET /api/repair-requests/pending
+// GET /api/repair-requests/pending  (service creator, supervisor)
 export const getPendingRepairRequests = asyncHandler(async (req, res) => {
-  const result = await paginate(RepairRequest, { ...scopeForRole(req.user), status: 'pending' }, {
+  const result = await paginate(RepairRequest, { status: 'pending' }, {
     page: req.query.page,
     limit: req.query.limit,
     sort: req.query.sort,

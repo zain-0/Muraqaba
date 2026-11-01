@@ -662,8 +662,7 @@
               "invoiceSubmitted",
               "invoiceAccepted",
               "invoiceRejected",
-              "completed",
-              "cancelled"
+              "completed"
             ]
           },
           "history": {
@@ -680,8 +679,7 @@
                     "invoiceSubmitted",
                     "invoiceAccepted",
                     "invoiceRejected",
-                    "completed",
-                    "cancelled"
+                    "completed"
                   ]
                 },
                 "at": {
@@ -944,10 +942,6 @@
           "completedAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "repairRequest": {
-            "type": "string",
-            "example": "64b7f0c2e1d2a9b1c8a4f123"
           },
           "createdAt": {
             "type": "string",
@@ -1230,10 +1224,6 @@
               "resolved",
               "rejected"
             ]
-          },
-          "ticketId": {
-            "type": "string",
-            "example": "64b7f0c2e1d2a9b1c8a4f123"
           },
           "resolvedBy": {
             "type": "object",
@@ -1798,7 +1788,7 @@
           "Vendors"
         ],
         "summary": "List vendors with bus counts",
-        "description": "Roles: serviceCreator, supervisor, purchaseManager",
+        "description": "Roles: serviceCreator, supervisor",
         "security": [
           {
             "bearerAuth": []
@@ -1996,8 +1986,7 @@
                 "invoiceSubmitted",
                 "invoiceAccepted",
                 "invoiceRejected",
-                "completed",
-                "cancelled"
+                "completed"
               ]
             }
           },
@@ -2278,7 +2267,7 @@
           "Buses"
         ],
         "summary": "Bus details with open ticket count",
-        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "description": "Roles: serviceCreator, supervisor, purchaseManager",
         "security": [
           {
             "bearerAuth": []
@@ -2330,213 +2319,6 @@
           },
           "401": {
             "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Buses"
-        ],
-        "summary": "Update details, odometer readings or assigned vendor",
-        "description": "Roles: serviceCreator, supervisor",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "example": "64b7f0c2e1d2a9b1c8a4f123"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "make": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "year": {
-                    "type": "integer"
-                  },
-                  "vendorId": {
-                    "type": "string",
-                    "example": "64b7f0c2e1d2a9b1c8a4f123"
-                  },
-                  "engine": {
-                    "type": "object",
-                    "required": [
-                      "serviceKm",
-                      "currentKm"
-                    ],
-                    "properties": {
-                      "serviceKm": {
-                        "type": "number",
-                        "description": "Kilometres between services",
-                        "example": 15000
-                      },
-                      "currentKm": {
-                        "type": "number",
-                        "description": "Kilometres since the last service of this part",
-                        "example": 14200
-                      }
-                    }
-                  },
-                  "ac": {
-                    "type": "object",
-                    "required": [
-                      "serviceKm",
-                      "currentKm"
-                    ],
-                    "properties": {
-                      "serviceKm": {
-                        "type": "number",
-                        "description": "Kilometres between services",
-                        "example": 15000
-                      },
-                      "currentKm": {
-                        "type": "number",
-                        "description": "Kilometres since the last service of this part",
-                        "example": 14200
-                      }
-                    }
-                  },
-                  "tyre": {
-                    "type": "object",
-                    "required": [
-                      "serviceKm",
-                      "currentKm"
-                    ],
-                    "properties": {
-                      "serviceKm": {
-                        "type": "number",
-                        "description": "Kilometres between services",
-                        "example": 15000
-                      },
-                      "currentKm": {
-                        "type": "number",
-                        "description": "Kilometres since the last service of this part",
-                        "example": 14200
-                      }
-                    }
-                  },
-                  "transmission": {
-                    "type": "object",
-                    "required": [
-                      "serviceKm",
-                      "currentKm"
-                    ],
-                    "properties": {
-                      "serviceKm": {
-                        "type": "number",
-                        "description": "Kilometres between services",
-                        "example": 15000
-                      },
-                      "currentKm": {
-                        "type": "number",
-                        "description": "Kilometres since the last service of this part",
-                        "example": 14200
-                      }
-                    }
-                  },
-                  "brakePad": {
-                    "type": "object",
-                    "required": [
-                      "serviceKm",
-                      "currentKm"
-                    ],
-                    "properties": {
-                      "serviceKm": {
-                        "type": "number",
-                        "description": "Kilometres between services",
-                        "example": 15000
-                      },
-                      "currentKm": {
-                        "type": "number",
-                        "description": "Kilometres since the last service of this part",
-                        "example": 14200
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "example": true
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Bus"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Role not allowed or resource owned by someone else",
             "content": {
               "application/json": {
                 "schema": {
@@ -2583,8 +2365,7 @@
                 "invoiceSubmitted",
                 "invoiceAccepted",
                 "invoiceRejected",
-                "completed",
-                "cancelled"
+                "completed"
               ]
             }
           },
@@ -2749,11 +2530,6 @@
                   "description": {
                     "type": "string",
                     "maxLength": 1000
-                  },
-                  "repairRequestId": {
-                    "type": "string",
-                    "example": "64b7f0c2e1d2a9b1c8a4f123",
-                    "description": "Optional: resolve and link a pending repair request for the same bus"
                   }
                 }
               }
@@ -3315,125 +3091,6 @@
         }
       }
     },
-    "/api/tickets/{id}/cancel": {
-      "put": {
-        "tags": [
-          "Tickets"
-        ],
-        "summary": "Cancel a pending ticket (supervisor, or whoever raised it)",
-        "description": "Roles: supervisor, serviceCreator",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "example": "64b7f0c2e1d2a9b1c8a4f123"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "reason"
-                ],
-                "properties": {
-                  "reason": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "example": true
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Ticket"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Role not allowed or resource owned by someone else",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Duplicate or invalid state transition",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/tickets/{id}/acknowledge": {
       "put": {
         "tags": [
@@ -3942,113 +3599,6 @@
       }
     },
     "/api/repair-requests": {
-      "get": {
-        "tags": [
-          "Repair Requests"
-        ],
-        "summary": "List repair requests visible to the caller",
-        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "pending",
-                "resolved",
-                "rejected"
-              ]
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200,
-              "default": 50
-            }
-          },
-          {
-            "name": "sort",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "newest",
-                "oldest"
-              ],
-              "default": "newest"
-            },
-            "description": "Order by creation date"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "example": true
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/RepairRequest"
-                      }
-                    },
-                    "count": {
-                      "type": "integer"
-                    },
-                    "total": {
-                      "type": "integer"
-                    },
-                    "page": {
-                      "type": "integer"
-                    },
-                    "pages": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Repair Requests"
@@ -4170,7 +3720,7 @@
           "Repair Requests"
         ],
         "summary": "Pending repair requests",
-        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "description": "Roles: serviceCreator, supervisor",
         "security": [
           {
             "bearerAuth": []

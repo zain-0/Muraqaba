@@ -1,7 +1,6 @@
 import express from 'express';
 import {
   createRepairRequest,
-  listRepairRequests,
   getPendingRepairRequests,
   updateRepairRequestStatus,
 } from '../controllers/repairRequestController.js';
@@ -21,8 +20,7 @@ router.use(authMiddleware);
 const REVIEWERS = ['serviceCreator', 'supervisor'];
 
 router.post('/', roleMiddleware(['vendor']), validateRepairRequest, createRepairRequest);
-router.get('/', validateRepairRequestListQuery, listRepairRequests);
-router.get('/pending', validateRepairRequestListQuery, getPendingRepairRequests);
+router.get('/pending', roleMiddleware(REVIEWERS), validateRepairRequestListQuery, getPendingRepairRequests);
 router.put('/:id/status', roleMiddleware(REVIEWERS), validateObjectId, validateRepairRequestStatus, updateRepairRequestStatus);
 router.put('/status/:id', roleMiddleware(REVIEWERS), validateObjectId, validateRepairRequestStatus, updateRepairRequestStatus); // legacy path
 
