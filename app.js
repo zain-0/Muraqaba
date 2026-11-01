@@ -54,7 +54,8 @@ app.use(
       return callback(err);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    // ngrok-skip-browser-warning: sent by the web app when the API is exposed through an ngrok tunnel.
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
     exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After'],
     credentials: true,
     maxAge: 600,
