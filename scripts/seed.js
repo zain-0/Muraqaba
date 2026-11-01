@@ -98,6 +98,9 @@ async function main() {
       t -= 1;
       ticket.transition(status, by._id, note);
       ticket.history[ticket.history.length - 1].at = daysAgo(Math.max(t, 0));
+      // The status's own date field, which the dashboards show, has to agree with the history.
+      const field = { approved: 'approvedAt', acknowledged: 'acknowledgedAt', invoiceSubmitted: 'invoiceSubmittedAt', invoiceRejected: 'invoiceRejectedAt', invoiceAccepted: 'invoiceAcceptedAt', completed: 'completedAt' }[status];
+      if (field) ticket[field] = daysAgo(Math.max(t, 0));
     };
     ticket.history.push({ status: 'pending', by: creator._id, note: 'Ticket created', at: daysAgo(createdDaysAgo) });
 
