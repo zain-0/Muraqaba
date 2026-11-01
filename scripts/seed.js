@@ -106,7 +106,7 @@ async function main() {
     if (target >= 1) step('approved', supervisor);
     if (target >= 2) step('acknowledged', vendor);
     if (target >= 3) {
-      const inv = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount, description: `Work completed on ${bus.fleetNumber}`, invoiceNumber: `INV-${bus.fleetNumber}-1` });
+      const inv = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount, description: `Work completed on ${bus.fleetNumber}`, invoiceNumber: `INV-${bus.fleetNumber}-1`, submittedAt: daysAgo(Math.max(t - 1, 0)) });
       ticket.invoice = inv._id;
       step('invoiceSubmitted', vendor, `Invoice ${inv.invoiceNumber}`);
       if (target >= 4) {
@@ -118,7 +118,7 @@ async function main() {
         step('invoiceRejected', supervisor, inv.rejectionReason);
       }
       if (target >= 5) {
-        const inv2 = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount: Math.round(amount * 0.85), description: `Itemised invoice for ${bus.fleetNumber}`, invoiceNumber: `INV-${bus.fleetNumber}-2` });
+        const inv2 = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount: Math.round(amount * 0.85), description: `Itemised invoice for ${bus.fleetNumber}`, invoiceNumber: `INV-${bus.fleetNumber}-2`, submittedAt: daysAgo(Math.max(t - 1, 0)) });
         ticket.invoice = inv2._id;
         step('invoiceSubmitted', vendor, `Invoice ${inv2.invoiceNumber}`);
       }
