@@ -10,6 +10,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 
@@ -25,6 +26,7 @@ if (testUri === baseUri) {
 
 process.env.MONGO_URI = testUri;
 process.env.NODE_ENV = 'test';
+process.env.UPLOAD_DIR = join(tmpdir(), 'muraqaba-test-uploads');
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-not-for-production-use-only-0123456789';
 process.env.RATE_LIMIT_MAX = '100000';
 process.env.AUTH_RATE_LIMIT_MAX = '100000';

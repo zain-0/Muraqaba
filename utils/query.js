@@ -14,6 +14,7 @@ export const TICKET_POPULATE = [
   { path: 'invoiceRejectedBy', select: USER_FIELDS },
   { path: 'invoice' },
   { path: 'history.by', select: USER_FIELDS },
+  { path: 'negotiation.by', select: USER_FIELDS },
 ];
 
 export const REPAIR_REQUEST_POPULATE = [

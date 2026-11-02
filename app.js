@@ -17,6 +17,7 @@ import vendorRoutes from './routes/vendorRoutes.js';
 import busRoutes from './routes/busRoutes.js';
 import ticketRoutes from './routes/ticketRoutes.js';
 import repairRequestRoutes from './routes/repairRequestRoutes.js';
+import sheetRoutes from './routes/sheetRoutes.js';
 import { errorHandler, notFound } from './middleware/errorMiddleware.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -105,6 +106,7 @@ app.use('/api/vendors', vendorRoutes);
 app.use(['/api/buses', '/api/bus'], busRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/repair-requests', repairRequestRoutes);
+app.use('/api/sheets', sheetRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

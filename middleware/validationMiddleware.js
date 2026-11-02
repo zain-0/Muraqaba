@@ -3,6 +3,7 @@ import { ROLES } from '../models/User.js';
 import { BUS_PARTS } from '../models/Bus.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES } from '../models/Ticket.js';
 import { REPAIR_REQUEST_STATUSES } from '../models/RepairRequest.js';
+import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
 
 export const handleValidationErrors = (req, res, next) => {
   const result = validationResult(req);
@@ -48,7 +49,24 @@ export const validateLogin = [
   handleValidationErrors,
 ];
 
-export const validateVendorCreate = [name(), email(), password(), handleValidationErrors];
+const RATE_MESSAGE = 'Enter a rate above 0';
+const rate = (field) => body(field, RATE_MESSAGE).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat();
+
+export const validateVendorCreate = [
+  name(),
+  email(),
+  password(),
+  rate('serviceRates.minor').optional(),
+  rate('serviceRates.major').optional(),
+  handleValidationErrors,
+];
+
+export const validateVendorRates = [
+  param('id').isMongoId().withMessage('Invalid ID'),
+  rate('minor'),
+  rate('major'),
+  handleValidationErrors,
+];
 
 const partRules = (part) =>
   ['serviceKm', 'currentKm'].map((k) =>
@@ -80,7 +98,13 @@ export const validateTicketCreate = [
     .if(body('serviceType').equals('repair'))
     .isString()
     .isIn(REPAIR_CATEGORIES)
-    .withMessage('Choose a repair category for repair tickets'),
+    .withMessage('Choose a repair category for repair VSRs'),
+  body('currentReading', 'Enter the current reading as a whole number of kilometres')
+    .not()
+    .isArray()
+    .isInt({ min: 0, max: MAX_NUMBER })
+    .toInt(),
+  body('vendorId', 'Choose a vendor').optional({ values: 'falsy' }).isString().isMongoId(),
   body('description')
     .optional({ values: 'falsy' })
     .isString()
@@ -92,6 +116,54 @@ export const validateTicketCreate = [
 ];
 
 export const validateTransitionNote = [note(), handleValidationErrors];
+
+export const validateSheetMonth = [
+  qstr('month').matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('Choose a valid month'),
+  handleValidationErrors,
+];
+
+const sheetDay = () => [
+  str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),
+  str('date', 'Day').matches(/^\d{4}-\d{2}-\d{2}$/).isISO8601({ strict: true }).withMessage('Choose a valid day'),
+];
+
+export const validateReadingUpdate = [
+  ...sheetDay(),
+  body('km', 'Enter the reading as a whole number of kilometres').optional({ values: 'null' }).not().isArray().isInt({ min: 0, max: MAX_NUMBER }).toInt(),
+  handleValidationErrors,
+];
+
+export const validateBusStatusUpdate = [
+  ...sheetDay(),
+  str('status', 'Status').isIn(BUS_DAY_STATUSES).withMessage('Choose a valid status'),
+  handleValidationErrors,
+];
+
+const NEGOTIATION_NOTE = 'Keep the note to 1000 characters or fewer';
+const roundNote = () => body('note', NEGOTIATION_NOTE).optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 });
+
+export const validateEstimate = [
+  body('amount', 'Enter the estimate amount').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  roundNote(),
+  handleValidationErrors,
+];
+
+export const validateEstimateReply = [
+  body('amount', 'Enter a counter amount above 0, or leave it empty').optional({ values: 'falsy' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  roundNote(),
+  handleValidationErrors,
+];
+
+export const validateAttachmentParams = [
+  param('id').isMongoId().withMessage('Invalid ID'),
+  param('attachmentId').isMongoId().withMessage('Invalid ID'),
+  handleValidationErrors,
+];
+
+export const validateTicketReturn = [
+  str('reason', 'Reason').trim().isLength({ min: 1, max: 500 }).withMessage('Enter why the VSR is being returned, in 500 characters or fewer'),
+  handleValidationErrors,
+];
 
 export const validateInvoiceSubmit = [
   body('amount').isFloat({ min: 0, max: MAX_NUMBER }).withMessage('Amount must be 0 or more').toFloat(),

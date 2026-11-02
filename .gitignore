@@ -8,3 +8,4 @@ coverage/
 .data/
 .playwright-mcp/
 .claude/
+uploads/

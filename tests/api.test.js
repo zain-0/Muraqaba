@@ -57,6 +57,15 @@ const signIn = async (email) => {
   return { token: res.body.token, id: res.body.user.id, email: res.body.user.email };
 };
 
+/** Sends a multipart estimate or reply, the way the browser does. */
+const estimate = async (ticketId, token, fields, suffix = '', files = []) => {
+  const form = new FormData();
+  Object.entries(fields).forEach(([key, value]) => form.set(key, value));
+  files.forEach((file) => form.append('attachments', file));
+  const res = await fetch(`${BASE}/tickets/${ticketId}/estimate${suffix}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+  return { status: res.status, body: await res.json() };
+};
+
 describe('Muraqaba API', () => {
   before(async () => {
     const health = await api('GET', '/health');
@@ -205,22 +214,32 @@ describe('Muraqaba API', () => {
   });
 
   describe('ticket lifecycle', () => {
-    test('service creator raises a repair ticket; vendor is derived from the bus', async () => {
+    test('service creator raises a repair ticket; it goes to the bus vendor first', async () => {
       const missingCategory = await api('POST', '/tickets', {
         token: users.creator.token,
-        body: { busId: ctx.bus1._id, serviceType: 'repair', description: 'Battery dead' },
+        body: { busId: ctx.bus1._id, serviceType: 'repair', currentReading: 52000, description: 'Battery dead' },
       });
       assert.equal(missingCategory.status, 400);
 
+      for (const currentReading of [undefined, '', -1, 1.5, 'abc', [52000]]) {
+        const badReading = await api('POST', '/tickets', {
+          token: users.creator.token,
+          body: { busId: ctx.bus1._id, serviceType: 'minor', currentReading },
+        });
+        assert.equal(badReading.status, 400, `reading ${JSON.stringify(currentReading)}`);
+        assert.equal(badReading.body.errors[0].field, 'currentReading');
+      }
+
       const res = await api('POST', '/tickets', {
         token: users.creator.token,
-        body: { busId: ctx.bus1._id, serviceType: 'repair', repairCategory: 'BATTERY REPLACEMENT', description: 'Battery not holding charge.' },
+        body: { busId: ctx.bus1._id, serviceType: 'repair', repairCategory: 'BATTERY REPLACEMENT', currentReading: 52000, description: 'Battery not holding charge.' },
       });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       ctx.ticket = res.body.data;
-      assert.equal(ctx.ticket.status, 'pending');
+      assert.equal(ctx.ticket.status, 'sentToVendor');
       assert.equal(ctx.ticket.vendorId._id, users.vendor1.id);
       assert.equal(ctx.ticket.description, 'Battery not holding charge.');
+      assert.equal(ctx.ticket.currentReading, 52000);
       assert.equal(ctx.ticket.history.length, 1);
       assertNoSecrets(res.body, 'created ticket');
     });
@@ -240,9 +259,38 @@ describe('Muraqaba API', () => {
       const creatorApprove = await api('PUT', `/tickets/${ctx.ticket._id}/approve`, { token: users.creator.token });
       assert.equal(creatorApprove.status, 403);
 
+      const tooSoon = await api('PUT', `/tickets/${ctx.ticket._id}/approve`, { token: users.supervisor.token });
+      assert.equal(tooSoon.status, 409);
+      const noEstimate = await api('PUT', `/tickets/${ctx.ticket._id}/escalate`, { token: users.creator.token });
+      assert.equal(noEstimate.status, 409);
+
+      const bad = await estimate(ctx.ticket._id, users.vendor1.token, { amount: '0' });
+      assert.equal(bad.status, 400);
+      const wrong = await estimate(ctx.ticket._id, users.vendor2.token, { amount: '900' });
+      assert.equal(wrong.status, 403);
+      const first = await estimate(ctx.ticket._id, users.vendor1.token, { amount: '1200', note: 'Battery and labour' });
+      assert.equal(first.status, 201, JSON.stringify(first.body));
+      assert.equal(first.body.data.status, 'estimateSubmitted');
+
+      const empty = await estimate(ctx.ticket._id, users.creator.token, {}, '/reply');
+      assert.equal(empty.status, 400);
+      const counter = await estimate(ctx.ticket._id, users.creator.token, { amount: '1000', note: 'Too high' }, '/reply');
+      assert.equal(counter.status, 201, JSON.stringify(counter.body));
+      assert.equal(counter.body.data.status, 'estimateCountered');
+      const notYet = await api('PUT', `/tickets/${ctx.ticket._id}/escalate`, { token: users.creator.token });
+      assert.equal(notYet.status, 409);
+
+      const second = await estimate(ctx.ticket._id, users.vendor1.token, { amount: '1100' });
+      assert.equal(second.body.data.negotiation.length, 3);
+      assert.equal((await api('PUT', `/tickets/${ctx.ticket._id}/escalate`, { token: users.vendor1.token })).status, 403);
+      const escalated = await api('PUT', `/tickets/${ctx.ticket._id}/escalate`, { token: users.creator.token });
+      assert.equal(escalated.status, 200, JSON.stringify(escalated.body));
+      assert.equal(escalated.body.data.status, 'pending');
+
       const approve = await api('PUT', `/tickets/${ctx.ticket._id}/approve`, { token: users.supervisor.token });
       assert.equal(approve.status, 200);
       assert.equal(approve.body.data.status, 'approved');
+      assert.equal(approve.body.data.approvedEstimate, 1100);
       assert.equal(approve.body.data.initialApprovedBy._id, users.supervisor.id);
 
       const twice = await api('PUT', `/tickets/${ctx.ticket._id}/approve`, { token: users.supervisor.token });
@@ -427,11 +475,290 @@ describe('Muraqaba API', () => {
       assert.equal(res.status, 201, JSON.stringify(res.body));
       return res.body.data;
     };
+    const toApproval = async (ticket, vendor) => {
+      await estimate(ticket._id, vendor.token, { amount: '800' });
+      const res = await api('PUT', `/tickets/${ticket._id}/escalate`, { token: users.creator.token });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body.data;
+    };
     const newTicket = async (busId) => {
-      const res = await api('POST', '/tickets', { token: users.creator.token, body: { busId, serviceType: 'minor' } });
+      const res = await api('POST', '/tickets', { token: users.creator.token, body: { busId, serviceType: 'minor', currentReading: 52000 } });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       return res.body.data;
     };
+
+    test('minor and major services take the vendor price per km and skip the negotiation', async () => {
+      const email = `priced-${run}@test.muraqaba.dev`;
+      const created = await api('POST', '/vendors', {
+        token: users.creator.token,
+        body: { name: 'Priced Motors', email, password: PASSWORD, serviceRates: { minor: 0.5, major: 1 } },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const vendor = created.body.data;
+      assert.equal(vendor.serviceRates.minor, 0.5);
+      const bus = await newBus('PRICE', vendor._id);
+      const raise = (body) => api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, ...body } });
+
+      const first = await raise({ serviceType: 'minor', currentReading: 10000 });
+      assert.equal(first.status, 201, JSON.stringify(first.body));
+      assert.equal(first.body.data.status, 'pending');
+      assert.deepEqual(first.body.data.agreedPrice, { rate: 0.5, km: 10000, amount: 5000 });
+
+      const second = await raise({ serviceType: 'minor', currentReading: 12000 });
+      assert.deepEqual(second.body.data.agreedPrice, { rate: 0.5, km: 2000, amount: 1000 });
+
+      const lower = await raise({ serviceType: 'minor', currentReading: 11000 });
+      assert.equal(lower.status, 400);
+      assert.equal(lower.body.errors[0].field, 'currentReading');
+
+      const major = await raise({ serviceType: 'major', currentReading: 12000 });
+      assert.deepEqual(major.body.data.agreedPrice, { rate: 1, km: 12000, amount: 12000 });
+
+      const repair = await raise({ serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 12000 });
+      assert.equal(repair.body.data.status, 'sentToVendor');
+      assert.equal(repair.body.data.agreedPrice, undefined);
+
+      const reply = await estimate(second.body.data._id, users.creator.token, { note: 'Can we talk?' }, '/reply');
+      assert.equal(reply.status, 409);
+      const returned = await api('PUT', `/tickets/${second.body.data._id}/return`, { token: users.supervisor.token, body: { reason: 'Check it' } });
+      assert.equal(returned.status, 200);
+      const noTalks = await estimate(second.body.data._id, users.creator.token, { note: 'Can we talk?' }, '/reply');
+      assert.equal(noTalks.status, 409);
+      const again = await api('PUT', `/tickets/${second.body.data._id}/escalate`, { token: users.creator.token });
+      assert.equal(again.status, 200, JSON.stringify(again.body));
+      const approved = await api('PUT', `/tickets/${second.body.data._id}/approve`, { token: users.supervisor.token });
+      assert.equal(approved.body.data.approvedEstimate, 1000);
+      assert.equal(approved.body.data.status, 'approved');
+
+      const setRates = (token, body) => api('PUT', `/vendors/${vendor._id}/rates`, { token, body });
+      assert.equal((await setRates(users.supervisor.token, { minor: 2, major: 3 })).status, 403);
+      assert.equal((await setRates(users.creator.token, { minor: 0, major: 3 })).status, 400);
+      const saved = await setRates(users.creator.token, { minor: 2, major: 3 });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.data.serviceRates.major, 3);
+      assert.equal((await api('PUT', `/vendors/${users.supervisor.id}/rates`, { token: users.creator.token, body: { minor: 2, major: 3 } })).status, 404);
+    });
+
+    test('daily km sheet: creators fill it, supervisors read it, nobody else sees it', async () => {
+      const bus = await newBus('KM', users.vendor1.id);
+      const sheet = (token, query = '') => api('GET', `/sheets/readings${query}`, { token });
+      assert.equal((await sheet(users.vendor1.token)).status, 403);
+      assert.equal((await sheet(users.purchasing.token)).status, 403);
+      assert.equal((await sheet(users.creator.token, '?month=2026-13')).status, 400);
+      const read = await sheet(users.supervisor.token);
+      assert.equal(read.status, 200, JSON.stringify(read.body));
+      const { today, days } = read.body.data;
+      assert.ok(days.includes(today));
+      assert.ok(days.length >= 28);
+
+      const put = (token, body) => api('PUT', '/sheets/readings', { token, body });
+      assert.equal((await put(users.supervisor.token, { busId: bus._id, date: today, km: 100 })).status, 403);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: '2099-01-01', km: 100 })).status, 400);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, km: -1 })).status, 400);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, km: 1.5 })).status, 400);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: '2026-02-31', km: 5 })).status, 400);
+      assert.equal((await put(users.creator.token, { busId: '0123456789abcdef01234567', date: today, km: 5 })).status, 404);
+
+      const saved = await put(users.creator.token, { busId: bus._id, date: today, km: 4321 });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const row = async () => (await sheet(users.creator.token)).body.data.buses.find((b) => b._id === bus._id);
+      assert.equal((await row()).readings[today], 4321);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, km: 5000 })).status, 200);
+      assert.equal((await row()).readings[today], 5000);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, km: null })).status, 200);
+      assert.equal((await row()).readings[today], undefined);
+
+      await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'other', currentReading: 7777 } });
+      assert.equal((await row()).readings[today], 7777);
+      await put(users.creator.token, { busId: bus._id, date: today, km: 7800 });
+      await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'other', currentReading: 7900 } });
+      assert.equal((await row()).readings[today], 7800, 'a VSR must not overwrite what the creator typed');
+    });
+
+    test('daily status sheet: VSRs pick it, it carries forward and scrapping stays locked', async () => {
+      const bus = await newBus('STAT', users.vendor1.id);
+      const sheet = async () => (await api('GET', '/sheets/status', { token: users.supervisor.token })).body.data;
+      const row = async () => (await sheet()).buses.find((b) => b._id === bus._id);
+      const { today, days } = await sheet();
+      const todayIndex = days.indexOf(today);
+      const put = (token, body) => api('PUT', '/sheets/status', { token, body });
+      const raise = (body) => api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, currentReading: 100, ...body } });
+
+      assert.equal((await row()).cells[todayIndex].status, 'ready');
+      assert.equal((await api('GET', '/sheets/status', { token: users.vendor1.token })).status, 403);
+      assert.equal((await put(users.supervisor.token, { busId: bus._id, date: today, status: 'ready' })).status, 403);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, status: 'flying' })).status, 400);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: '2099-01-01', status: 'ready' })).status, 400);
+
+      const picked = [
+        [{ serviceType: 'minor' }, 'maintenance'],
+        [{ serviceType: 'major' }, 'maintenance'],
+        [{ serviceType: 'other' }, 'maintenance'],
+        [{ serviceType: 'repair', repairCategory: 'ENGINE' }, 'repair'],
+        [{ serviceType: 'repair', repairCategory: 'TYRE REPLACEMENT' }, 'tyreChange'],
+        [{ serviceType: 'repair', repairCategory: 'BATTERY REPLACEMENT' }, 'batteryChange'],
+        [{ serviceType: 'repair', repairCategory: 'ACCIDENT' }, 'accident'],
+      ];
+      for (const [body, status] of picked) {
+        const res = await raise(body);
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        const cell = (await row()).cells[todayIndex];
+        assert.equal(cell.status, status, JSON.stringify(body));
+        assert.equal(cell.source, 'vsr');
+      }
+
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: days[0], status: 'removed' })).status, 200);
+      const carried = await row();
+      assert.equal(carried.cells[0].status, 'removed');
+      assert.equal(carried.cells[0].source, 'manual');
+      if (todayIndex > 1) assert.equal(carried.cells[1].status, 'removed', 'a status holds until the next change');
+      if (todayIndex + 1 < days.length) assert.equal(carried.cells[todayIndex + 1], null, 'future days stay empty');
+
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, status: 'scrapping' })).status, 200);
+      await raise({ serviceType: 'repair', repairCategory: 'ENGINE' });
+      assert.equal((await row()).cells[todayIndex].status, 'scrapping', 'a VSR must not override scrapping');
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, status: 'ready' })).status, 200);
+      assert.equal((await row()).cells[todayIndex].status, 'ready');
+
+      const whole = await sheet();
+      const countedToday = Object.values(whole.summary).reduce((sum, counts) => sum + counts[todayIndex], 0);
+      assert.equal(countedToday, whole.buses.length, 'the day summary accounts for every bus');
+    });
+
+    test('repair tracker follows a VSR through its stages and counts buses per day', async () => {
+      const bus = await newBus('TRACK', users.vendor1.id);
+      const sheet = async () => (await api('GET', '/sheets/repairs', { token: users.supervisor.token })).body.data;
+      assert.equal((await api('GET', '/sheets/repairs', { token: users.vendor1.token })).status, 403);
+      const raised = await api('POST', '/tickets', {
+        token: users.creator.token,
+        body: { busId: bus._id, serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 100 },
+      });
+      const id = raised.body.data._id;
+      const stage = async () => (await sheet()).rows.find((r) => r._id === id)?.stage;
+
+      assert.equal(await stage(), 'waitingEstimate');
+      const before = await sheet();
+      const todayIndex = before.days.indexOf(before.today);
+      assert.ok(before.summary.waitingEstimate[todayIndex] >= 1);
+      if (todayIndex + 1 < before.days.length) assert.equal(before.summary.waitingEstimate[todayIndex + 1], null);
+
+      await estimate(id, users.vendor1.token, { amount: '900' });
+      assert.equal(await stage(), 'negotiation');
+      await api('PUT', `/tickets/${id}/escalate`, { token: users.creator.token });
+      assert.equal(await stage(), 'waitingApproval');
+      await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token });
+      assert.equal(await stage(), 'estimateApproved');
+      await api('PUT', `/tickets/${id}/acknowledge`, { token: users.vendor1.token });
+      assert.equal(await stage(), 'goneForRepair');
+      await api('POST', `/tickets/${id}/invoice`, { token: users.vendor1.token, body: { amount: 900, description: 'Engine work and labour', invoiceNumber: `INV-${run}` } });
+      assert.equal(await stage(), 'invoicing');
+      await api('PUT', `/tickets/${id}/invoice/accept`, { token: users.supervisor.token });
+      await api('PUT', `/tickets/${id}/complete`, { token: users.vendor1.token });
+      const finished = await sheet();
+      const row = finished.rows.find((r) => r._id === id);
+      assert.equal(row.stage, 'received');
+      assert.equal(row.estimate, 900);
+      assert.ok(finished.summary.received[todayIndex] >= 1);
+
+      const minor = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'minor', currentReading: 200 } });
+      assert.equal((await sheet()).rows.find((r) => r._id === minor.body.data._id), undefined, 'minor services are not in the repair process');
+    });
+
+    test('estimate files upload, stay with those allowed to see them and reject bad types', async () => {
+      const ticket = await newTicket(ctx.bus1._id);
+      const pdf = new File(['%PDF-1.4 quote'], 'عرض سعر.pdf', { type: 'application/pdf' });
+      const sent = await estimate(ticket._id, users.vendor1.token, { amount: '500' }, '', [pdf]);
+      assert.equal(sent.status, 201, JSON.stringify(sent.body));
+      const [file] = sent.body.data.negotiation[0].attachments;
+      assert.equal(file.name, 'عرض سعر.pdf');
+      assert.equal(file.mimeType, 'application/pdf');
+
+      const url = `/tickets/${ticket._id}/attachments/${file._id}`;
+      const fetchFile = (token) => fetch(`${BASE}${url}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      const ok = await fetchFile(users.creator.token);
+      assert.equal(ok.status, 200);
+      assert.equal(await ok.text(), '%PDF-1.4 quote');
+      assert.match(ok.headers.get('content-disposition'), /^attachment/);
+      assert.equal((await fetchFile(users.vendor2.token)).status, 404);
+      assert.equal((await fetchFile(users.purchasing.token)).status, 404);
+      assert.equal((await fetchFile()).status, 401);
+
+      const script = new File(['<script>'], 'quote.html', { type: 'application/pdf' });
+      const refused = await estimate(ticket._id, users.creator.token, { note: 'See this' }, '/reply', [script]);
+      assert.equal(refused.status, 400);
+      assert.equal(refused.body.errors[0].field, 'attachments');
+      const tooBig = new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'big.pdf');
+      assert.equal((await estimate(ticket._id, users.creator.token, { note: 'See this' }, '/reply', [tooBig])).status, 400);
+    });
+
+    test('a supervisor returns an escalated ticket with a reason and the creator takes it back', async () => {
+      const ticket = await toApproval(await newTicket(ctx.bus1._id), users.vendor1);
+      const path = `/tickets/${ticket._id}`;
+      const send = (token, reason) => api('PUT', `${path}/return`, { token, body: { reason } });
+
+      assert.equal((await send(users.creator.token, 'Wrong')).status, 403);
+      assert.equal((await send(users.supervisor.token, '   ')).status, 400);
+      assert.equal((await send(users.supervisor.token, 'x'.repeat(501))).status, 400);
+
+      const corrected = { busId: ctx.bus1._id, serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 53000, description: 'Corrected' };
+      const tooEarly = await api('PUT', `${path}/details`, { token: users.creator.token, body: corrected });
+      assert.equal(tooEarly.status, 409);
+
+      const returned = await send(users.supervisor.token, 'Reading looks wrong');
+      assert.equal(returned.status, 200, JSON.stringify(returned.body));
+      assert.equal(returned.body.data.status, 'returned');
+      assert.equal(returned.body.data.history.at(-1).note, 'Reading looks wrong');
+      assert.equal(returned.body.data.returnReason, 'Reading looks wrong');
+
+      const vendorView = await api('GET', path, { token: users.vendor1.token });
+      assert.equal(vendorView.body.data.returnReason, undefined);
+      assert.ok(!JSON.stringify(vendorView.body).includes('Reading looks wrong'));
+      const vendorList = await api('GET', '/tickets?limit=100', { token: users.vendor1.token });
+      assert.ok(!JSON.stringify(vendorList.body).includes('Reading looks wrong'));
+
+      const approve = await api('PUT', `${path}/approve`, { token: users.supervisor.token });
+      assert.equal(approve.status, 409);
+
+      const vendorCannot = await api('PUT', `${path}/details`, { token: users.vendor1.token, body: corrected });
+      assert.equal(vendorCannot.status, 403);
+      const badReading = await api('PUT', `${path}/details`, { token: users.creator.token, body: { ...corrected, currentReading: -1 } });
+      assert.equal(badReading.status, 400);
+      const newVendor = await api('PUT', `${path}/details`, { token: users.creator.token, body: { ...corrected, vendorId: users.vendor2.id } });
+      assert.equal(newVendor.status, 409);
+
+      const saved = await api('PUT', `${path}/details`, { token: users.creator.token, body: corrected });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.data.status, 'returned');
+      assert.equal(saved.body.data.currentReading, 53000);
+      assert.equal(saved.body.data.repairCategory, 'ENGINE');
+      assert.equal(saved.body.data.vendorId._id, users.vendor1.id);
+
+      const reply = await estimate(ticket._id, users.creator.token, { note: 'Please lower the price' }, '/reply');
+      assert.equal(reply.body.data.status, 'estimateCountered');
+      await estimate(ticket._id, users.vendor1.token, { amount: '700' });
+      const again = await api('PUT', `${path}/escalate`, { token: users.creator.token });
+      assert.equal(again.body.data.status, 'pending');
+      assert.equal(again.body.data.returnReason, undefined);
+      const approved = await api('PUT', `${path}/approve`, { token: users.supervisor.token });
+      assert.equal(approved.status, 200);
+      assert.equal(approved.body.data.approvedEstimate, 700);
+    });
+
+    test('the creator can send a ticket to a vendor other than the bus vendor', async () => {
+      const raise = (vendorId) =>
+        api('POST', '/tickets', { token: users.creator.token, body: { busId: ctx.bus1._id, serviceType: 'minor', currentReading: 52000, vendorId } });
+
+      const res = await raise(users.vendor2.id);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      assert.equal(res.body.data.vendorId._id, users.vendor2.id);
+      assert.equal((await api('GET', `/tickets/${res.body.data._id}`, { token: users.vendor2.token })).status, 200);
+      assert.equal((await api('GET', `/tickets/${res.body.data._id}`, { token: users.vendor1.token })).status, 404);
+
+      assert.equal((await raise(users.supervisor.id)).status, 400);
+      assert.equal((await raise('0123456789abcdef01234567')).status, 404);
+      assert.equal((await raise('not-an-id')).status, 400);
+      assert.equal((await raise([users.vendor2.id])).status, 400);
+    });
 
     test('staff roles cannot self-register, including through an array value', async () => {
       const email = `escalate-${run}@test.muraqaba.dev`;
@@ -484,7 +811,7 @@ describe('Muraqaba API', () => {
 
     test('simultaneous invoice submissions: exactly one wins and no orphan invoices remain', async () => {
       const bus = await newBus('RACE', users.vendor2.id);
-      const ticket = await newTicket(bus._id);
+      const ticket = await toApproval(await newTicket(bus._id), users.vendor2);
       await api('PUT', `/tickets/${ticket._id}/approve`, { token: users.supervisor.token });
       await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor2.token });
 

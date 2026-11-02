@@ -7,6 +7,12 @@ import {
   getCompletedTickets,
   getTicketById,
   approveTicket,
+  returnTicket,
+  correctTicketDetails,
+  submitEstimate,
+  replyToEstimate,
+  escalateTicket,
+  downloadAttachment,
   acknowledgeTicket,
   submitInvoice,
   acceptInvoice,
@@ -20,9 +26,15 @@ import {
   validateInvoiceSubmit,
   validateInvoiceReject,
   validateTransitionNote,
+  validateTicketReturn,
+  validateEstimate,
+  validateEstimateReply,
+  validateAttachmentParams,
   validateObjectId,
   validateTicketListQuery,
 } from '../middleware/validationMiddleware.js';
+
+import { parseAttachments } from '../utils/uploads.js';
 
 const router = express.Router();
 
@@ -42,9 +54,15 @@ router.get('/completed', validateTicketListQuery, getCompletedTickets);
 
 // Single ticket (vendors only see their own)
 router.get('/:id', validateObjectId, getTicketById);
+router.get('/:id/attachments/:attachmentId', validateAttachmentParams, downloadAttachment);
 
 // Lifecycle transitions
 router.put('/:id/approve', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, approveTicket);
+router.put('/:id/return', roleMiddleware(['supervisor']), validateObjectId, validateTicketReturn, returnTicket);
+router.put('/:id/details', roleMiddleware(CREATORS), validateObjectId, validateTicketCreate, correctTicketDetails);
+router.post('/:id/estimate', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateEstimate, submitEstimate);
+router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, parseAttachments, validateEstimateReply, replyToEstimate);
+router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
 router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateTransitionNote, acknowledgeTicket);
 router.post('/:id/invoice', roleMiddleware(['vendor']), validateObjectId, validateInvoiceSubmit, submitInvoice);
 router.put('/:id/invoice/accept', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, acceptInvoice);

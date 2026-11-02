@@ -96,6 +96,9 @@ const ticket = {
   properties: {
     _id: objectId, busId: bus, serviceType: { type: 'string', enum: SERVICE_TYPES },
     repairCategory: { type: 'string', enum: REPAIR_CATEGORIES }, description: { type: 'string' },
+    currentReading: { type: 'integer', minimum: 0, description: 'Odometer in km when the ticket was raised' },
+    agreedPrice: { type: 'object', description: 'Minor and major services: the vendor rate frozen at raising', properties: { rate: { type: 'number' }, km: { type: 'number' }, amount: { type: 'number' } } },
+    approvedEstimate: { type: 'number' },
     vendorId: user, createdBy: user, status: { type: 'string', enum: TICKET_STATUSES },
     history: {
       type: 'array',
@@ -146,7 +149,7 @@ const spec = {
   },
   servers: [{ url: 'http://localhost:5000', description: 'Local development' }],
   tags: [
-    { name: 'Health' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Vendors' }, { name: 'Buses' }, { name: 'Tickets' }, { name: 'Repair Requests' },
+    { name: 'Health' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Vendors' }, { name: 'Buses' }, { name: 'Tickets' }, { name: 'Repair Requests' }, { name: 'Sheets' },
   ],
   components: {
     securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
@@ -187,6 +190,16 @@ const spec = {
         response: envelope(ref('User')), status: 201, more: pick(400, 403, 409),
       }),
     },
+    '/api/vendors/{id}/rates': { put: op('Vendors', 'Set the agreed AED per km for minor and major services', ['serviceCreator'], { params: [idParam], body: { type: 'object', required: ['minor', 'major'], properties: { minor: { type: 'number' }, major: { type: 'number' } } }, response: envelope(ref('User')), more: pick(400, 403, 404) }) },
+    '/api/sheets/readings': {
+      get: op('Sheets', 'Daily km readings for every bus in a month', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
+      put: op('Sheets', 'Save or clear one day of a bus (km: null clears it)', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date'], properties: { busId: objectId, date: { type: 'string' }, km: { type: 'integer', nullable: true } } }, response: { type: 'object' }, more: pick(400, 403, 404) }),
+    },
+    '/api/sheets/status': {
+      get: op('Sheets', 'Daily status of every bus in a month, with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
+      put: op('Sheets', 'Change a bus status from a day onward', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date', 'status'], properties: { busId: objectId, date: { type: 'string' }, status: { type: 'string' } } }, response: { type: 'object' }, more: pick(400, 403, 404) }),
+    },
+    '/api/sheets/repairs': { get: op('Sheets', 'Repair process list with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }) },
     '/api/vendors/tickets': { get: op('Vendors', 'Tickets assigned to the signed-in vendor', ['vendor'], { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
     '/api/buses': {
       get: op('Buses', 'List buses (vendors see only their own)', ROLES, { response: listEnvelope(ref('Bus')) }),
@@ -195,12 +208,14 @@ const spec = {
     '/api/buses/{id}': { get: op('Buses', 'Bus details with open ticket count', ['serviceCreator', 'supervisor', 'purchaseManager'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }) },
     '/api/tickets': {
       get: op('Tickets', 'List tickets visible to the caller', ROLES, { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(400) }),
-      post: op('Tickets', 'Raise a ticket (vendor is taken from the bus)', ['serviceCreator', 'supervisor'], {
+      post: op('Tickets', 'Raise a ticket (vendor defaults to the bus vendor)', ['serviceCreator', 'supervisor'], {
         body: {
-          type: 'object', required: ['busId', 'serviceType'],
+          type: 'object', required: ['busId', 'serviceType', 'currentReading'],
           properties: {
             busId: objectId, serviceType: { type: 'string', enum: SERVICE_TYPES },
             repairCategory: { type: 'string', enum: REPAIR_CATEGORIES, description: 'Required when serviceType is repair' },
+            currentReading: { type: 'integer', minimum: 0, description: 'Odometer in km' },
+            vendorId: { ...objectId, description: 'Defaults to the vendor assigned to the bus' },
             description: { type: 'string', maxLength: 1000 },
           },
         },
@@ -212,6 +227,11 @@ const spec = {
     '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: pageQuery, response: listEnvelope(ref('Ticket')) }) },
     '/api/tickets/{id}': { get: op('Tickets', 'Ticket detail with full invoice history', ROLES, { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 404) }) },
     '/api/tickets/{id}/approve': { put: op('Tickets', 'Approve a pending ticket', ['supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
+    '/api/tickets/{id}/return': { put: op('Tickets', 'Return a pending ticket to the creator', ['supervisor'], { params: [idParam], body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', maxLength: 500 } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/details': { put: op('Tickets', 'Correct the details of a returned ticket', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/estimate': { post: op('Tickets', 'Vendor sends an estimate (multipart: amount, note, attachments)', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/estimate/reply': { post: op('Tickets', 'Creator replies to an estimate (multipart: amount, note, attachments)', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/escalate': { put: op('Tickets', 'Send the latest estimate to the supervisor', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
     '/api/tickets/{id}/acknowledge': { put: op('Tickets', 'Vendor accepts an approved ticket', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
     '/api/tickets/{id}/invoice': {
       post: op('Tickets', 'Vendor submits (or resubmits) an invoice', ['vendor'], {

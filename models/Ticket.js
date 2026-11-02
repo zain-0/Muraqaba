@@ -9,9 +9,14 @@ export const REPAIR_CATEGORIES = [
   'BODY',
   'BATTERY REPLACEMENT',
   'TYRE REPLACEMENT',
+  'ACCIDENT',
 ];
 export const TICKET_STATUSES = [
-  'pending', // created, waiting for supervisor approval
+  'sentToVendor', // created, waiting for the vendor's estimate
+  'estimateSubmitted', // vendor sent an estimate; the creator replies or escalates it
+  'estimateCountered', // creator replied; waiting for the vendor's updated estimate
+  'pending', // creator escalated the estimate, waiting for supervisor approval
+  'returned', // supervisor sent it back with a reason; the creator corrects, replies or escalates again
   'approved', // supervisor approved, waiting for the vendor to acknowledge
   'acknowledged', // vendor accepted the job; work in progress, waiting for an invoice
   'invoiceSubmitted', // vendor submitted an invoice, waiting for supervisor review
@@ -33,6 +38,35 @@ const HistoryEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const AttachmentSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  size: { type: Number, required: true },
+  mimeType: { type: String, required: true },
+});
+
+// One message in the estimate negotiation: the vendor's estimate or the creator's reply.
+const NegotiationRoundSchema = new mongoose.Schema(
+  {
+    from: { type: String, enum: ['vendor', 'creator'], required: true },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    amount: { type: Number, min: 0 }, // optional on a creator's reply
+    note: { type: String, trim: true, maxlength: 1000 },
+    attachments: { type: [AttachmentSchema], default: [] },
+    at: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+// Minor and major services: the vendor's agreed rate, frozen when the ticket is raised.
+const AgreedPriceSchema = new mongoose.Schema(
+  {
+    rate: { type: Number, required: true, min: 0 }, // AED per km
+    km: { type: Number, required: true, min: 0 },
+    amount: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
 const TicketSchema = new mongoose.Schema(
   {
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', required: true, index: true },
@@ -45,12 +79,18 @@ const TicketSchema = new mongoose.Schema(
       },
     },
     description: { type: String, trim: true, maxlength: 1000 },
+    // Odometer in km when the ticket was raised. The API requires it; older tickets have none.
+    currentReading: { type: Number, min: 0 },
 
-    // Always derived from the assigned vendor of the bus at creation time.
+    // The vendor doing the work: the bus's vendor unless the creator chose another.
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
 
-    status: { type: String, enum: TICKET_STATUSES, default: 'pending', index: true },
+    status: { type: String, enum: TICKET_STATUSES, default: 'sentToVendor', index: true },
+    negotiation: { type: [NegotiationRoundSchema], default: [] },
+    agreedPrice: AgreedPriceSchema,
+    approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved
+    returnReason: { type: String, trim: true, maxlength: 500 }, // never shown to vendors
     history: { type: [HistoryEntrySchema], default: [] },
 
     initialApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -110,6 +150,11 @@ TicketSchema.methods.transition = function transition(status, userId, note) {
     default:
       break;
   }
+};
+
+/** The vendor's most recent estimate, which is what gets escalated and approved. */
+TicketSchema.methods.latestEstimate = function latestEstimate() {
+  return [...this.negotiation].reverse().find((round) => round.from === 'vendor');
 };
 
 const Ticket = mongoose.model('Ticket', TicketSchema);

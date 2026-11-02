@@ -7,7 +7,7 @@ import { BUS_POPULATE } from '../utils/query.js';
 
 const scopeForRole = (user) => (user.role === 'vendor' ? { vendor: user._id } : {});
 
-const assertVendorExists = async (vendorId) => {
+export const assertVendorExists = async (vendorId) => {
   const vendor = await User.findById(vendorId);
   if (!vendor) throw new AppError('Vendor not found', 404, 'NOT_FOUND');
   if (vendor.role !== 'vendor') throw new AppError('Selected user is not a vendor', 400, 'NOT_A_VENDOR');

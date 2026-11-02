@@ -14,7 +14,11 @@ export const getProfile = asyncHandler(async (req, res) => {
 const countByStatus = async (filter) => {
   const rows = await Ticket.aggregate([{ $match: filter }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
   const counts = {
+    sentToVendor: 0,
+    estimateSubmitted: 0,
+    estimateCountered: 0,
     pending: 0,
+    returned: 0,
     approved: 0,
     acknowledged: 0,
     invoiceSubmitted: 0,
@@ -49,7 +53,7 @@ const serviceCreatorDashboard = async (user) => {
     fleet: { buses, busesNeedingService: busesDue },
     repairRequests: { pending: pendingRepairRequests },
     // Things only this role can move forward.
-    actionRequired: pendingRepairRequests + busesDue,
+    actionRequired: all.estimateSubmitted + all.returned + pendingRepairRequests + busesDue,
   };
 };
 
@@ -85,7 +89,7 @@ const vendorDashboard = async (user) => {
     tickets,
     fleet: { buses, busesNeedingService: busesDue },
     repairRequests: rr,
-    actionRequired: tickets.approved + tickets.acknowledged + tickets.invoiceRejected + tickets.invoiceAccepted,
+    actionRequired: tickets.sentToVendor + tickets.estimateCountered + tickets.approved + tickets.acknowledged + tickets.invoiceRejected + tickets.invoiceAccepted,
   };
 };
 

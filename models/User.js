@@ -9,6 +9,11 @@ const UserSchema = new mongoose.Schema(
     // Never returned by default. Controllers that need it must call .select('+password').
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ROLES, required: true, index: true },
+    // Vendors only: the agreed AED per km for each kind of service.
+    serviceRates: {
+      minor: { type: Number, min: 0 },
+      major: { type: Number, min: 0 },
+    },
   },
   {
     timestamps: true,
