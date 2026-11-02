@@ -1,9 +1,9 @@
 /**
  * Seeds a development database with one account per role, two vendors, a small fleet,
- * repair requests, and tickets at every stage of the lifecycle so each dashboard has data.
+ * and tickets at every stage of the lifecycle so each dashboard has data.
  *
  *   npm run seed          # adds demo data if the demo accounts do not exist yet
- *   npm run seed:reset    # wipes users, buses, tickets, invoices and repair requests first
+ *   npm run seed:reset    # wipes users, buses, tickets, invoices and the daily sheets first
  *
  * All demo accounts share the password in SEED_PASSWORD (default: Password123!).
  */
@@ -15,7 +15,6 @@ import User from '../models/User.js';
 import Bus from '../models/Bus.js';
 import Ticket from '../models/Ticket.js';
 import Invoice from '../models/Invoice.js';
-import RepairRequest from '../models/RepairRequest.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { uaeDay } from '../utils/uaeTime.js';
@@ -42,7 +41,7 @@ async function main() {
   await connectDB({ maxAttempts: 3 });
 
   if (reset) {
-    await Promise.all([User, Bus, Ticket, Invoice, RepairRequest, BusDailyReading, BusStatusChange].map((M) => M.deleteMany({})));
+    await Promise.all([User, Bus, Ticket, Invoice, BusDailyReading, BusStatusChange].map((M) => M.deleteMany({})));
     console.log('Cleared existing data');
   } else if (await User.exists({ email: ACCOUNTS[0].email })) {
     console.log('Demo accounts already exist. Run with --reset to recreate everything.');
@@ -225,14 +224,9 @@ async function main() {
     }
   }
 
-  await RepairRequest.create([
-    { busId: bus101._id, vendorId: vendor1._id, repairCategory: 'MECHANICAL', description: 'Grinding noise from the front axle under braking; needs inspection before weekend routes.' },
-    { busId: bus103._id, vendorId: vendor2._id, repairCategory: 'BODY', description: 'Rear bumper cracked after depot reversing incident; water getting into the engine bay.' },
-  ]);
-
   console.log('\nSeed complete. Demo accounts (password: %s):', PASSWORD);
   ACCOUNTS.forEach((a) => console.log(`  ${a.role.padEnd(16)} ${a.email}`));
-  console.log(`\nBuses: ${buses.length}, VSRs: ${await Ticket.countDocuments()}, repair requests: ${await RepairRequest.countDocuments()}`);
+  console.log(`\nBuses: ${buses.length}, VSRs: ${await Ticket.countDocuments()}`);
   await mongoose.connection.close();
 }
 

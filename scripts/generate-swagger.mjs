@@ -112,16 +112,6 @@ const ticket = {
     createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   },
 };
-const repairRequest = {
-  type: 'object',
-  properties: {
-    _id: objectId, busId: bus, vendorId: user, description: { type: 'string' },
-    repairCategory: { type: 'string', enum: REPAIR_CATEGORIES }, status: { type: 'string', enum: ['pending', 'resolved', 'rejected'] },
-    resolvedBy: user, resolvedAt: { type: 'string', format: 'date-time' },
-    rejectedBy: user, rejectedAt: { type: 'string', format: 'date-time' }, resolutionNote: { type: 'string' },
-    createdAt: { type: 'string', format: 'date-time' },
-  },
-};
 const authResponse = { type: 'object', properties: { success: { type: 'boolean' }, token: { type: 'string' }, user } };
 const credentials = { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string', minLength: 8 } } };
 
@@ -142,14 +132,14 @@ const spec = {
       '',
       '**Ticket lifecycle:** pending → approved (supervisor) → acknowledged (vendor) → invoiceSubmitted (vendor) → invoiceAccepted or invoiceRejected (supervisor) → completed (vendor). A rejected invoice goes back to the vendor for resubmission.',
       '',
-      '**Roles:** serviceCreator manages vendors, buses and raises tickets; supervisor approves tickets and reviews invoices; vendor acknowledges, invoices and completes work on buses assigned to them and can raise repair requests; purchaseManager has read access to invoiced tickets.',
+      '**Roles:** serviceCreator manages vendors, buses and raises tickets; supervisor approves tickets and reviews invoices; vendor acknowledges, invoices and completes work on tickets assigned to them; purchaseManager has read access to invoiced tickets.',
       '',
       'All list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`.',
     ].join('\n'),
   },
   servers: [{ url: 'http://localhost:5000', description: 'Local development' }],
   tags: [
-    { name: 'Health' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Vendors' }, { name: 'Buses' }, { name: 'Tickets' }, { name: 'Repair Requests' }, { name: 'Sheets' },
+    { name: 'Health' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Vendors' }, { name: 'Buses' }, { name: 'Tickets' }, { name: 'Sheets' },
   ],
   components: {
     securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
@@ -163,7 +153,7 @@ const spec = {
           errors: { type: 'array', items: { type: 'object', properties: { field: { type: 'string' }, message: { type: 'string' } } } },
         },
       },
-      User: user, Bus: bus, BusInput: busInput, Ticket: ticket, Invoice: invoice, RepairRequest: repairRequest,
+      User: user, Bus: bus, BusInput: busInput, Ticket: ticket, Invoice: invoice,
     },
   },
   paths: {
@@ -202,7 +192,7 @@ const spec = {
     '/api/sheets/repairs': { get: op('Sheets', 'Repair process list with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }) },
     '/api/vendors/tickets': { get: op('Vendors', 'Tickets assigned to the signed-in vendor', ['vendor'], { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
     '/api/buses': {
-      get: op('Buses', 'List buses (vendors see only their own)', ROLES, { response: listEnvelope(ref('Bus')) }),
+      get: op('Buses', 'List the fleet', ['serviceCreator', 'supervisor', 'purchaseManager'], { response: listEnvelope(ref('Bus')) }),
       post: op('Buses', 'Add a bus to the fleet', ['serviceCreator', 'supervisor'], { body: ref('BusInput'), response: envelope(ref('Bus')), status: 201, more: pick(400, 403, 404, 409) }),
     },
     '/api/buses/{id}': { get: op('Buses', 'Bus details with open ticket count', ['serviceCreator', 'supervisor', 'purchaseManager'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }) },
@@ -248,19 +238,6 @@ const spec = {
       }),
     },
     '/api/tickets/{id}/complete': { put: op('Tickets', 'Vendor closes the ticket after invoice acceptance', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
-    '/api/repair-requests': {
-      post: op('Repair Requests', 'Vendor flags a problem on one of their buses', ['vendor'], {
-        body: { type: 'object', required: ['busId', 'description', 'repairCategory'], properties: { busId: objectId, description: { type: 'string', minLength: 10 }, repairCategory: { type: 'string', enum: REPAIR_CATEGORIES } } },
-        response: envelope(ref('RepairRequest')), status: 201, more: pick(400, 403, 404),
-      }),
-    },
-    '/api/repair-requests/pending': { get: op('Repair Requests', 'Pending repair requests', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('RepairRequest')) }) },
-    '/api/repair-requests/{id}/status': {
-      put: op('Repair Requests', 'Resolve or reject a pending request', ['serviceCreator', 'supervisor'], {
-        params: [idParam], body: { type: 'object', required: ['status'], properties: { status: { type: 'string', enum: ['resolved', 'rejected'] }, note: { type: 'string', maxLength: 500 } } },
-        response: envelope(ref('RepairRequest')), more: pick(400, 403, 404, 409),
-      }),
-    },
   },
 };
 

@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
-import RepairRequest from '../models/RepairRequest.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 
@@ -39,28 +38,25 @@ const busesNeedingService = async (filter) => {
 };
 
 const serviceCreatorDashboard = async (user) => {
-  const [mine, all, buses, busesDue, pendingRepairRequests] = await Promise.all([
+  const [mine, all, buses, busesDue] = await Promise.all([
     countByStatus({ createdBy: user._id }),
     countByStatus({}),
     Bus.countDocuments(),
     busesNeedingService({}),
-    RepairRequest.countDocuments({ status: 'pending' }),
   ]);
   return {
     role: user.role,
     tickets: all,
     myTickets: mine,
     fleet: { buses, busesNeedingService: busesDue },
-    repairRequests: { pending: pendingRepairRequests },
     // Things only this role can move forward.
-    actionRequired: all.estimateSubmitted + all.returned + pendingRepairRequests + busesDue,
+    actionRequired: all.estimateSubmitted + all.returned + busesDue,
   };
 };
 
 const supervisorDashboard = async (user) => {
-  const [tickets, pendingRepairRequests, buses, busesDue] = await Promise.all([
+  const [tickets, buses, busesDue] = await Promise.all([
     countByStatus({}),
-    RepairRequest.countDocuments({ status: 'pending' }),
     Bus.countDocuments(),
     busesNeedingService({}),
   ]);
@@ -68,27 +64,20 @@ const supervisorDashboard = async (user) => {
     role: user.role,
     tickets,
     fleet: { buses, busesNeedingService: busesDue },
-    repairRequests: { pending: pendingRepairRequests },
-    actionRequired: tickets.pending + tickets.invoiceSubmitted + pendingRepairRequests,
+    actionRequired: tickets.pending + tickets.invoiceSubmitted,
   };
 };
 
 const vendorDashboard = async (user) => {
-  const [tickets, buses, busesDue, repairRequests] = await Promise.all([
+  const [tickets, buses, busesDue] = await Promise.all([
     countByStatus({ vendorId: user._id }),
     Bus.countDocuments({ vendor: user._id }),
     busesNeedingService({ vendor: user._id }),
-    RepairRequest.aggregate([{ $match: { vendorId: user._id } }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
   ]);
-  const rr = { pending: 0, resolved: 0, rejected: 0 };
-  repairRequests.forEach((r) => {
-    rr[r._id] = r.n;
-  });
   return {
     role: user.role,
     tickets,
     fleet: { buses, busesNeedingService: busesDue },
-    repairRequests: rr,
     actionRequired: tickets.sentToVendor + tickets.estimateCountered + tickets.approved + tickets.acknowledged + tickets.invoiceRejected + tickets.invoiceAccepted,
   };
 };

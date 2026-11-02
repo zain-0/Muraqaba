@@ -6,9 +6,9 @@ Backend for Muraqaba, a maintenance ticketing system for bus fleets. Express 5, 
 
 | Role | What they do |
 | --- | --- |
-| serviceCreator | Creates vendor accounts, adds buses (each assigned to a vendor), raises maintenance tickets, negotiates repair estimates and escalates them, sets vendor prices, fills the daily km and status sheets, marks vendor repair requests resolved or rejected |
+| serviceCreator | Creates vendor accounts, adds buses (each assigned to a vendor), raises maintenance tickets, negotiates repair estimates and escalates them, sets vendor prices, fills the daily km and status sheets |
 | supervisor | Approves or returns tickets, accepts or rejects invoices, reads the month sheets, can also add buses and raise tickets |
-| vendor | Self-registers or is added by a service creator. Sends estimates with documents, acknowledges approved tickets, submits invoices, closes completed tickets, raises repair requests |
+| vendor | Self-registers or is added by a service creator. Sends estimates with documents, acknowledges approved tickets, submits invoices, closes completed tickets |
 | purchaseManager | Read-only view of invoiced and completed tickets and totals |
 
 Ticket lifecycle:
@@ -85,7 +85,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET | /api/users/dashboard | any | Role-specific counters and `actionRequired` |
 | GET | /api/vendors | creator, supervisor | Vendor directory with bus counts |
 | POST | /api/vendors | creator | Create vendor account |
-| GET | /api/buses | any | Fleet (vendors: own buses only, for the fault form) |
+| GET | /api/buses | creator, supervisor, purchasing | Fleet |
 | POST | /api/buses | creator, supervisor | Add a bus |
 | GET | /api/buses/:id | creator, supervisor, purchasing | Details with `openTickets` |
 | GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&sort=oldest` |
@@ -107,9 +107,6 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/tickets/:id/invoice/accept | supervisor | invoiceSubmitted → invoiceAccepted |
 | PUT | /api/tickets/:id/invoice/reject | supervisor | invoiceSubmitted → invoiceRejected (`reason`) |
 | PUT | /api/tickets/:id/complete | vendor (owner) | invoiceAccepted → completed |
-| GET | /api/repair-requests/pending | creator, supervisor | Pending requests |
-| POST | /api/repair-requests | vendor | Flag a problem on an assigned bus |
-| PUT | /api/repair-requests/:id/status | creator, supervisor | Resolve or reject |
 
 ## Production notes
 
@@ -117,4 +114,4 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 - The compose MongoDB has no authentication and is bound to localhost. For a real deployment use a managed cluster or add `MONGO_INITDB_ROOT_USERNAME/PASSWORD` and credentials in `MONGO_URI`.
 - `docker compose --profile full up -d` builds and runs the API next to MongoDB; `Dockerfile` runs as a non-root user with a health check.
 - Rate limits: 300 requests / 15 min per IP overall and 20 / 15 min on login and register (override with `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`).
-- Tickets, invoices and repair requests use optimistic concurrency: when two people act on the same record at once, one succeeds and the other gets `409 INVALID_STATE`. MongoDB has no transactions on a standalone server, so paired writes are ordered so that a losing request leaves nothing behind.
+- Tickets and invoices use optimistic concurrency: when two people act on the same record at once, one succeeds and the other gets `409 INVALID_STATE`. MongoDB has no transactions on a standalone server, so paired writes are ordered so that a losing request leaves nothing behind.

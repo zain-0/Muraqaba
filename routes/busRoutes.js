@@ -9,11 +9,11 @@ const router = express.Router();
 router.use(authMiddleware);
 
 const MANAGERS = ['serviceCreator', 'supervisor'];
+const READERS = [...MANAGERS, 'purchaseManager'];
 
-// Vendors get only their own buses, to choose from when reporting a fault.
-router.get('/', getAllBuses);
+router.get('/', roleMiddleware(READERS), getAllBuses);
 router.post('/', roleMiddleware(MANAGERS), validateBusCreate, createBus);
 router.post('/create', roleMiddleware(MANAGERS), validateBusCreate, createBus); // legacy path
-router.get('/:id', roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), validateObjectId, getBusById);
+router.get('/:id', roleMiddleware(READERS), validateObjectId, getBusById);
 
 export default router;

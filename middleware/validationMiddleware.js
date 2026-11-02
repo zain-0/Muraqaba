@@ -2,7 +2,6 @@ import { body, param, query, validationResult } from 'express-validator';
 import { ROLES } from '../models/User.js';
 import { BUS_PARTS } from '../models/Bus.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES } from '../models/Ticket.js';
-import { REPAIR_REQUEST_STATUSES } from '../models/RepairRequest.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
 
 export const handleValidationErrors = (req, res, next) => {
@@ -177,24 +176,6 @@ export const validateInvoiceSubmit = [
 
 export const validateInvoiceReject = [note('reason'), handleValidationErrors];
 
-export const validateRepairRequest = [
-  str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),
-  str('description', 'Description')
-    .trim()
-    .isLength({ min: 10, max: 1000 })
-    .withMessage('Describe the problem in at least 10 characters'),
-  str('repairCategory', 'Repair category').isIn(REPAIR_CATEGORIES).withMessage('Choose a repair category'),
-  handleValidationErrors,
-];
-
-export const validateRepairRequestStatus = [
-  str('status', 'Status')
-    .isIn(REPAIR_REQUEST_STATUSES.filter((s) => s !== 'pending'))
-    .withMessage('Status must be resolved or rejected'),
-  note(),
-  handleValidationErrors,
-];
-
 export const validateObjectId = [param('id').isMongoId().withMessage('Invalid ID'), handleValidationErrors];
 
 const pageQuery = [
@@ -207,12 +188,6 @@ export const validateTicketListQuery = [
   qstr('status').isIn(TICKET_STATUSES).withMessage('Unknown status'),
   qstr('busId').isMongoId().withMessage('Invalid bus'),
   qstr('mine').isBoolean().withMessage('mine must be true or false').toBoolean(),
-  ...pageQuery,
-  handleValidationErrors,
-];
-
-export const validateRepairRequestListQuery = [
-  qstr('status').isIn(REPAIR_REQUEST_STATUSES).withMessage('Unknown status'),
   ...pageQuery,
   handleValidationErrors,
 ];

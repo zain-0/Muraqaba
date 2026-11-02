@@ -17,13 +17,6 @@ export const TICKET_POPULATE = [
   { path: 'negotiation.by', select: USER_FIELDS },
 ];
 
-export const REPAIR_REQUEST_POPULATE = [
-  { path: 'busId' },
-  { path: 'vendorId', select: USER_FIELDS },
-  { path: 'resolvedBy', select: USER_FIELDS },
-  { path: 'rejectedBy', select: USER_FIELDS },
-];
-
 export const BUS_POPULATE = [{ path: 'vendor', select: USER_FIELDS }];
 
 /**
