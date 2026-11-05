@@ -158,7 +158,7 @@ describe('invoice and forwarding', () => {
     assert.equal(received.body.data.status, 'invoiceReceived');
     assert.ok(received.body.data.invoiceReceivedAt);
 
-    assert.equal((await put(id, 'forward', users.supervisor.token)).status, 200, 'supervisors can act as creators in the API');
+    assert.equal((await put(id, 'forward', users.creator.token)).status, 200);
     const detail = await api('GET', `/tickets/${id}`, { token: users.purchasing.token });
     assert.equal(detail.status, 200, 'purchasing can read it');
     assert.equal(detail.body.data.status, 'forwardedToPurchase');

@@ -253,6 +253,7 @@ export const validateBreakdown = [
   body('parts.*.unitPrice', 'Enter a unit price, 0 or more').not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
   body('labourHours', 'Enter the labour hours, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: 100000 }).toFloat(),
   body('consumables', 'Enter the consumables and other costs, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  body('unitsFitted', 'Enter how many were fitted, above 0').optional({ values: 'null' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
   optionalText('remarks', 1000),
   handleValidationErrors,
 ];

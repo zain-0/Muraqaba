@@ -143,14 +143,16 @@ export const toAcknowledged = async (users, ticket, vendor) => {
 };
 
 /** From acknowledged to the bus being back with the creator. */
-export const fromAcknowledgedToReturned = async (users, id, vendor, { km = 6000, date } = {}) => {
+export const fromAcknowledgedToReturned = async (users, id, vendor, { km, date } = {}) => {
   const put = (path, token, body) => api('PUT', `/tickets/${id}/${path}`, { token, body });
-  ok(await put('vehicle/sent', users.creator.token));
-  ok(await put('vehicle/received', vendor.token, { km }));
-  ok(await put('work/start', vendor.token));
-  ok(await put('work/ready', vendor.token));
-  ok(await put('vehicle/release', vendor.token));
-  return ok(await put('vehicle/returned', users.creator.token, { km, date, replacedPartsReceived: true }));
+  const { currentReading = 0 } = ok(await api('GET', `/tickets/${id}`, { token: users.creator.token }));
+  const back = km ?? currentReading + 200;
+  ok(await put('vehicle/sent', users.creator.token, { date }));
+  ok(await put('vehicle/received', vendor.token, { km: Math.min(back, currentReading + 100), date }));
+  ok(await put('work/start', vendor.token, { date }));
+  ok(await put('work/ready', vendor.token, { date }));
+  ok(await put('vehicle/release', vendor.token, { date }));
+  return ok(await put('vehicle/returned', users.creator.token, { km: back, date, replacedPartsReceived: true }));
 };
 
 export const toVehicleReturned = async (users, ticket, vendor, options) => {

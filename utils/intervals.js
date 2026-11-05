@@ -37,7 +37,9 @@ export const intervalStatus = (bus, latestKm, now = new Date()) => {
   const currentKm = latestKm ?? Math.max(bus.intervals.oil.lastKm, bus.intervals.transmission.lastKm, bus.intervals.tyre.lastKm);
   const status = { currentKm };
   ['oil', 'transmission', 'tyre', 'battery'].forEach((service) => {
-    const { unit, interval, actual, left, delayed } = measure(bus, service, currentKm, now);
+    // A reading older than the last service says nothing about how far the bus has gone since.
+    const km = service === 'battery' ? currentKm : Math.max(currentKm, bus.intervals[service].lastKm);
+    const { unit, interval, actual, left, delayed } = measure(bus, service, km, now);
     const state = left === 0 ? 'overdue' : left <= DUE_SOON[unit] ? 'soon' : 'ok';
     status[service] = { unit, interval, used: Math.max(actual, 0), left, delayed, state };
   });

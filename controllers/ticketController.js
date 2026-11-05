@@ -42,19 +42,26 @@ const busForVendor = (bus) => {
   return { _id, fleetNumber, registrationNumber, chassisNumber, make, model, year };
 };
 
-// Steps whose history note is the depot's own: a return reason, a GRN or purchase invoice number.
-const HIDDEN_NOTES = ['returned', 'grnCreated', 'completed'];
 const DEPOT_STAMPS = ['grn', 'purchaseInvoice'];
+// Once the invoice is accepted a vendor only hears that it was, and later that the VSR closed.
+const DEPOT_STEPS = ['invoiceReceived', 'forwardedToPurchase', 'grnCreated'];
+
+/** What a vendor may read of one history entry. */
+const historyForVendor = (entry) => {
+  if (entry.status === 'returned') return { ...entry, note: undefined }; // the reason is internal
+  if (entry.status === 'completed') return { ...entry, note: undefined, by: undefined, effectiveAt: undefined }; // purchasing closed it
+  return entry;
+};
 
 /** Internal notes and our own figures stay with the depot, so vendors get them stripped. */
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
   if (user.role !== 'vendor') return json;
-  const { returnReason, intervalUsage, isBreakdown, breakdown, grn, purchaseInvoice, lpoDeduction, ...rest } = json;
+  const { returnReason, intervalUsage, isBreakdown, breakdown, grn, purchaseInvoice, lpoDeduction, forwardedAt, invoiceReceivedAt, ...rest } = json;
   return {
     ...rest,
     busId: busForVendor(json.busId),
-    history: (json.history || []).map((h) => (HIDDEN_NOTES.includes(h.status) ? { ...h, note: undefined } : h)),
+    history: (json.history || []).filter((entry) => !DEPOT_STEPS.includes(entry.status)).map(historyForVendor),
     signatures: (json.signatures || []).filter((stamp) => !DEPOT_STAMPS.includes(stamp.step)),
   };
 };
@@ -255,6 +262,8 @@ export const declineTicket = asyncHandler(async (req, res) => {
 export const correctTicketDetails = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'returned', `Only returned VSRs can be changed (this one is ${ticket.status})`);
+  // It travels in its parent's bus, so its bus and kind are not open to change.
+  if (ticket.parentTicket) throw new AppError('An additional job cannot be changed. Reply to the vendor or send it for approval again.', 409, 'INVALID_STATE');
   const fields = await requestFields(req.body);
   // Estimates belong to the vendor who wrote them, and a new vendor must not read a rival's prices.
   if (ticket.negotiation.length && !fields.vendorId.equals(ticket.vendorId)) {
@@ -276,7 +285,7 @@ export const submitEstimate = asyncHandler(async (req, res) => {
     const estimateNumber = ticket.negotiation.filter((round) => round.from === 'vendor').length + 1;
     ticket.negotiation.push({ from: 'vendor', by: req.user._id, amount, quotationNumber, daysToComplete, estimateNumber, note, attachments });
     ticket.daysToComplete = daysToComplete;
-    ticket.transition('estimateSubmitted', req.user._id, 'Estimate sent');
+    ticket.transition('estimateSubmitted', req.user._id, `Estimate ${estimateNumber}`);
     await ticket.save();
   });
   await respond(res, ticket, 'Estimate sent to the service creator', 201);
@@ -330,7 +339,10 @@ export const saveBreakdown = asyncHandler(async (req, res) => {
   assertStatus(ticket, ['estimateSubmitted', 'estimateCountered', 'returned'], `Parts and labour can only change while the price is open (this one is ${ticket.status})`);
   if (ticket.agreedPrice) throw new AppError('This VSR uses an agreed price, so it has no parts and labour to fill in.', 409, 'INVALID_STATE');
 
-  const { parts = [], labourHours = 0, consumables = 0, remarks } = req.body;
+  const { remarks, unitsFitted } = req.body;
+  const parts = req.body.parts ?? [];
+  const labourHours = req.body.labourHours ?? 0;
+  const consumables = req.body.consumables ?? 0;
   if (!parts.length && !labourHours && !consumables) {
     const message = 'Add at least one part, labour hours or consumables';
     throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'parts', message }]);
@@ -352,6 +364,7 @@ export const saveBreakdown = asyncHandler(async (req, res) => {
     labourTotal,
     consumables,
     quotationTotal: money(partsTotal + labourTotal + consumables),
+    unitsFitted: unitsFitted ?? undefined,
     remarks,
   };
   compareWithEstimate(ticket);

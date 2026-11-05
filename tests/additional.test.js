@@ -17,9 +17,9 @@ const addJob = (parentId, fields = JOB, token = users.vendor1.token, files = [])
 const parentAtWork = async () => {
   const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 5000 } });
   const { _id: id } = await toAcknowledged(users, raised.body.data, users.vendor1);
-  await put(id, 'vehicle/sent', users.creator.token);
+  await put(id, 'vehicle/sent', users.creator.token, { date: '2026-10-04' });
   await put(id, 'vehicle/received', users.vendor1.token, { km: 5050, date: '2026-10-05' });
-  return (await put(id, 'work/start', users.vendor1.token)).body.data;
+  return (await put(id, 'work/start', users.vendor1.token, { date: '2026-10-06' })).body.data;
 };
 /** An additional job that went through the creator and the supervisor. */
 const approvedJob = async (parent) => {
@@ -141,7 +141,7 @@ describe('additional jobs', () => {
     const parent = await parentAtWork();
     const job = await approvedJob(parent);
     assert.equal(job.status, 'vehicleReceived');
-    await put(parent._id, 'work/ready', users.vendor1.token);
+    await put(parent._id, 'work/ready', users.vendor1.token, { date: '2026-10-08' });
 
     const released = await put(parent._id, 'vehicle/release', users.vendor1.token, { date: '2026-10-09' });
     assert.equal(released.status, 200, JSON.stringify(released.body));

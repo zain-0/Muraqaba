@@ -76,15 +76,10 @@ const supervisorDashboard = async (user) => {
 };
 
 const vendorDashboard = async (user) => {
-  const [tickets, buses, busesDue] = await Promise.all([
-    countByStatus({ vendorId: user._id }),
-    Bus.countDocuments({ vendor: user._id }),
-    busesNeedingService({ vendor: user._id }),
-  ]);
+  const tickets = await countByStatus({ vendorId: user._id });
   return {
     role: user.role,
     tickets,
-    fleet: { buses, busesNeedingService: busesDue },
     actionRequired: tickets.sentToVendor + tickets.estimateCountered + tickets.approved + tickets.vehicleSent + tickets.vehicleReceived + tickets.workInProgress + tickets.readyForDelivery + tickets.vehicleReturned + tickets.invoiceRejected,
   };
 };

@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import mongoose from 'mongoose';
-import Ticket from '../models/Ticket.js';
+import Ticket, { PURCHASE_VISIBLE_STATUSES } from '../models/Ticket.js';
 import Invoice from '../models/Invoice.js';
 import { Grn, Lpo, PurchaseInvoice } from '../models/Purchase.js';
 import { assertVendorExists } from './busController.js';
@@ -21,10 +21,27 @@ const loadBatch = async (ids) => {
   return tickets;
 };
 
+/**
+ * Takes each VSR for this GRN in one atomic step, in a fixed order so two batches cannot wait
+ * on each other. Only one GRN can hold a VSR, and a batch that loses one lets go of the rest.
+ */
+const claimForGrn = async (tickets, grnId) => {
+  const inOrder = [...tickets].sort((a, b) => String(a._id).localeCompare(String(b._id)));
+  for (const ticket of inOrder) {
+    const { modifiedCount } = await Ticket.updateOne({ _id: ticket._id, status: 'forwardedToPurchase', grn: mongoose.trusted({ $exists: false }) }, { $set: { grn: grnId } });
+    if (!modifiedCount) {
+      await releaseGrnClaim(grnId);
+      throw new AppError(`${ticket.vsrNumber} has just gone on another GRN`, 409, 'INVALID_STATE');
+    }
+  }
+};
+const releaseGrnClaim = (grnId) => Ticket.updateMany({ grn: grnId }, { $unset: { grn: 1 } });
+
 // GET /api/grns/export?ticketIds=a,b  (purchasing: the batch as Excel)
 export const exportBatch = asyncHandler(async (req, res) => {
   // Express 5 parses req.query afresh on every read, so a validator cannot rewrite it.
   const tickets = await loadBatch(toIdList(req.query.ticketIds));
+  if (tickets.some((ticket) => !PURCHASE_VISIBLE_STATUSES.includes(ticket.status))) throw new AppError('One of these VSRs was not found', 404, 'NOT_FOUND');
   const book = new ExcelJS.Workbook();
   const sheet = book.addWorksheet('GRN batch');
   sheet.columns = [
@@ -76,28 +93,35 @@ export const createGrn = asyncHandler(async (req, res) => {
 
   assertCanSign(req.user);
   const when = date ?? new Date();
+  const grnId = new mongoose.Types.ObjectId();
+  await claimForGrn(tickets, grnId);
   let grn;
-  await withStoredAttachments(req.files, async (attachments) => {
-    // The number is unique, so saving the GRN first means a taken number changes no VSR.
-    grn = await Grn.create({
-      number,
-      date: when,
-      vendor: tickets[0].vendorId._id,
-      tickets: tickets.map((ticket) => ticket._id),
-      total: money(tickets.reduce((sum, ticket) => sum + (ticket.invoice?.amount ?? 0), 0)),
-      notes,
-      attachments,
-      createdBy: req.user._id,
-    });
-    await Promise.all(
-      tickets.map((ticket) => {
-        ticket.grn = grn._id;
-        stamp(ticket, req.user, 'grn');
-        ticket.transition('grnCreated', req.user._id, `GRN ${number}`, { effectiveAt: when });
-        return ticket.save();
+  try {
+    grn = await withStoredAttachments(req.files, (attachments) =>
+      Grn.create({
+        _id: grnId,
+        number,
+        date: when,
+        vendor: tickets[0].vendorId._id,
+        tickets: tickets.map((ticket) => ticket._id),
+        total: money(tickets.reduce((sum, ticket) => sum + (ticket.invoice?.amount ?? 0), 0)),
+        notes,
+        attachments,
+        createdBy: req.user._id,
       })
     );
-  });
+  } catch (err) {
+    await releaseGrnClaim(grnId); // a taken number leaves every VSR free
+    throw err;
+  }
+  const claimed = await Ticket.find({ grn: grnId });
+  await Promise.all(
+    claimed.map((ticket) => {
+      stamp(ticket, req.user, 'grn');
+      ticket.transition('grnCreated', req.user._id, `GRN ${number}`, { effectiveAt: when });
+      return ticket.save();
+    })
+  );
   res.status(201).json({ success: true, message: 'GRN created', data: grn });
 });
 
@@ -122,31 +146,40 @@ export const createPurchaseInvoice = asyncHandler(async (req, res) => {
 
   assertCanSign(req.user);
   const when = date ?? new Date();
-  const tickets = await Ticket.find({ _id: mongoose.trusted({ $in: grn.tickets }) });
+  // Taken in one atomic step, so only one purchase invoice can close this GRN.
+  const invoiceId = new mongoose.Types.ObjectId();
+  const { modifiedCount } = await Grn.updateOne({ _id: grn._id, purchaseInvoice: mongoose.trusted({ $exists: false }) }, { $set: { purchaseInvoice: invoiceId } });
+  if (!modifiedCount) throw new AppError('This GRN already has a purchase invoice', 409, 'INVALID_STATE');
+
   let invoice;
-  await withStoredAttachments(req.files, async (attachments) => {
-    invoice = await PurchaseInvoice.create({
-      number,
-      date: when,
-      grn: grn._id,
-      vendor: grn.vendor,
-      tickets: grn.tickets,
-      amount: amount ?? grn.total,
-      notes,
-      attachments,
-      createdBy: req.user._id,
-    });
-    grn.purchaseInvoice = invoice._id;
-    await grn.save();
-    await Promise.all(
-      tickets.map((ticket) => {
-        ticket.purchaseInvoice = invoice._id;
-        stamp(ticket, req.user, 'purchaseInvoice');
-        ticket.transition('completed', req.user._id, `Purchase invoice ${number}`, { effectiveAt: when });
-        return ticket.save();
+  try {
+    invoice = await withStoredAttachments(req.files, (attachments) =>
+      PurchaseInvoice.create({
+        _id: invoiceId,
+        number,
+        date: when,
+        grn: grn._id,
+        vendor: grn.vendor,
+        tickets: grn.tickets,
+        amount: amount ?? grn.total,
+        notes,
+        attachments,
+        createdBy: req.user._id,
       })
     );
-  });
+  } catch (err) {
+    await Grn.updateOne({ _id: grn._id }, { $unset: { purchaseInvoice: 1 } }); // a taken number leaves the GRN free
+    throw err;
+  }
+  const tickets = await Ticket.find({ _id: mongoose.trusted({ $in: grn.tickets }), status: 'grnCreated' });
+  await Promise.all(
+    tickets.map((ticket) => {
+      ticket.purchaseInvoice = invoice._id;
+      stamp(ticket, req.user, 'purchaseInvoice');
+      ticket.transition('completed', req.user._id, `Purchase invoice ${number}`, { effectiveAt: when });
+      return ticket.save();
+    })
+  );
   res.status(201).json({ success: true, message: 'Purchase invoice created. The VSRs are closed.', data: invoice });
 });
 

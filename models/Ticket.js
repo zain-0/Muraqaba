@@ -118,6 +118,7 @@ const BreakdownSchema = new mongoose.Schema(
     quotationTotal: { type: Number, required: true, min: 0 },
     estimateAmount: { type: Number, min: 0 },
     discount: { type: Number },
+    unitsFitted: { type: Number, min: 0 }, // tyres or batteries, for the LPO; extras on the list do not count
     remarks: { type: String, trim: true, maxlength: 1000 },
   },
   { _id: false }

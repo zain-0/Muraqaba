@@ -224,7 +224,7 @@ async function main() {
       await estimateRound(1, estimate, 'Found during the work. Needs doing before the bus goes back.');
     } else if (reached('estimateSubmitted') && !priced) {
       await estimateRound(1, Math.round(estimate * 1.15), 'Parts and labour for the job as described.');
-      step('estimateSubmitted', vendor, 'Estimate sent');
+      step('estimateSubmitted', vendor, 'Estimate 1');
     }
     if (reached('estimateCountered') && !priced && !parent) {
       ticket.negotiation.push({ from: 'creator', by: creator._id, amount: estimate, note: 'Please come down to this amount; we have similar jobs at this price.', at: when() });
@@ -233,7 +233,7 @@ async function main() {
     if (reached('pending') && !priced) {
       if (!parent) {
         await estimateRound(2, estimate, 'Agreed at this amount.');
-        step('estimateSubmitted', vendor, 'Estimate sent');
+        step('estimateSubmitted', vendor, 'Estimate 2');
       }
       ticket.breakdown = breakdownFor(bus, estimate, parts);
       sign(creator, 'escalated');

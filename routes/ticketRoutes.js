@@ -62,6 +62,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 const CREATORS = ['serviceCreator', 'supervisor'];
+const SERVICE_CREATOR = ['serviceCreator'];
 
 // Create
 router.post('/', roleMiddleware(CREATORS), validateTicketCreate, createTicket);
@@ -86,19 +87,19 @@ router.put('/:id/details', roleMiddleware(CREATORS), validateObjectId, validateT
 router.post('/:id/estimate', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateEstimate, submitEstimate);
 router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, parseAttachments, validateEstimateReply, replyToEstimate);
 router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
-router.post('/:id/scan-quotation', roleMiddleware(CREATORS), validateObjectId, validateScan, scanQuotationFile);
-router.put('/:id/breakdown', roleMiddleware(CREATORS), validateObjectId, validateBreakdown, saveBreakdown);
+router.post('/:id/scan-quotation', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateScan, scanQuotationFile);
+router.put('/:id/breakdown', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateBreakdown, saveBreakdown);
 router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateAcknowledge, acknowledgeTicket);
-router.put('/:id/vehicle/sent', roleMiddleware(CREATORS), validateObjectId, validateStepDate, markVehicleSent);
+router.put('/:id/vehicle/sent', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateStepDate, markVehicleSent);
 router.put('/:id/vehicle/received', roleMiddleware(['vendor']), validateObjectId, validateVehicleReceived, markVehicleReceived);
 router.put('/:id/work/start', roleMiddleware(['vendor']), validateObjectId, validateStepDate, startWork);
 router.put('/:id/work/ready', roleMiddleware(['vendor']), validateObjectId, validateStepDate, markReady);
 router.put('/:id/vehicle/release', roleMiddleware(['vendor']), validateObjectId, validateStepDate, releaseVehicle);
-router.put('/:id/vehicle/returned', roleMiddleware(CREATORS), validateObjectId, validateVehicleReturned, markVehicleReturned);
+router.put('/:id/vehicle/returned', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateVehicleReturned, markVehicleReturned);
 router.post('/:id/invoice', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateInvoiceSubmit, submitInvoice);
 router.put('/:id/invoice/accept', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, acceptInvoice);
 router.put('/:id/invoice/reject', roleMiddleware(['supervisor']), validateObjectId, validateInvoiceReject, rejectInvoice);
-router.put('/:id/invoice/received', roleMiddleware(CREATORS), validateObjectId, validateStepDate, markInvoiceReceived);
-router.put('/:id/forward', roleMiddleware(CREATORS), validateObjectId, validateStepDate, forwardToPurchase);
+router.put('/:id/invoice/received', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateStepDate, markInvoiceReceived);
+router.put('/:id/forward', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateStepDate, forwardToPurchase);
 
 export default router;

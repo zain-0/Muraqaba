@@ -14,7 +14,7 @@ import { assertStatus, assertVendorOwns, loadTicket, respond } from './ticketCon
 
 /** Moves the ticket one step; `fields` go on ticket.vehicle. */
 const step = (ticket, to, user, { date, km, fields = {} }) => {
-  const when = date ?? new Date();
+  const when = date || new Date();
   Object.entries(fields).forEach(([key, value]) => {
     ticket.vehicle[key] = value === WHEN ? when : value;
   });
@@ -29,11 +29,32 @@ const familyOf = (ticket) => {
 };
 
 const AT_THE_WORKSHOP = ['vehicleReceived', 'workInProgress', 'readyForDelivery'];
+// A job in one of these has not been decided yet, so the bus has to wait for it.
+const NOT_YET_AT_THE_WORKSHOP = ['sentToVendor', 'estimateSubmitted', 'estimateCountered', 'pending', 'returned', 'approved', 'acknowledged', 'vehicleSent'];
+
+const fieldError = (field, message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field, message }]);
+
+/** A date someone typed cannot go before the step before it. Left empty, it is now, which never can. */
+const assertAfterPreviousStep = (ticket, date) => {
+  if (!date) return;
+  const previous = [...ticket.history].reverse().find((entry) => entry.effectiveAt)?.effectiveAt;
+  if (previous && uaeDay(date) < uaeDay(previous)) throw fieldError('date', 'This date is before the step before it');
+};
+
+// A bus at a workshop barely moves, so a reading this far above the last is a typing slip.
+const READING_MARGIN_KM = 20000;
+
+/** An odometer does not go backwards, and a mistyped one would throw the bus's intervals out. */
+const assertReading = (km, lastKnown = 0) => {
+  if (km < lastKnown) throw fieldError('km', 'This reading is lower than the one already recorded on this VSR');
+  if (km > lastKnown + READING_MARGIN_KM) throw fieldError('km', 'This reading is far above the one recorded on this VSR. Check it.');
+};
 
 // PUT /api/tickets/:id/vehicle/sent  (creator)
 export const markVehicleSent = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'acknowledged', `The bus can be sent once the vendor has acknowledged the job (this one is ${ticket.status})`);
+  assertAfterPreviousStep(ticket, req.body.date);
   step(ticket, 'vehicleSent', req.user, { date: req.body.date, fields: { sentAt: WHEN } });
   await ticket.save();
   await respond(res, ticket, 'Bus marked as sent to the vendor');
@@ -45,6 +66,8 @@ export const markVehicleReceived = asyncHandler(async (req, res) => {
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'vehicleSent', `The bus has to be sent before it can be received (this one is ${ticket.status})`);
   const { date, km } = req.body;
+  assertAfterPreviousStep(ticket, date);
+  assertReading(km, ticket.currentReading);
   step(ticket, 'vehicleReceived', req.user, { date, km, fields: { receivedAt: WHEN, receivedKm: km } });
   await ticket.save();
   await respond(res, ticket, 'Bus marked as received');
@@ -55,6 +78,7 @@ export const startWork = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'vehicleReceived', `Work starts after the bus is received (this one is ${ticket.status})`);
+  assertAfterPreviousStep(ticket, req.body.date);
   step(ticket, 'workInProgress', req.user, { date: req.body.date, fields: { workStartedAt: WHEN } });
   await ticket.save();
   await respond(res, ticket, 'Work in progress');
@@ -65,6 +89,7 @@ export const markReady = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'workInProgress', `Work has to be in progress before the bus can be ready (this one is ${ticket.status})`);
+  assertAfterPreviousStep(ticket, req.body.date);
   step(ticket, 'readyForDelivery', req.user, { date: req.body.date, fields: { readyAt: WHEN } });
   await ticket.save();
   await respond(res, ticket, 'Bus is ready for delivery');
@@ -75,13 +100,15 @@ export const releaseVehicle = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'readyForDelivery', `The bus has to be ready before it can be released (this one is ${ticket.status})`);
+  assertAfterPreviousStep(ticket, req.body.date);
 
   const family = await familyOf(ticket);
-  const moving = family.filter((member) => member.status !== 'declined');
-  const waiting = moving.find((member) => !AT_THE_WORKSHOP.includes(member.status));
+  const waiting = family.find((member) => NOT_YET_AT_THE_WORKSHOP.includes(member.status));
   if (waiting) throw new AppError(`${waiting.vsrNumber} is still waiting. It has to be approved or declined before the bus can leave.`, 409, 'INVALID_STATE');
 
-  const when = req.body.date ?? new Date();
+  // Anything already gone stays as it is, so a job that got left behind can always be released later.
+  const moving = family.filter((member) => AT_THE_WORKSHOP.includes(member.status));
+  const when = req.body.date || new Date();
   moving.forEach((member) => {
     stamp(member, req.user, 'vehicleReleased');
     step(member, 'vehicleReleased', req.user, { date: when, fields: { releasedAt: WHEN } });
@@ -104,7 +131,9 @@ export const markVehicleReturned = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'vehicleReleased', `The vendor has to release the bus first (this one is ${ticket.status})`);
   const { date, km, replacedPartsReceived } = req.body;
-  const when = date ?? new Date();
+  assertAfterPreviousStep(ticket, date);
+  assertReading(km, ticket.vehicle?.receivedKm ?? ticket.currentReading);
+  const when = date || new Date();
   const family = (await familyOf(ticket)).filter((member) => member.status === 'vehicleReleased');
   family.forEach((member) => {
     step(member, 'vehicleReturned', req.user, {
@@ -123,7 +152,8 @@ export const markVehicleReturned = asyncHandler(async (req, res) => {
 export const markInvoiceReceived = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'invoiceAccepted', `The invoice has to be accepted first (this one is ${ticket.status})`);
-  ticket.invoiceReceivedAt = req.body.date ?? new Date();
+  assertAfterPreviousStep(ticket, req.body.date);
+  ticket.invoiceReceivedAt = req.body.date || new Date();
   ticket.transition('invoiceReceived', req.user._id, undefined, { effectiveAt: ticket.invoiceReceivedAt });
   await ticket.save();
   await respond(res, ticket, 'Invoice marked as received');
@@ -133,7 +163,8 @@ export const markInvoiceReceived = asyncHandler(async (req, res) => {
 export const forwardToPurchase = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'invoiceReceived', `Mark the invoice as received first (this one is ${ticket.status})`);
-  ticket.forwardedAt = req.body.date ?? new Date();
+  assertAfterPreviousStep(ticket, req.body.date);
+  ticket.forwardedAt = req.body.date || new Date();
   ticket.transition('forwardedToPurchase', req.user._id, undefined, { effectiveAt: ticket.forwardedAt });
   await ticket.save();
   await respond(res, ticket, 'Forwarded to the purchase department');

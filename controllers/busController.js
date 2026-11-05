@@ -48,7 +48,12 @@ const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model
   expectedLifeYears,
   labourRate,
   rates: { oil: rates?.oil, transmission: rates?.transmission },
-  intervals,
+  intervals: {
+    oil: { everyKm: intervals.oil.everyKm, lastKm: intervals.oil.lastKm ?? 0 },
+    transmission: { everyKm: intervals.transmission.everyKm, lastKm: intervals.transmission.lastKm ?? 0 },
+    tyre: { everyKm: intervals.tyre.everyKm, lastKm: intervals.tyre.lastKm ?? 0 },
+    battery: { everyMonths: intervals.battery.everyMonths, lastDate: intervals.battery.lastDate ?? new Date() },
+  },
 });
 
 // POST /api/buses

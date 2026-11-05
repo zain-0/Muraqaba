@@ -12,6 +12,7 @@ import { USER_FIELDS } from '../utils/query.js';
 import { endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
 const MAINTENANCE = ['oil', 'transmission'];
+const NOT_DECLINED = mongoose.trusted({ $ne: 'declined' });
 
 /** The figure a VSR counts under: accidents apart from other repairs. */
 const kindOf = ({ serviceType, repairCategory }) => (serviceType === 'repair' && repairCategory === 'ACCIDENT' ? 'accident' : serviceType);
@@ -41,7 +42,8 @@ const GROUP_KEYS = {
 // GET /api/reports/query?brand=&type=&year=&vendorId=&busId=&isBreakdown=&groupBy=
 export const runQuery = asyncHandler(async (req, res) => {
   const { brand, type, year = uaeDay().slice(0, 4), vendorId, busId, isBreakdown, groupBy = 'brand' } = req.query;
-  const filter = { createdAt: yearRange(year) };
+  // A declined additional job was never done.
+  const filter = { createdAt: yearRange(year), status: NOT_DECLINED };
   if (vendorId) filter.vendorId = vendorId;
   if (busId) filter.busId = busId;
   if (isBreakdown) filter.isBreakdown = isBreakdown === 'true';
@@ -80,7 +82,7 @@ const emptyCounts = () => ({ repair: 0, tyre: 0, battery: 0, maintenance: 0 });
 // GET /api/reports/fleet?year=&brand=
 export const fleetFigures = asyncHandler(async (req, res) => {
   const { year = uaeDay().slice(0, 4), brand } = req.query;
-  const tickets = await Ticket.find({ createdAt: yearRange(year) }).select('serviceType repairCategory createdAt busId').populate('busId', 'make');
+  const tickets = await Ticket.find({ createdAt: yearRange(year), status: NOT_DECLINED }).select('serviceType repairCategory createdAt busId').populate('busId', 'make');
 
   const months = Array.from({ length: 12 }, (_, i) => ({ month: `${year}-${String(i + 1).padStart(2, '0')}`, ...emptyCounts() }));
   const totals = emptyCounts();
@@ -126,7 +128,7 @@ export const dueServices = async () => {
 export const weeklyReport = asyncHandler(async (req, res) => {
   const to = new Date();
   const from = new Date(to.getTime() - REPORT_DAYS * 24 * 60 * 60 * 1000);
-  const tickets = await Ticket.find({ createdAt: mongoose.trusted({ $gte: from, $lte: to }), serviceType: mongoose.trusted({ $in: REPORTED_SERVICES }) })
+  const tickets = await Ticket.find({ createdAt: mongoose.trusted({ $gte: from, $lte: to }), serviceType: mongoose.trusted({ $in: REPORTED_SERVICES }), status: NOT_DECLINED })
     .select('vsrNumber serviceType status createdAt busId vendorId intervalUsage')
     .sort({ createdAt: -1 })
     .populate('busId', 'fleetNumber make')
