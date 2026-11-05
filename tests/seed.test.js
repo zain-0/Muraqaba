@@ -52,6 +52,16 @@ describe('demo data', () => {
       const onDisk = await stat(join(uploads, `${round.attachments[0]._id}.pdf`));
       assert.equal(onDisk.size, round.attachments[0].size, 'the demo documents exist as files');
 
+      // The Vehicle panel and the history must give a trip step the same day.
+      const travelled = await tickets.find({ 'vehicle.returnedAt': { $exists: true } }).toArray();
+      assert.ok(travelled.length > 0);
+      for (const ticket of travelled) {
+        for (const [status, field] of [['vehicleSent', 'sentAt'], ['vehicleReleased', 'releasedAt'], ['vehicleReturned', 'returnedAt']]) {
+          const entry = ticket.history.find((h) => h.status === status);
+          if (entry) assert.equal(entry.effectiveAt?.toISOString(), ticket.vehicle[field]?.toISOString(), `${ticket.vsrNumber} ${status}`);
+        }
+      }
+
       const signed = await connection.collection('users').countDocuments({ signatureImage: { $exists: true } });
       assert.equal(signed, 5, 'everyone can sign straight away');
     } finally {

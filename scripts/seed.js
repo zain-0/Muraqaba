@@ -266,9 +266,12 @@ async function main() {
       sign(vendor, 'acknowledged');
       step('acknowledged', vendor);
     }
+    // The step's date is the day it was entered, read once so the history and the Vehicle panel agree.
     const stepWithDate = (status, by, field, extra) => {
-      step(status, by, undefined, { effectiveAt: when(), ...extra });
-      ticket.vehicle[field] = when();
+      step(status, by, undefined, extra);
+      const at = when();
+      ticket.history[ticket.history.length - 1].effectiveAt = at;
+      ticket.vehicle[field] = at;
     };
     if (reached('vehicleSent') && !parent) stepWithDate('vehicleSent', creator, 'sentAt');
     if (reached('vehicleReceived') && !parent) {
