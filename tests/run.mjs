@@ -34,6 +34,10 @@ process.env.AUTH_RATE_LIMIT_MAX = '100000';
 // Production-like registration policy so the tests prove staff roles cannot self-register.
 process.env.ALLOW_PUBLIC_REGISTRATION = 'true';
 process.env.SELF_REGISTER_ROLES = 'vendor';
+// Notifications check on every read in tests, and the main test API has no scanning key.
+process.env.NOTIFICATION_CHECK_MS = '0';
+delete process.env.ANTHROPIC_API_KEY;
+delete process.env.ANTHROPIC_BASE_URL;
 
 const { default: connectDB } = await import('../config/db.js');
 const { default: app } = await import('../app.js');

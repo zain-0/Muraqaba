@@ -69,7 +69,8 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   const status = err.statusCode || err.status || 500;
-  if (status >= 500) {
+  // A 502 or 503 we raised on purpose is an expected outcome, not a crash.
+  if (status === 500 || (status > 500 && !err.isOperational)) {
     console.error('Unhandled error:', err);
   }
   return res.status(status).json({

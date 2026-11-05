@@ -296,6 +296,26 @@ export const validateAdditionalJob = [
   handleValidationErrors,
 ];
 
+const reportYear = () => qstr('year').isInt({ min: 2000, max: 2100 }).withMessage('Choose a valid year');
+
+export const validateReportQuery = [
+  reportYear(),
+  qstr('brand').isLength({ max: 120 }).withMessage('Choose a valid brand'),
+  qstr('type').isIn(['accident', 'repair', 'maintenance', 'oil', 'transmission', 'tyre', 'battery', 'other']).withMessage('Choose a valid kind of work'),
+  qstr('vendorId').isMongoId().withMessage('Choose a valid vendor'),
+  qstr('busId').isMongoId().withMessage('Choose a valid bus'),
+  qstr('isBreakdown').isBoolean().withMessage('Breakdown must be yes or no'),
+  qstr('groupBy').isIn(['brand', 'month', 'bus', 'vendor', 'type']).withMessage('Choose a valid grouping'),
+  handleValidationErrors,
+];
+
+export const validateFleetFigures = [reportYear(), qstr('brand').isLength({ max: 120 }).withMessage('Choose a valid brand'), handleValidationErrors];
+
+export const validateScan = [
+  body('attachmentId', 'Choose a valid file').optional({ values: 'falsy' }).isString().isMongoId(),
+  handleValidationErrors,
+];
+
 export const validateObjectId = [param('id').isMongoId().withMessage('Invalid ID'), handleValidationErrors];
 
 const pageQuery = [

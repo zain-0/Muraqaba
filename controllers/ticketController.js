@@ -11,6 +11,8 @@ import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
 import { deductFromLpo } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
+import { notifyLpoProblem } from '../utils/notifications.js';
+import { assertScanConfigured, scanQuotation, SCANNABLE_TYPES } from '../utils/quotationScan.js';
 
 /**
  * Build the Mongo filter a user is allowed to see, combined with optional query filters.
@@ -352,6 +354,23 @@ export const saveBreakdown = asyncHandler(async (req, res) => {
   await respond(res, ticket, 'Parts and labour saved');
 });
 
+// POST /api/tickets/:id/scan-quotation  (creator: returns lines to check, saves nothing)
+export const scanQuotationFile = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertStatus(ticket, ['estimateSubmitted', 'estimateCountered', 'returned'], `A quotation can only be scanned while the price is open (this one is ${ticket.status})`);
+  assertScanConfigured();
+
+  const files = [...ticket.negotiation].reverse().filter((round) => round.from === 'vendor').flatMap((round) => round.attachments);
+  const { attachmentId } = req.body;
+  if (attachmentId && !files.some((file) => file._id.equals(attachmentId))) throw new AppError('File not found', 404, 'NOT_FOUND');
+  const refuse = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'attachments', message }]);
+  if (!files.length) throw refuse('The vendor attached no file to scan.');
+  const file = attachmentId ? files.find((candidate) => candidate._id.equals(attachmentId)) : files.find((candidate) => SCANNABLE_TYPES.includes(candidate.mimeType));
+  if (!file || !SCANNABLE_TYPES.includes(file.mimeType)) throw refuse('Only a PDF or a photo can be scanned. Fill in the parts by hand.');
+
+  res.json({ success: true, data: await scanQuotation(file) });
+});
+
 // PUT /api/tickets/:id/escalate  (creator)
 export const escalateTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
@@ -443,6 +462,7 @@ export const acceptInvoice = asyncHandler(async (req, res) => {
   try {
     ticket.lpoDeduction = await deductFromLpo(ticket, invoice);
     if (ticket.lpoDeduction) await ticket.save();
+    if (ticket.lpoDeduction?.status === 'noLpo' || ticket.lpoDeduction?.overrun) await notifyLpoProblem(ticket);
   } catch (err) {
     console.error('Could not update the LPO:', err);
   }
