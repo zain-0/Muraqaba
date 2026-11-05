@@ -50,19 +50,31 @@ export const signIn = async (email) => {
   return { token: res.body.token, id: res.body.user.id, email: res.body.user.email };
 };
 
-/** The three staff accounts tests/run.mjs seeds, plus two vendors of this file's own. */
+/** A small real PNG header plus a label, so two people's signatures differ. */
+export const signatureOf = (label) => `data:image/png;base64,${Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(label)]).toString('base64')}`;
+
+const withSignature = async (user, label) => {
+  const res = await api('PUT', '/users/signature', { token: user.token, body: { image: signatureOf(label) } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  return user;
+};
+
+/** The three staff accounts tests/run.mjs seeds, plus two vendors of this file's own, all ready to sign. */
 export const signInEveryone = async () => {
   const health = await api('GET', '/health');
   assert.equal(health.status, 200, `API not reachable at ${BASE}: ${JSON.stringify(health.body)}`);
   assert.equal(health.body.db, 'connected');
   return {
-    creator: await signIn('test-creator@muraqaba.test'),
-    supervisor: await signIn('test-supervisor@muraqaba.test'),
-    purchasing: await signIn('test-purchasing@muraqaba.test'),
-    vendor1: await register('vendor', 'vendor-one'),
-    vendor2: await register('vendor', 'vendor-two'),
+    creator: await withSignature(await signIn('test-creator@muraqaba.test'), 'creator'),
+    supervisor: await withSignature(await signIn('test-supervisor@muraqaba.test'), 'supervisor'),
+    purchasing: await withSignature(await signIn('test-purchasing@muraqaba.test'), 'purchasing'),
+    vendor1: await withSignature(await register('vendor', 'vendor-one'), 'vendor1'),
+    vendor2: await withSignature(await register('vendor', 'vendor-two'), 'vendor2'),
   };
 };
+
+/** A vendor of a test's own, ready to sign. */
+export const newVendor = async (label) => withSignature(await register('vendor', label), label);
 
 /** A complete add-bus form. Rates are on the bus; oil at AED 0.5 and transmission at AED 1 per km. */
 export const busBody = (suffix, vendorId, overrides = {}) => ({

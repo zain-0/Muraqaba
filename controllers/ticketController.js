@@ -10,6 +10,7 @@ import { UPLOAD_DIR, storedPath, withStoredAttachments } from '../utils/uploads.
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
 import { deductFromLpo } from '../utils/lpoDeduction.js';
+import { stamp } from '../utils/signatures.js';
 
 /**
  * Build the Mongo filter a user is allowed to see, combined with optional query filters.
@@ -118,7 +119,9 @@ export const createTicket = asyncHandler(async (req, res) => {
   const fields = await requestFields(req.body);
   // An agreed price leaves nothing to negotiate, so it goes straight to the supervisor.
   const status = fields.agreedPrice ? 'pending' : 'sentToVendor';
-  const ticket = new Ticket({ ...fields, vsrNumber: await nextVsrNumber(), status, createdBy: req.user._id });
+  const ticket = new Ticket({ ...fields, status, createdBy: req.user._id });
+  if (fields.agreedPrice) stamp(ticket, req.user, 'escalated');
+  ticket.vsrNumber = await nextVsrNumber();
   ticket.history.push({ status, by: req.user._id, note: 'VSR created' });
   await ticket.save();
   // The VSR is real by now, so a problem with the daily sheet must not report it as failed.
@@ -167,7 +170,8 @@ export const getMyTickets = asyncHandler(async (req, res) => {
 
 /** Loads a ticket with the same visibility rules for the detail page and its files. */
 const loadVisibleTicket = async (req) => {
-  const ticket = await Ticket.findById(req.params.id).populate(TICKET_POPULATE);
+  // Lists leave the drawings out to stay light; a single VSR shows and prints them.
+  const ticket = await Ticket.findById(req.params.id).populate(TICKET_POPULATE).populate({ path: 'signatures.image', select: 'image' });
   if (!ticket) throw new AppError('VSR not found', 404, 'NOT_FOUND');
 
   const vendorRef = ticket.vendorId?._id || ticket.vendorId;
@@ -182,6 +186,15 @@ const loadVisibleTicket = async (req) => {
   return ticket;
 };
 
+/** The other VSRs in this job's family: a parent and its additional jobs, in number order. */
+const linkedTo = async (user, ticket) => {
+  const root = ticket.parentTicket ?? ticket._id;
+  const linked = await Ticket.find({ _id: mongoose.trusted({ $ne: ticket._id }), $or: [{ _id: root }, { parentTicket: root }] })
+    .select('vsrNumber status serviceType')
+    .sort({ vsrNumber: 1 });
+  return user.role === 'purchaseManager' ? linked.filter((t) => PURCHASE_VISIBLE_STATUSES.includes(t.status)) : linked;
+};
+
 // GET /api/tickets/:id
 export const getTicketById = asyncHandler(async (req, res) => {
   const ticket = await loadVisibleTicket(req);
@@ -189,7 +202,7 @@ export const getTicketById = asyncHandler(async (req, res) => {
   // Every invoice ever submitted for this ticket, oldest first, so the UI can show rejections and resubmissions.
   const invoices = await Invoice.find({ ticketId: ticket._id }).sort({ createdAt: 1 });
 
-  res.json({ success: true, data: { ...forViewer(req.user, ticket), invoices } });
+  res.json({ success: true, data: { ...forViewer(req.user, ticket), invoices, linkedTickets: await linkedTo(req.user, ticket) } });
 });
 
 // PUT /api/tickets/:id/approve  (supervisor)
@@ -197,9 +210,17 @@ export const approveTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'pending', `Only pending VSRs can be approved (this one is ${ticket.status})`);
   ticket.approvedEstimate = ticket.agreedPrice?.amount ?? ticket.latestEstimate()?.amount;
+  stamp(ticket, req.user, 'approved');
   ticket.transition('approved', req.user._id, req.body?.note);
+  // An additional job's bus is already at the vendor, so it has no sending or receiving of its own.
+  if (ticket.parentTicket) {
+    const { vehicle } = await Ticket.findById(ticket.parentTicket).select('vehicle');
+    ticket.vehicle.receivedAt = vehicle.receivedAt;
+    ticket.vehicle.receivedKm = vehicle.receivedKm;
+    ticket.transition('vehicleReceived', req.user._id, undefined, { effectiveAt: vehicle.receivedAt, km: vehicle.receivedKm });
+  }
   await ticket.save();
-  await respond(res, ticket, 'VSR approved. The vendor has been asked to acknowledge it.');
+  await respond(res, ticket, ticket.parentTicket ? 'Additional job approved. The vendor can work on it.' : 'VSR approved. The vendor has been asked to acknowledge it.');
 });
 
 // PUT /api/tickets/:id/return  (supervisor)
@@ -210,6 +231,17 @@ export const returnTicket = asyncHandler(async (req, res) => {
   ticket.transition('returned', req.user._id, req.body.reason);
   await ticket.save();
   await respond(res, ticket, 'VSR returned to the service creator.');
+});
+
+// PUT /api/tickets/:id/decline  (supervisor; additional jobs only, because one left waiting holds up its parent's release)
+export const declineTicket = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertStatus(ticket, 'pending', `Only pending VSRs can be declined (this one is ${ticket.status})`);
+  if (!ticket.parentTicket) throw new AppError('Only an additional job can be declined. Return this VSR to the service creator instead.', 409, 'INVALID_STATE');
+  ticket.declineReason = req.body.reason;
+  ticket.transition('declined', req.user._id, req.body.reason);
+  await ticket.save();
+  await respond(res, ticket, 'Additional job declined');
 });
 
 // PUT /api/tickets/:id/details  (creator, after a supervisor returned it)
@@ -325,6 +357,7 @@ export const escalateTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, ['estimateSubmitted', 'returned'], `Only a VSR with an estimate to review can be sent to the supervisor (this one is ${ticket.status})`);
   if (!ticket.agreedPrice) checkBreakdownAgainstEstimate(ticket);
+  stamp(ticket, req.user, 'escalated');
   ticket.returnReason = undefined;
   ticket.transition('pending', req.user._id, req.body?.note || 'Sent to the supervisor for approval');
   await ticket.save();
@@ -356,6 +389,7 @@ export const acknowledgeTicket = asyncHandler(async (req, res) => {
     const message = 'Enter the number of days to complete the work';
     throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'daysToComplete', message }]);
   }
+  stamp(ticket, req.user, 'acknowledged');
   ticket.transition('acknowledged', req.user._id, req.body?.note);
   await ticket.save();
   await respond(res, ticket, 'VSR acknowledged. The service creator sends the bus.');
@@ -395,6 +429,7 @@ export const acceptInvoice = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findById(ticket.invoice);
   if (!invoice) throw new AppError('Invoice record is missing', 500, 'INVOICE_MISSING');
   if (invoice.status !== 'invoicePending') throw new AppError('Invoice has already been processed', 409, 'INVALID_STATE');
+  stamp(ticket, req.user, 'invoiceAccepted');
 
   invoice.status = 'approved';
   invoice.approvedAt = new Date();

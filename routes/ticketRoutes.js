@@ -8,6 +8,7 @@ import {
   getTicketById,
   approveTicket,
   returnTicket,
+  declineTicket,
   correctTicketDetails,
   saveBreakdown,
   submitEstimate,
@@ -28,6 +29,7 @@ import {
   markVehicleReturned,
   markInvoiceReceived,
   forwardToPurchase,
+  createAdditionalJob,
 } from '../controllers/workshopController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
@@ -37,6 +39,8 @@ import {
   validateInvoiceReject,
   validateTransitionNote,
   validateTicketReturn,
+  validateTicketDecline,
+  validateAdditionalJob,
   validateEstimate,
   validateEstimateReply,
   validateBreakdown,
@@ -74,6 +78,8 @@ router.get('/:id/attachments/:attachmentId', validateAttachmentParams, downloadA
 // Lifecycle transitions
 router.put('/:id/approve', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, approveTicket);
 router.put('/:id/return', roleMiddleware(['supervisor']), validateObjectId, validateTicketReturn, returnTicket);
+router.put('/:id/decline', roleMiddleware(['supervisor']), validateObjectId, validateTicketDecline, declineTicket);
+router.post('/:id/additional', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateAdditionalJob, createAdditionalJob);
 router.put('/:id/details', roleMiddleware(CREATORS), validateObjectId, validateTicketCreate, correctTicketDetails);
 router.post('/:id/estimate', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateEstimate, submitEstimate);
 router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, parseAttachments, validateEstimateReply, replyToEstimate);

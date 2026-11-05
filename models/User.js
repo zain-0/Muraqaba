@@ -9,6 +9,7 @@ const UserSchema = new mongoose.Schema(
     // Never returned by default. Controllers that need it must call .select('+password').
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ROLES, required: true, index: true },
+    signatureImage: { type: mongoose.Schema.Types.ObjectId, ref: 'SignatureImage' },
   },
   {
     timestamps: true,
@@ -16,11 +17,24 @@ const UserSchema = new mongoose.Schema(
       transform(_doc, ret) {
         delete ret.password;
         delete ret.__v;
+        ret.hasSignature = Boolean(ret.signatureImage);
+        delete ret.signatureImage;
         return ret;
       },
     },
   }
 );
+
+// A drawing is never changed once saved; a new signature is a new record, so old stamps stay true.
+const SignatureImageSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    image: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
+export const SignatureImage = mongoose.model('SignatureImage', SignatureImageSchema);
 
 const User = mongoose.model('User', UserSchema);
 export default User;

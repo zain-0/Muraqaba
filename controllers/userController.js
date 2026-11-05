@@ -1,9 +1,24 @@
 import mongoose from 'mongoose';
 import Ticket, { PURCHASE_VISIBLE_STATUSES, TICKET_STATUSES } from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
+import { SignatureImage } from '../models/User.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
+
+// GET /api/users/signature  (your own)
+export const getSignature = asyncHandler(async (req, res) => {
+  const signature = req.user.signatureImage ? await SignatureImage.findById(req.user.signatureImage) : null;
+  res.json({ success: true, data: { image: signature?.image ?? null } });
+});
+
+// PUT /api/users/signature  (your own)
+export const saveSignature = asyncHandler(async (req, res) => {
+  const signature = await SignatureImage.create({ user: req.user._id, image: req.body.image });
+  req.user.signatureImage = signature._id;
+  await req.user.save();
+  res.json({ success: true, message: 'Signature saved', data: { image: signature.image } });
+});
 
 // GET /api/users/profile
 export const getProfile = asyncHandler(async (req, res) => {

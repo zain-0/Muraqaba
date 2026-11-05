@@ -231,6 +231,16 @@ export const validateLpo = [
   handleValidationErrors,
 ];
 
+const PNG_START = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_PREFIX = 'data:image/png;base64,';
+
+export const validateSignature = [
+  body('image', 'Draw your signature')
+    .isString()
+    .custom((value) => value.startsWith(PNG_PREFIX) && Buffer.from(value.slice(PNG_PREFIX.length, PNG_PREFIX.length + 12), 'base64').subarray(0, 8).equals(PNG_START)),
+  handleValidationErrors,
+];
+
 export const validateAcknowledge = [note(), daysToComplete().optional({ values: 'null' }), handleValidationErrors];
 
 export const validateBreakdown = [
@@ -269,6 +279,22 @@ export const validateInvoiceSubmit = [
 ];
 
 export const validateInvoiceReject = [note('reason'), handleValidationErrors];
+
+export const validateTicketDecline = [
+  str('reason', 'Reason').trim().isLength({ min: 1, max: 500 }).withMessage('Enter why the job is being declined, in 500 characters or fewer'),
+  handleValidationErrors,
+];
+
+export const validateAdditionalJob = [
+  body('amount', 'Enter the estimate amount').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  str('quotationNumber', 'Quotation number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the quotation number'),
+  daysToComplete(),
+  str('serviceType', 'Service type').isIn(['repair', 'tyre', 'battery', 'other']).withMessage('Choose what kind of work this is'),
+  body('repairCategory').if(body('serviceType').equals('repair')).isString().isIn(REPAIR_CATEGORIES).withMessage('Choose a repair category for repair VSRs'),
+  str('description', 'Description').trim().isLength({ min: 10, max: 1000 }).withMessage('Describe the additional work, in 10 to 1000 characters'),
+  roundNote(),
+  handleValidationErrors,
+];
 
 export const validateObjectId = [param('id').isMongoId().withMessage('Invalid ID'), handleValidationErrors];
 

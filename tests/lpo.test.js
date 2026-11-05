@@ -4,7 +4,7 @@
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, createBus, estimate, register, run, signInEveryone, submitInvoice, toInvoiceAccepted, toVehicleReturned } from './helpers.js';
+import { api, createBus, estimate, newVendor, run, signInEveryone, submitInvoice, toInvoiceAccepted, toVehicleReturned } from './helpers.js';
 
 let users;
 let counter = 0;
@@ -23,7 +23,7 @@ const getLpo = async (id) => ok(await api('GET', `/lpos/${id}`, { token: users.p
 
 /** A vendor of its own, so each test starts with no LPOs for that vendor. */
 const setup = async (label) => {
-  const vendor = await register('vendor', `lpo-${label}`);
+  const vendor = await newVendor(`lpo-${label}`);
   const bus = await createBus(users, `L${label}`, vendor.id, { rates: undefined });
   return { vendor, bus };
 };

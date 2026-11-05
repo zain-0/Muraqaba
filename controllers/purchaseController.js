@@ -8,6 +8,7 @@ import { toIdList } from '../middleware/validationMiddleware.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { USER_FIELDS, paginate } from '../utils/query.js';
 import { uaeDay } from '../utils/uaeTime.js';
+import { assertCanSign, stamp } from '../utils/signatures.js';
 import { withStoredAttachments } from '../utils/uploads.js';
 
 const money = (value) => Math.round(value * 100) / 100;
@@ -71,6 +72,7 @@ export const createGrn = asyncHandler(async (req, res) => {
     throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'ticketIds', message }]);
   }
 
+  assertCanSign(req.user);
   const when = date ?? new Date();
   let grn;
   await withStoredAttachments(req.files, async (attachments) => {
@@ -88,6 +90,7 @@ export const createGrn = asyncHandler(async (req, res) => {
     await Promise.all(
       tickets.map((ticket) => {
         ticket.grn = grn._id;
+        stamp(ticket, req.user, 'grn');
         ticket.transition('grnCreated', req.user._id, `GRN ${number}`, { effectiveAt: when });
         return ticket.save();
       })
@@ -115,6 +118,7 @@ export const createPurchaseInvoice = asyncHandler(async (req, res) => {
   if (!grn) throw new AppError('GRN not found', 404, 'NOT_FOUND');
   if (grn.purchaseInvoice) throw new AppError('This GRN already has a purchase invoice', 409, 'INVALID_STATE');
 
+  assertCanSign(req.user);
   const when = date ?? new Date();
   const tickets = await Ticket.find({ _id: mongoose.trusted({ $in: grn.tickets }) });
   let invoice;
@@ -135,6 +139,7 @@ export const createPurchaseInvoice = asyncHandler(async (req, res) => {
     await Promise.all(
       tickets.map((ticket) => {
         ticket.purchaseInvoice = invoice._id;
+        stamp(ticket, req.user, 'purchaseInvoice');
         ticket.transition('completed', req.user._id, `Purchase invoice ${number}`, { effectiveAt: when });
         return ticket.save();
       })

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import Bus from '../models/Bus.js';
-import Ticket from '../models/Ticket.js';
+import Ticket, { CLOSED_STATUSES } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES, BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { USER_FIELDS } from '../utils/query.js';
@@ -120,6 +120,7 @@ const STAGE_OF_STATUS = {
   forwardedToPurchase: 'invoicing',
   grnCreated: 'invoicing',
   completed: 'closed',
+  declined: 'closed',
 };
 
 /** The ticket's stage at a moment, read back from its history; null if it did not exist yet. */
@@ -147,7 +148,7 @@ export const getRepairSheet = asyncHandler(async (req, res) => {
     .populate('vendorId', USER_FIELDS);
 
   const completedOn = (ticket) => {
-    const entry = ticket.history.find((h) => h.status === 'completed');
+    const entry = ticket.history.find((h) => CLOSED_STATUSES.includes(h.status));
     return entry ? uaeDay(entry.at) : null;
   };
   const monthStart = startOfUaeDay(days[0]);

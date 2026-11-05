@@ -31,10 +31,11 @@ export const TICKET_STATUSES = [
   'forwardedToPurchase', // purchasing makes the GRN
   'grnCreated', // purchasing makes the purchase invoice
   'completed', // the purchase invoice closes the ticket
+  'declined', // additional jobs only: the supervisor turned it down
 ];
 
 // Statuses that end the lifecycle.
-export const CLOSED_STATUSES = ['completed'];
+export const CLOSED_STATUSES = ['completed', 'declined'];
 
 // What the purchase manager is concerned with: anything that has an invoice.
 export const PURCHASE_VISIBLE_STATUSES = ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed'];
@@ -138,10 +139,27 @@ const LpoDeductionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// A person's signature on one step. The name and role are copied so they read as they did that day.
+const SignatureStampSchema = new mongoose.Schema(
+  {
+    step: { type: String, required: true },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true },
+    role: { type: String, required: true },
+    image: { type: mongoose.Schema.Types.ObjectId, ref: 'SignatureImage', required: true },
+    at: { type: Date, required: true },
+  },
+  { _id: false }
+);
+
 const TicketSchema = new mongoose.Schema(
   {
     vsrNumber: { type: String, required: true, unique: true, trim: true },
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', required: true, index: true },
+    // An additional job the vendor raised during the work on this VSR; VSR-0001 gets VSR-0001b.
+    parentTicket: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', index: true },
+    additionalCount: { type: Number, default: 0 },
+    declineReason: { type: String, trim: true, maxlength: 500 },
     serviceType: { type: String, enum: SERVICE_TYPES, required: true },
     repairCategory: {
       type: String,
@@ -179,6 +197,7 @@ const TicketSchema = new mongoose.Schema(
     approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved
     returnReason: { type: String, trim: true, maxlength: 500 }, // never shown to vendors
     history: { type: [HistoryEntrySchema], default: [] },
+    signatures: { type: [SignatureStampSchema], default: [] },
 
     initialApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     approvedAt: Date,
@@ -237,6 +256,7 @@ TicketSchema.methods.transition = function transition(status, userId, note, { ef
       this.invoiceRejectedAt = now;
       break;
     case 'completed':
+    case 'declined':
       this.completedAt = now;
       break;
     default:

@@ -13,6 +13,7 @@ const publicUser = (user) => ({
   name: user.name,
   email: user.email,
   role: user.role,
+  hasSignature: Boolean(user.signatureImage),
 });
 
 // Compared against when the email is unknown, so login takes the same time either way
