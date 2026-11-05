@@ -13,6 +13,8 @@ import { withStoredAttachments } from '../utils/uploads.js';
 
 const money = (value) => Math.round(value * 100) / 100;
 
+const SERVICE_LABELS = { oil: 'Oil service', transmission: 'Transmission service', tyre: 'Tyre change', battery: 'Battery change', repair: 'Repair', other: 'Other' };
+
 const loadBatch = async (ids) => {
   const tickets = await Ticket.find({ _id: mongoose.trusted({ $in: ids }) }).populate('busId', 'fleetNumber registrationNumber make').populate('vendorId', USER_FIELDS).populate('invoice');
   if (tickets.length !== ids.length) throw new AppError('One of these VSRs was not found', 404, 'NOT_FOUND');
@@ -45,7 +47,7 @@ export const exportBatch = asyncHandler(async (req, res) => {
       registration: ticket.busId?.registrationNumber,
       brand: ticket.busId?.make,
       vendor: ticket.vendorId?.name,
-      service: ticket.serviceType,
+      service: SERVICE_LABELS[ticket.serviceType],
       quotation: ticket.latestEstimate()?.quotationNumber,
       invoice: ticket.invoice?.invoiceNumber,
       date: ticket.invoice?.submittedAt ? uaeDay(ticket.invoice.submittedAt) : undefined,
