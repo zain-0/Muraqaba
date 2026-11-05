@@ -3,7 +3,7 @@
   "info": {
     "title": "Muraqaba Fleet Maintenance API",
     "version": "1.1.0",
-    "description": "Ticketing API for bus fleet maintenance with four roles.\n\n**Ticket lifecycle:** pending → approved (supervisor) → acknowledged (vendor) → invoiceSubmitted (vendor) → invoiceAccepted or invoiceRejected (supervisor) → completed (vendor). A rejected invoice goes back to the vendor for resubmission.\n\n**Roles:** serviceCreator manages vendors, buses and raises tickets; supervisor approves tickets and reviews invoices; vendor acknowledges, invoices and completes work on tickets assigned to them; purchaseManager has read access to invoiced tickets.\n\nAll list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`."
+    "description": "Ticketing API for bus fleet maintenance with four roles.\n\n**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil and transmission with a rate on the bus start at pending. Screens call a ticket a VSR.\n\n**Roles:** serviceCreator manages vendors and buses, raises tickets, fills in parts and labour, sends buses and forwards invoices; supervisor approves tickets and reviews invoices; vendor sends estimates, works on buses, releases them and invoices; purchaseManager makes GRNs, purchase invoices and LPOs and runs queries.\n\nAll list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`."
   },
   "servers": [
     {
@@ -29,6 +29,18 @@
     },
     {
       "name": "Tickets"
+    },
+    {
+      "name": "Workshop"
+    },
+    {
+      "name": "Purchasing"
+    },
+    {
+      "name": "Reports"
+    },
+    {
+      "name": "Notifications"
     },
     {
       "name": "Sheets"
@@ -105,120 +117,134 @@
             "type": "string"
           },
           "fleetNumber": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown as the Site Number"
           },
           "registrationNumber": {
             "type": "string"
           },
           "make": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown as the Brand"
           },
           "model": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown as the Type"
           },
           "year": {
             "type": "integer",
+            "description": "Shown as the Model year",
             "example": 2021
+          },
+          "registrationExpiry": {
+            "type": "string",
+            "format": "date"
+          },
+          "expectedLifeYears": {
+            "type": "integer",
+            "example": 15
+          },
+          "labourRate": {
+            "type": "number",
+            "description": "AED per repair labour hour"
+          },
+          "rates": {
+            "type": "object",
+            "description": "AED per km, for the bus vendor",
+            "properties": {
+              "oil": {
+                "type": "number"
+              },
+              "transmission": {
+                "type": "number"
+              }
+            }
+          },
+          "intervals": {
+            "type": "object",
+            "required": [
+              "oil",
+              "transmission",
+              "tyre",
+              "battery"
+            ],
+            "properties": {
+              "oil": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                }
+              },
+              "transmission": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                }
+              },
+              "tyre": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                }
+              },
+              "battery": {
+                "type": "object",
+                "required": [
+                  "everyMonths"
+                ],
+                "properties": {
+                  "everyMonths": {
+                    "type": "integer",
+                    "example": 18
+                  },
+                  "lastDate": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
           },
           "vendorId": {
             "type": "string",
             "example": "64b7f0c2e1d2a9b1c8a4f123",
-            "description": "User id of the vendor responsible for this bus"
-          },
-          "engine": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "ac": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "tyre": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "transmission": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "brakePad": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
+            "description": "User id of the vendor responsible for this bus. Set when adding; locked afterwards."
           },
           "_id": {
             "type": "string",
@@ -249,12 +275,10 @@
               }
             }
           },
-          "partsDue": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Parts at or past their service interval"
+          "intervalStatus": {
+            "type": "object",
+            "description": "Where each interval stands, from the latest km reading",
+            "additionalProperties": true
           },
           "createdAt": {
             "type": "string",
@@ -275,132 +299,144 @@
           "make",
           "model",
           "year",
+          "registrationExpiry",
+          "expectedLifeYears",
           "vendorId",
-          "engine",
-          "ac",
-          "tyre",
-          "transmission",
-          "brakePad"
+          "intervals"
         ],
         "properties": {
           "chassisNumber": {
             "type": "string"
           },
           "fleetNumber": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown as the Site Number"
           },
           "registrationNumber": {
             "type": "string"
           },
           "make": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown as the Brand"
           },
           "model": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown as the Type"
           },
           "year": {
             "type": "integer",
+            "description": "Shown as the Model year",
             "example": 2021
+          },
+          "registrationExpiry": {
+            "type": "string",
+            "format": "date"
+          },
+          "expectedLifeYears": {
+            "type": "integer",
+            "example": 15
+          },
+          "labourRate": {
+            "type": "number",
+            "description": "AED per repair labour hour"
+          },
+          "rates": {
+            "type": "object",
+            "description": "AED per km, for the bus vendor",
+            "properties": {
+              "oil": {
+                "type": "number"
+              },
+              "transmission": {
+                "type": "number"
+              }
+            }
+          },
+          "intervals": {
+            "type": "object",
+            "required": [
+              "oil",
+              "transmission",
+              "tyre",
+              "battery"
+            ],
+            "properties": {
+              "oil": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                }
+              },
+              "transmission": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                }
+              },
+              "tyre": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                }
+              },
+              "battery": {
+                "type": "object",
+                "required": [
+                  "everyMonths"
+                ],
+                "properties": {
+                  "everyMonths": {
+                    "type": "integer",
+                    "example": 18
+                  },
+                  "lastDate": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              }
+            }
           },
           "vendorId": {
             "type": "string",
             "example": "64b7f0c2e1d2a9b1c8a4f123",
-            "description": "User id of the vendor responsible for this bus"
-          },
-          "engine": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "ac": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "tyre": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "transmission": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
-          },
-          "brakePad": {
-            "type": "object",
-            "required": [
-              "serviceKm",
-              "currentKm"
-            ],
-            "properties": {
-              "serviceKm": {
-                "type": "number",
-                "description": "Kilometres between services",
-                "example": 15000
-              },
-              "currentKm": {
-                "type": "number",
-                "description": "Kilometres since the last service of this part",
-                "example": 14200
-              }
-            }
+            "description": "User id of the vendor responsible for this bus. Set when adding; locked afterwards."
           }
         }
       },
@@ -411,6 +447,23 @@
             "type": "string",
             "example": "64b7f0c2e1d2a9b1c8a4f123"
           },
+          "vsrNumber": {
+            "type": "string",
+            "example": "VSR-0012"
+          },
+          "parentTicket": {
+            "type": "string",
+            "example": "64b7f0c2e1d2a9b1c8a4f123",
+            "description": "Set on an additional job, numbered after its parent: VSR-0012b"
+          },
+          "linkedTickets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "The parent and additional jobs (detail endpoint only)"
+          },
           "busId": {
             "type": "object",
             "properties": {
@@ -418,120 +471,134 @@
                 "type": "string"
               },
               "fleetNumber": {
-                "type": "string"
+                "type": "string",
+                "description": "Shown as the Site Number"
               },
               "registrationNumber": {
                 "type": "string"
               },
               "make": {
-                "type": "string"
+                "type": "string",
+                "description": "Shown as the Brand"
               },
               "model": {
-                "type": "string"
+                "type": "string",
+                "description": "Shown as the Type"
               },
               "year": {
                 "type": "integer",
+                "description": "Shown as the Model year",
                 "example": 2021
+              },
+              "registrationExpiry": {
+                "type": "string",
+                "format": "date"
+              },
+              "expectedLifeYears": {
+                "type": "integer",
+                "example": 15
+              },
+              "labourRate": {
+                "type": "number",
+                "description": "AED per repair labour hour"
+              },
+              "rates": {
+                "type": "object",
+                "description": "AED per km, for the bus vendor",
+                "properties": {
+                  "oil": {
+                    "type": "number"
+                  },
+                  "transmission": {
+                    "type": "number"
+                  }
+                }
+              },
+              "intervals": {
+                "type": "object",
+                "required": [
+                  "oil",
+                  "transmission",
+                  "tyre",
+                  "battery"
+                ],
+                "properties": {
+                  "oil": {
+                    "type": "object",
+                    "required": [
+                      "everyKm"
+                    ],
+                    "properties": {
+                      "everyKm": {
+                        "type": "number",
+                        "description": "Kilometres between services",
+                        "example": 10000
+                      },
+                      "lastKm": {
+                        "type": "number",
+                        "description": "Odometer at the last service",
+                        "example": 0
+                      }
+                    }
+                  },
+                  "transmission": {
+                    "type": "object",
+                    "required": [
+                      "everyKm"
+                    ],
+                    "properties": {
+                      "everyKm": {
+                        "type": "number",
+                        "description": "Kilometres between services",
+                        "example": 10000
+                      },
+                      "lastKm": {
+                        "type": "number",
+                        "description": "Odometer at the last service",
+                        "example": 0
+                      }
+                    }
+                  },
+                  "tyre": {
+                    "type": "object",
+                    "required": [
+                      "everyKm"
+                    ],
+                    "properties": {
+                      "everyKm": {
+                        "type": "number",
+                        "description": "Kilometres between services",
+                        "example": 10000
+                      },
+                      "lastKm": {
+                        "type": "number",
+                        "description": "Odometer at the last service",
+                        "example": 0
+                      }
+                    }
+                  },
+                  "battery": {
+                    "type": "object",
+                    "required": [
+                      "everyMonths"
+                    ],
+                    "properties": {
+                      "everyMonths": {
+                        "type": "integer",
+                        "example": 18
+                      },
+                      "lastDate": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    }
+                  }
+                }
               },
               "vendorId": {
                 "type": "string",
                 "example": "64b7f0c2e1d2a9b1c8a4f123",
-                "description": "User id of the vendor responsible for this bus"
-              },
-              "engine": {
-                "type": "object",
-                "required": [
-                  "serviceKm",
-                  "currentKm"
-                ],
-                "properties": {
-                  "serviceKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 15000
-                  },
-                  "currentKm": {
-                    "type": "number",
-                    "description": "Kilometres since the last service of this part",
-                    "example": 14200
-                  }
-                }
-              },
-              "ac": {
-                "type": "object",
-                "required": [
-                  "serviceKm",
-                  "currentKm"
-                ],
-                "properties": {
-                  "serviceKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 15000
-                  },
-                  "currentKm": {
-                    "type": "number",
-                    "description": "Kilometres since the last service of this part",
-                    "example": 14200
-                  }
-                }
-              },
-              "tyre": {
-                "type": "object",
-                "required": [
-                  "serviceKm",
-                  "currentKm"
-                ],
-                "properties": {
-                  "serviceKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 15000
-                  },
-                  "currentKm": {
-                    "type": "number",
-                    "description": "Kilometres since the last service of this part",
-                    "example": 14200
-                  }
-                }
-              },
-              "transmission": {
-                "type": "object",
-                "required": [
-                  "serviceKm",
-                  "currentKm"
-                ],
-                "properties": {
-                  "serviceKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 15000
-                  },
-                  "currentKm": {
-                    "type": "number",
-                    "description": "Kilometres since the last service of this part",
-                    "example": 14200
-                  }
-                }
-              },
-              "brakePad": {
-                "type": "object",
-                "required": [
-                  "serviceKm",
-                  "currentKm"
-                ],
-                "properties": {
-                  "serviceKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 15000
-                  },
-                  "currentKm": {
-                    "type": "number",
-                    "description": "Kilometres since the last service of this part",
-                    "example": 14200
-                  }
-                }
+                "description": "User id of the vendor responsible for this bus. Set when adding; locked afterwards."
               },
               "_id": {
                 "type": "string",
@@ -562,12 +629,10 @@
                   }
                 }
               },
-              "partsDue": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Parts at or past their service interval"
+              "intervalStatus": {
+                "type": "object",
+                "description": "Where each interval stands, from the latest km reading",
+                "additionalProperties": true
               },
               "createdAt": {
                 "type": "string",
@@ -582,8 +647,10 @@
           "serviceType": {
             "type": "string",
             "enum": [
-              "minor",
-              "major",
+              "oil",
+              "transmission",
+              "tyre",
+              "battery",
               "repair",
               "other"
             ]
@@ -596,8 +663,7 @@
               "AC REPAIR",
               "ENGINE",
               "BODY",
-              "BATTERY REPLACEMENT",
-              "TYRE REPLACEMENT"
+              "ACCIDENT"
             ]
           },
           "description": {
@@ -608,9 +674,17 @@
             "minimum": 0,
             "description": "Odometer in km when the ticket was raised"
           },
+          "isBreakdown": {
+            "type": "boolean",
+            "description": "Broke down on the road. Never sent to vendors."
+          },
+          "daysToComplete": {
+            "type": "integer",
+            "description": "The vendor's latest promise"
+          },
           "agreedPrice": {
             "type": "object",
-            "description": "Minor and major services: the vendor rate frozen at raising",
+            "description": "Oil and transmission: rate on the bus times its interval, frozen at raising",
             "properties": {
               "rate": {
                 "type": "number"
@@ -622,6 +696,44 @@
                 "type": "number"
               }
             }
+          },
+          "intervalUsage": {
+            "type": "object",
+            "description": "How much of the interval was left or delayed. Never sent to vendors.",
+            "additionalProperties": true
+          },
+          "breakdown": {
+            "type": "object",
+            "description": "Parts, labour and consumables checked against the estimate. Never sent to vendors.",
+            "additionalProperties": true
+          },
+          "vehicle": {
+            "type": "object",
+            "description": "Dates and km of the bus going out and coming back",
+            "additionalProperties": true
+          },
+          "signatures": {
+            "type": "array",
+            "description": "Who signed which step. The drawing is populated on the detail endpoint only.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "grn": {
+            "type": "object",
+            "description": "Never sent to vendors",
+            "additionalProperties": true
+          },
+          "purchaseInvoice": {
+            "type": "object",
+            "description": "Never sent to vendors",
+            "additionalProperties": true
+          },
+          "lpoDeduction": {
+            "type": "object",
+            "description": "What accepting the invoice took off the LPO. Never sent to vendors.",
+            "additionalProperties": true
           },
           "approvedEstimate": {
             "type": "number"
@@ -679,13 +791,27 @@
           "status": {
             "type": "string",
             "enum": [
+              "sentToVendor",
+              "estimateSubmitted",
+              "estimateCountered",
               "pending",
+              "returned",
               "approved",
               "acknowledged",
+              "vehicleSent",
+              "vehicleReceived",
+              "workInProgress",
+              "readyForDelivery",
+              "vehicleReleased",
+              "vehicleReturned",
               "invoiceSubmitted",
               "invoiceAccepted",
               "invoiceRejected",
-              "completed"
+              "invoiceReceived",
+              "forwardedToPurchase",
+              "grnCreated",
+              "completed",
+              "declined"
             ]
           },
           "history": {
@@ -696,18 +822,40 @@
                 "status": {
                   "type": "string",
                   "enum": [
+                    "sentToVendor",
+                    "estimateSubmitted",
+                    "estimateCountered",
                     "pending",
+                    "returned",
                     "approved",
                     "acknowledged",
+                    "vehicleSent",
+                    "vehicleReceived",
+                    "workInProgress",
+                    "readyForDelivery",
+                    "vehicleReleased",
+                    "vehicleReturned",
                     "invoiceSubmitted",
                     "invoiceAccepted",
                     "invoiceRejected",
-                    "completed"
+                    "invoiceReceived",
+                    "forwardedToPurchase",
+                    "grnCreated",
+                    "completed",
+                    "declined"
                   ]
                 },
                 "at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "effectiveAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "The date the person gave"
+                },
+                "km": {
+                  "type": "number"
                 },
                 "by": {
                   "type": "object",
@@ -764,6 +912,27 @@
               "description": {
                 "type": "string"
               },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "_id": {
+                      "type": "string",
+                      "example": "64b7f0c2e1d2a9b1c8a4f123"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -814,6 +983,27 @@
                 },
                 "description": {
                   "type": "string"
+                },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "_id": {
+                        "type": "string",
+                        "example": "64b7f0c2e1d2a9b1c8a4f123"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      },
+                      "mimeType": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 },
                 "status": {
                   "type": "string",
@@ -999,6 +1189,27 @@
           },
           "description": {
             "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "_id": {
+                  "type": "string",
+                  "example": "64b7f0c2e1d2a9b1c8a4f123"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "mimeType": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "status": {
             "type": "string",
@@ -1694,117 +1905,6 @@
         }
       }
     },
-    "/api/vendors/{id}/rates": {
-      "put": {
-        "tags": [
-          "Vendors"
-        ],
-        "summary": "Set the agreed AED per km for minor and major services",
-        "description": "Roles: serviceCreator",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "example": "64b7f0c2e1d2a9b1c8a4f123"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "minor",
-                  "major"
-                ],
-                "properties": {
-                  "minor": {
-                    "type": "number"
-                  },
-                  "major": {
-                    "type": "number"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "example": true
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/User"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Role not allowed or resource owned by someone else",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/sheets/readings": {
       "get": {
         "tags": [
@@ -2206,13 +2306,27 @@
             "schema": {
               "type": "string",
               "enum": [
+                "sentToVendor",
+                "estimateSubmitted",
+                "estimateCountered",
                 "pending",
+                "returned",
                 "approved",
                 "acknowledged",
+                "vehicleSent",
+                "vehicleReceived",
+                "workInProgress",
+                "readyForDelivery",
+                "vehicleReleased",
+                "vehicleReturned",
                 "invoiceSubmitted",
                 "invoiceAccepted",
                 "invoiceRejected",
-                "completed"
+                "invoiceReceived",
+                "forwardedToPurchase",
+                "grnCreated",
+                "completed",
+                "declined"
               ]
             }
           },
@@ -2564,6 +2678,113 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "Buses"
+        ],
+        "summary": "Edit a bus. New tickets use the changes; the vendor stays as it was.",
+        "description": "Roles: serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Bus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/tickets": {
@@ -2585,13 +2806,27 @@
             "schema": {
               "type": "string",
               "enum": [
+                "sentToVendor",
+                "estimateSubmitted",
+                "estimateCountered",
                 "pending",
+                "returned",
                 "approved",
                 "acknowledged",
+                "vehicleSent",
+                "vehicleReceived",
+                "workInProgress",
+                "readyForDelivery",
+                "vehicleReleased",
+                "vehicleReturned",
                 "invoiceSubmitted",
                 "invoiceAccepted",
                 "invoiceRejected",
-                "completed"
+                "invoiceReceived",
+                "forwardedToPurchase",
+                "grnCreated",
+                "completed",
+                "declined"
               ]
             }
           },
@@ -2735,8 +2970,10 @@
                   "serviceType": {
                     "type": "string",
                     "enum": [
-                      "minor",
-                      "major",
+                      "oil",
+                      "transmission",
+                      "tyre",
+                      "battery",
                       "repair",
                       "other"
                     ]
@@ -2749,8 +2986,7 @@
                       "AC REPAIR",
                       "ENGINE",
                       "BODY",
-                      "BATTERY REPLACEMENT",
-                      "TYRE REPLACEMENT"
+                      "ACCIDENT"
                     ],
                     "description": "Required when serviceType is repair"
                   },
@@ -2767,6 +3003,10 @@
                   "description": {
                     "type": "string",
                     "maxLength": 1000
+                  },
+                  "isBreakdown": {
+                    "type": "boolean",
+                    "description": "Broke down on the road. Never sent to vendors."
                   }
                 }
               }
@@ -3550,7 +3790,7 @@
         "tags": [
           "Tickets"
         ],
-        "summary": "Vendor sends an estimate (multipart: amount, note, attachments)",
+        "summary": "Vendor sends an estimate (multipart: amount, quotationNumber, daysToComplete, note, attachments)",
         "description": "Roles: vendor",
         "security": [
           {
@@ -3837,7 +4077,7 @@
         "tags": [
           "Tickets"
         ],
-        "summary": "Vendor accepts an approved ticket",
+        "summary": "Vendor accepts an approved ticket. Gives daysToComplete when it has an agreed price.",
         "description": "Roles: vendor",
         "security": [
           {
@@ -3855,6 +4095,22 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "daysToComplete": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -3874,6 +4130,16 @@
                       "$ref": "#/components/schemas/Ticket"
                     }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -3921,12 +4187,612 @@
         }
       }
     },
-    "/api/tickets/{id}/invoice": {
+    "/api/tickets/{id}/breakdown": {
+      "put": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Save the parts, labour hours, consumables and remarks",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "quantity",
+                        "unitPrice"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "partNumber": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "unitPrice": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  },
+                  "labourHours": {
+                    "type": "number"
+                  },
+                  "consumables": {
+                    "type": "number"
+                  },
+                  "remarks": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/scan-quotation": {
       "post": {
         "tags": [
           "Tickets"
         ],
-        "summary": "Vendor submits (or resubmits) an invoice",
+        "summary": "Read the vendor's quotation file with Claude and return lines to check. Saves nothing. 503 SCAN_NOT_CONFIGURED without ANTHROPIC_API_KEY.",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "attachmentId": {
+                    "type": "string",
+                    "example": "64b7f0c2e1d2a9b1c8a4f123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/decline": {
+      "put": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Decline an additional job waiting for approval",
+        "description": "Roles: supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/additional": {
+      "post": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "Raise an additional job while the bus is at the workshop (multipart: description, serviceType, repairCategory, amount, quotationNumber, daysToComplete, note, attachments)",
+        "description": "Roles: vendor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/vehicle/sent": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "The bus went to the vendor",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/vehicle/received": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "The vendor has the bus",
         "description": "Roles: vendor",
         "security": [
           {
@@ -3951,18 +4817,880 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "amount",
-                  "description"
+                  "km"
                 ],
                 "properties": {
-                  "amount": {
-                    "type": "number",
-                    "minimum": 0
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
                   },
-                  "description": {
-                    "type": "string"
+                  "km": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/work/start": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "Work in progress",
+        "description": "Roles: vendor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/work/ready": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "Ready for delivery",
+        "description": "Roles: vendor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/vehicle/release": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "Release the bus, with every linked VSR at the workshop",
+        "description": "Roles: vendor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/vehicle/returned": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "The bus is back, for every linked VSR. Moves the last service on.",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "km"
+                ],
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
                   },
-                  "invoiceNumber": {
+                  "km": {
+                    "type": "integer"
+                  },
+                  "replacedPartsReceived": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/invoice/received": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "The creator has the accepted invoice",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/forward": {
+      "put": {
+        "tags": [
+          "Workshop"
+        ],
+        "summary": "Forward the invoice to purchasing",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Defaults to now, cannot be in the future"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/signature": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Your own signature drawing",
+        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "image": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Save your signature as a PNG data URL",
+        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "image"
+                ],
+                "properties": {
+                  "image": {
                     "type": "string"
                   }
                 }
@@ -3970,6 +5698,1218 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "image": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/grns": {
+      "get": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "List GRNs",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest"
+              ],
+              "default": "newest"
+            },
+            "description": "Order by creation date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "Make one GRN for a batch of forwarded VSRs from one vendor (multipart: number, ticketIds, date, notes, attachments)",
+        "description": "Roles: purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/grns/export": {
+      "get": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "The batch as an Excel file",
+        "description": "Roles: purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticketIds",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma separated"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/purchase-invoices": {
+      "post": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "Make the purchase invoice of a GRN, which closes its VSRs (multipart: number, grnId, date, amount, notes, attachments)",
+        "description": "Roles: purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lpos": {
+      "get": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "List LPOs",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest"
+              ],
+              "default": "newest"
+            },
+            "description": "Order by creation date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "Create an LPO",
+        "description": "Roles: purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "number",
+                  "vendorId",
+                  "validFrom",
+                  "validTo",
+                  "items"
+                ],
+                "properties": {
+                  "number": {
+                    "type": "string"
+                  },
+                  "vendorId": {
+                    "type": "string",
+                    "example": "64b7f0c2e1d2a9b1c8a4f123"
+                  },
+                  "validFrom": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "validTo": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "name",
+                        "quantity",
+                        "unitPrice"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "tyre",
+                            "battery",
+                            "repair",
+                            "other"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "quantity": {
+                          "type": "number"
+                        },
+                        "unitPrice": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lpos/{id}": {
+      "get": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "One LPO with the VSRs that used it",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/query": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "How many of what, for which brand, vendor, bus or year",
+        "description": "Roles: purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "brand",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "vendorId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "busId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "isBreakdown",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupBy",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/fleet": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Month figures for repairs, tyres, batteries and maintenance, by brand or for the fleet",
+        "description": "Roles: serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "brand",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/weekly": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "The last seven days of tyres, batteries and oil, and what is due",
+        "description": "Roles: supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Your own notifications, newest first, with the unread count",
+        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "unread": {
+                      "type": "integer"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/read-all": {
+      "put": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark all of yours as read",
+        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/{id}/read": {
+      "put": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark one of yours as read",
+        "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tickets/{id}/invoice": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Vendor submits (or resubmits) an invoice (multipart: amount, description, invoiceNumber, attachments; a file is required)",
+        "description": "Roles: vendor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
         "responses": {
           "201": {
             "description": "OK",
@@ -4203,95 +7143,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Role not allowed or resource owned by someone else",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Duplicate or invalid state transition",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tickets/{id}/complete": {
-      "put": {
-        "tags": [
-          "Tickets"
-        ],
-        "summary": "Vendor closes the ticket after invoice acceptance",
-        "description": "Roles: vendor",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "example": "64b7f0c2e1d2a9b1c8a4f123"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "example": true
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Ticket"
-                    }
-                  }
                 }
               }
             }
