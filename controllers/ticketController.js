@@ -104,10 +104,17 @@ const priceFromBusRate = ({ bus, vendor, serviceType }) => {
   return { rate, km, amount: Math.round(rate * km * 100) / 100 };
 };
 
+const readingError = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'currentReading', message }]);
+
 const assertReadingAfterLastService = (usage) => {
   if (usage?.unit !== 'km' || usage.actual >= 0) return;
-  const message = 'The reading is lower than the last service of this type for this bus';
-  throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'currentReading', message }]);
+  throw readingError('The reading is lower than the last service of this type for this bus');
+};
+
+/** An odometer cannot read below any service already recorded at a higher km, whatever the work. */
+const assertReadingAfterAnyService = (bus, reading) => {
+  const { oil, transmission, tyre } = bus.intervals;
+  if (reading < Math.max(oil.lastKm, transmission.lastKm, tyre.lastKm)) throw readingError('The reading is lower than the last service recorded for this bus');
 };
 
 /** The fields the creator fills in, shared by raising a ticket and correcting a returned one. */
@@ -117,6 +124,7 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
   const vendor = await assertVendorExists(vendorId || bus.vendor);
   const intervalUsage = usageWhenRaised(bus, serviceType, currentReading);
   assertReadingAfterLastService(intervalUsage);
+  assertReadingAfterAnyService(bus, currentReading);
   return {
     busId: bus._id,
     serviceType,

@@ -314,6 +314,16 @@ describe('browser testing findings', () => {
       assert.deepEqual(firstError(res), { field: 'daysToComplete', message: 'Enter a whole number of days, from 1 to 3650' });
     });
 
+    test('no VSR reads lower than a service already recorded on the bus', async () => {
+      const served = await createBus(users, 'FLOOR', users.vendor1.id, { intervals: { ...busBody('x', 'x').intervals, tyre: { everyKm: 40000, lastKm: 5000 } } });
+      for (const serviceType of ['repair', 'other', 'oil', 'battery']) {
+        const res = await api('POST', '/tickets', { token: users.creator.token, body: { busId: served._id, serviceType, repairCategory: 'ENGINE', currentReading: 3000 } });
+        assert.equal(res.status, 400, serviceType);
+        assert.equal(firstError(res).field, 'currentReading', serviceType);
+      }
+      assert.equal((await api('POST', '/tickets', { token: users.creator.token, body: { busId: served._id, serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 5000 } })).status, 201);
+    });
+
     test('a reading too large says so', async () => {
       const res = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'repair', repairCategory: 'ELECTRICAL', currentReading: 99999999999999 } });
       assert.deepEqual(firstError(res), { field: 'currentReading', message: 'That number is too large' });

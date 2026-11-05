@@ -194,8 +194,11 @@ describe('LPO', () => {
       const bus = await createBus(users, `L${label}`, vendor.id, { rates: { oil: 0.1, transmission: 0.05 } });
       return { vendor, bus };
     };
+    // Each service is raised further on, as an odometer only goes up.
+    let reading = 0;
     const service = async ({ vendor, bus }, serviceType, amount) => {
-      const raised = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType, currentReading: 900 } }));
+      reading += 1000;
+      const raised = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType, currentReading: reading } }));
       assert.equal(raised.status, 'pending', 'priced from the rate on the bus');
       return toInvoiceAccepted(users, raised, vendor, { invoice: { amount: String(amount) } });
     };
