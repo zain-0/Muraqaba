@@ -122,6 +122,22 @@ const BreakdownSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// What accepting the invoice took off the vendor's LPO. Never shown to vendors.
+const LpoDeductionSchema = new mongoose.Schema(
+  {
+    status: { type: String, enum: ['deducted', 'noLpo'], required: true },
+    lpo: { type: mongoose.Schema.Types.ObjectId, ref: 'Lpo', index: true },
+    lpoNumber: String,
+    item: mongoose.Schema.Types.ObjectId,
+    kind: { type: String, required: true },
+    quantity: { type: Number, default: 0 },
+    amount: { type: Number, required: true },
+    overrun: Boolean, // the LPO did not have enough left
+    at: Date,
+  },
+  { _id: false }
+);
+
 const TicketSchema = new mongoose.Schema(
   {
     vsrNumber: { type: String, required: true, unique: true, trim: true },
@@ -176,6 +192,9 @@ const TicketSchema = new mongoose.Schema(
     invoiceRejectedAt: Date,
     invoiceReceivedAt: Date,
     forwardedAt: Date,
+    grn: { type: mongoose.Schema.Types.ObjectId, ref: 'Grn' },
+    purchaseInvoice: { type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseInvoice' },
+    lpoDeduction: LpoDeductionSchema,
     completedAt: Date,
     statusUpdated: Date,
   },

@@ -9,6 +9,7 @@ import { TICKET_POPULATE, paginate } from '../utils/query.js';
 import { UPLOAD_DIR, storedPath, withStoredAttachments } from '../utils/uploads.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
+import { deductFromLpo } from '../utils/lpoDeduction.js';
 
 /**
  * Build the Mongo filter a user is allowed to see, combined with optional query filters.
@@ -42,7 +43,7 @@ const busForVendor = (bus) => {
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
   if (user.role !== 'vendor') return json;
-  const { returnReason, intervalUsage, isBreakdown, breakdown, ...rest } = json;
+  const { returnReason, intervalUsage, isBreakdown, breakdown, grn, purchaseInvoice, lpoDeduction, ...rest } = json;
   return {
     ...rest,
     busId: busForVendor(json.busId),
@@ -334,7 +335,9 @@ export const escalateTicket = asyncHandler(async (req, res) => {
 export const downloadAttachment = asyncHandler(async (req, res) => {
   const ticket = await loadVisibleTicket(req);
   const invoices = await Invoice.find({ ticketId: ticket._id }).select('attachments');
-  const attachment = [...ticket.negotiation, ...invoices].flatMap((holder) => holder.attachments).find((a) => a._id.equals(req.params.attachmentId));
+  // Purchasing's own documents stay with the depot.
+  const purchasing = req.user.role === 'vendor' ? [] : [ticket.grn, ticket.purchaseInvoice].filter(Boolean);
+  const attachment = [...ticket.negotiation, ...invoices, ...purchasing].flatMap((holder) => holder.attachments).find((a) => a._id.equals(req.params.attachmentId));
   if (!attachment) throw new AppError('File not found', 404, 'NOT_FOUND');
   res.attachment(attachment.name);
   res.type(attachment.mimeType);
@@ -400,6 +403,14 @@ export const acceptInvoice = asyncHandler(async (req, res) => {
 
   ticket.transition('invoiceAccepted', req.user._id, req.body?.note);
   await ticket.save();
+
+  // The invoice stands whatever happens to the LPO, so a failure here must not undo it.
+  try {
+    ticket.lpoDeduction = await deductFromLpo(ticket, invoice);
+    if (ticket.lpoDeduction) await ticket.save();
+  } catch (err) {
+    console.error('Could not update the LPO:', err);
+  }
   await respond(res, ticket, 'Invoice accepted. The service creator receives it and forwards it to purchasing.');
 });
 

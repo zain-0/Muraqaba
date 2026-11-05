@@ -13,6 +13,8 @@ export const TICKET_POPULATE = [
   { path: 'invoiceApprovedBy', select: USER_FIELDS },
   { path: 'invoiceRejectedBy', select: USER_FIELDS },
   { path: 'invoice' },
+  { path: 'grn', select: 'number date total notes attachments' },
+  { path: 'purchaseInvoice', select: 'number date amount notes attachments' },
   { path: 'history.by', select: USER_FIELDS },
   { path: 'negotiation.by', select: USER_FIELDS },
 ];

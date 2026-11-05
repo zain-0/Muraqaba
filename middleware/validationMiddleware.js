@@ -2,6 +2,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import { ROLES } from '../models/User.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
+import { LPO_KINDS } from '../models/Purchase.js';
 import { endOfUaeDay, uaeDay } from '../utils/uaeTime.js';
 
 export const handleValidationErrors = (req, res, next) => {
@@ -182,9 +183,55 @@ export const validateVehicleReturned = [
   handleValidationErrors,
 ];
 
-export const validateAcknowledge = [note(), daysToComplete().optional({ values: 'null' }), handleValidationErrors];
-
 const optionalText = (field, max) => body(field, `Keep this to ${max} characters or fewer`).optional({ values: 'falsy' }).isString().trim().isLength({ max });
+
+// A batch of VSRs arrives as comma-separated ids in a form or a query, and leaves as an array.
+export const toIdList = (value) => (typeof value === 'string' ? value.split(',').map((id) => id.trim()).filter(Boolean) : []);
+const validIdList = (value) => {
+  const ids = toIdList(value);
+  return ids.length > 0 && ids.length <= 200 && ids.every((id) => /^[0-9a-fA-F]{24}$/.test(id));
+};
+const BATCH_MESSAGE = 'Choose at least one VSR';
+
+const documentNumber = () => str('number', 'Number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the number');
+const documentNotes = () => body('notes', 'Keep the notes to 1000 characters or fewer').optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 });
+
+export const validateGrn = [
+  documentNumber(),
+  body('ticketIds', BATCH_MESSAGE).custom(validIdList).customSanitizer(toIdList),
+  stepDate(),
+  documentNotes(),
+  handleValidationErrors,
+];
+
+export const validateGrnExport = [query('ticketIds', BATCH_MESSAGE).custom(validIdList), handleValidationErrors];
+
+export const validatePurchaseInvoice = [
+  documentNumber(),
+  str('grnId', 'GRN').isMongoId().withMessage('Choose a GRN'),
+  stepDate(),
+  body('amount', 'Enter an amount, 0 or more').optional({ values: 'falsy' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  documentNotes(),
+  handleValidationErrors,
+];
+
+const isoDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true });
+
+export const validateLpo = [
+  documentNumber(),
+  str('vendorId', 'Vendor').isMongoId().withMessage('Choose a vendor'),
+  isoDay('validFrom', 'Choose the first day of the LPO').toDate(),
+  isoDay('validTo', 'Choose the last day of the LPO, after the first').custom((value, { req }) => new Date(value) >= new Date(req.body.validFrom)).toDate(),
+  body('items', 'Add at least one item').isArray({ min: 1, max: 200 }),
+  body('items.*.kind', 'Choose what this item is for').isString().isIn(LPO_KINDS),
+  body('items.*.name', 'Enter the item name').isString().trim().isLength({ min: 1, max: 120 }),
+  optionalText('items.*.description', 300),
+  body('items.*.quantity', 'Enter a quantity above 0').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  body('items.*.unitPrice', 'Enter a unit price, 0 or more').not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  handleValidationErrors,
+];
+
+export const validateAcknowledge = [note(), daysToComplete().optional({ values: 'null' }), handleValidationErrors];
 
 export const validateBreakdown = [
   body('parts', 'Parts must be a list').optional({ values: 'null' }).isArray({ max: 200 }),
