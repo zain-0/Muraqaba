@@ -163,6 +163,7 @@ export const getRepairSheet = asyncHandler(async (req, res) => {
       const entered = since ? t.history.find((h) => h.at >= since.at && STAGE_OF_STATUS[h.status] === stage) : t.history[0];
       return {
         _id: t._id,
+        vsrNumber: t.vsrNumber,
         fleetNumber: t.busId?.fleetNumber,
         make: t.busId?.make,
         model: t.busId?.model,

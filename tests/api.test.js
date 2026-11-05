@@ -457,6 +457,7 @@ describe('Muraqaba API', () => {
       const back = await sheet();
       const row = back.rows.find((r) => r._id === id);
       assert.equal(row.stage, 'received');
+      assert.equal(row.vsrNumber, raised.body.data.vsrNumber);
       assert.equal(row.estimate, 900);
       assert.ok(back.summary.received[todayIndex] >= 1);
       await submitInvoice(id, users.vendor1);
