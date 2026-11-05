@@ -1,9 +1,9 @@
 import express from 'express';
-import { listVendors, createVendor, setVendorRates } from '../controllers/vendorController.js';
+import { listVendors, createVendor } from '../controllers/vendorController.js';
 import { listTickets } from '../controllers/ticketController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
-import { validateVendorCreate, validateVendorRates, validateTicketListQuery } from '../middleware/validationMiddleware.js';
+import { validateVendorCreate, validateTicketListQuery } from '../middleware/validationMiddleware.js';
 
 const router = express.Router();
 
@@ -15,9 +15,6 @@ router.get('/', roleMiddleware(['serviceCreator', 'supervisor']), listVendors);
 // Create a vendor account (service creator only).
 router.post('/', roleMiddleware(['serviceCreator']), validateVendorCreate, createVendor);
 router.post('/create', roleMiddleware(['serviceCreator']), validateVendorCreate, createVendor); // legacy path
-
-// The agreed per-km prices for minor and major services (service creator only).
-router.put('/:id/rates', roleMiddleware(['serviceCreator']), validateVendorRates, setVendorRates);
 
 // Tickets assigned to the signed-in vendor (same as GET /api/tickets for a vendor).
 router.get('/tickets', roleMiddleware(['vendor']), validateTicketListQuery, listTickets);

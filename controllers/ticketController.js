@@ -7,6 +7,7 @@ import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { TICKET_POPULATE, paginate } from '../utils/query.js';
 import { UPLOAD_DIR, storedPath, withStoredAttachments } from '../utils/uploads.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
+import { usageWhenRaised } from '../utils/intervals.js';
 
 // Statuses the purchase manager is concerned with (anything that has an invoice).
 const PURCHASE_MANAGER_STATUSES = ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'];
@@ -32,12 +33,23 @@ const buildListFilter = (user, q = {}) => {
   return filter;
 };
 
-/** A supervisor's reason for returning a ticket is an internal note, so vendors get it stripped. */
+/** The bus as a vendor may see it: which bus it is, never its rates or intervals. */
+const busForVendor = (bus) => {
+  if (!bus?.fleetNumber) return bus;
+  const { _id, fleetNumber, registrationNumber, chassisNumber, make, model, year } = bus;
+  return { _id, fleetNumber, registrationNumber, chassisNumber, make, model, year };
+};
+
+/** Internal notes and our own figures stay with the depot, so vendors get them stripped. */
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
   if (user.role !== 'vendor') return json;
-  const { returnReason, ...rest } = json;
-  return { ...rest, history: (json.history || []).map((h) => (h.status === 'returned' ? { ...h, note: undefined } : h)) };
+  const { returnReason, intervalUsage, ...rest } = json;
+  return {
+    ...rest,
+    busId: busForVendor(json.busId),
+    history: (json.history || []).map((h) => (h.status === 'returned' ? { ...h, note: undefined } : h)),
+  };
 };
 
 const loadTicket = async (id) => {
@@ -65,34 +77,30 @@ const respond = async (res, ticket, message, status = 200) => {
 };
 
 /**
- * Minor and major services are priced from the vendor's agreed rate: rate times the km since
- * the bus's last ticket of that type, or its whole reading when it has had none.
+ * Oil and transmission services are priced from the rate on the bus, and only for the vendor
+ * that rate was agreed with. The vendor charges by the interval whatever the real km were;
+ * intervalUsage keeps how much was left or delayed.
  */
-const priceFromVendorRate = async ({ vendor, bus, serviceType, currentReading, ticketId }) => {
-  const rate = vendor.serviceRates?.[serviceType];
-  if (!rate) return undefined;
-  const last = await Ticket.findOne({
-    busId: bus._id,
-    serviceType,
-    currentReading: mongoose.trusted({ $exists: true }),
-    ...(ticketId ? { _id: mongoose.trusted({ $ne: ticketId }) } : {}),
-  })
-    .sort({ createdAt: -1 })
-    .select('currentReading');
-  const km = currentReading - (last?.currentReading ?? 0);
-  if (km < 0) {
-    const message = 'The reading is lower than the last VSR of this type for this bus';
-    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'currentReading', message }]);
-  }
+const priceFromBusRate = ({ bus, vendor, serviceType }) => {
+  const rate = bus.rates?.[serviceType];
+  if (!rate || !bus.vendor.equals(vendor._id)) return undefined;
+  const km = bus.intervals[serviceType].everyKm;
   return { rate, km, amount: Math.round(rate * km * 100) / 100 };
 };
 
+const assertReadingAfterLastService = (usage) => {
+  if (usage?.unit !== 'km' || usage.actual >= 0) return;
+  const message = 'The reading is lower than the last service of this type for this bus';
+  throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'currentReading', message }]);
+};
+
 /** The fields the creator fills in, shared by raising a ticket and correcting a returned one. */
-const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId }, ticketId) => {
+const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId }) => {
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
   const vendor = await assertVendorExists(vendorId || bus.vendor);
-  const agreedPrice = await priceFromVendorRate({ vendor, bus, serviceType, currentReading, ticketId });
+  const intervalUsage = usageWhenRaised(bus, serviceType, currentReading);
+  assertReadingAfterLastService(intervalUsage);
   return {
     busId: bus._id,
     serviceType,
@@ -100,7 +108,8 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
     description,
     currentReading,
     vendorId: vendor._id,
-    agreedPrice,
+    agreedPrice: priceFromBusRate({ bus, vendor, serviceType }),
+    intervalUsage,
   };
 };
 
@@ -207,7 +216,7 @@ export const returnTicket = asyncHandler(async (req, res) => {
 export const correctTicketDetails = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'returned', `Only returned VSRs can be changed (this one is ${ticket.status})`);
-  const fields = await requestFields(req.body, ticket._id);
+  const fields = await requestFields(req.body);
   // Estimates belong to the vendor who wrote them, and a new vendor must not read a rival's prices.
   if (ticket.negotiation.length && !fields.vendorId.equals(ticket.vendorId)) {
     throw new AppError('The vendor cannot be changed once estimates have started. Raise a new VSR instead.', 409, 'INVALID_STATE');

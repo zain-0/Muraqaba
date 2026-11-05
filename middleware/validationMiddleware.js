@@ -1,6 +1,5 @@
 import { body, param, query, validationResult } from 'express-validator';
 import { ROLES } from '../models/User.js';
-import { BUS_PARTS } from '../models/Bus.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
 
@@ -48,47 +47,48 @@ export const validateLogin = [
   handleValidationErrors,
 ];
 
-const RATE_MESSAGE = 'Enter a rate above 0';
-const rate = (field) => body(field, RATE_MESSAGE).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat();
-
 export const validateVendorCreate = [
   name(),
   email(),
   password(),
-  rate('serviceRates.minor').optional(),
-  rate('serviceRates.major').optional(),
   handleValidationErrors,
 ];
 
-export const validateVendorRates = [
-  param('id').isMongoId().withMessage('Invalid ID'),
-  rate('minor'),
-  rate('major'),
-  handleValidationErrors,
-];
+const KM_INTERVALS = ['oil', 'transmission', 'tyre'];
 
-const partRules = (part) =>
-  ['serviceKm', 'currentKm'].map((k) =>
-    body(`${part}.${k}`)
-      .isFloat({ min: 0, max: MAX_NUMBER })
-      .withMessage(`${part}.${k} must be a number of kilometres (0 or more)`)
-      .toFloat()
-  );
+const isDate = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).toDate();
 
-export const validateBusCreate = [
+const busRules = () => [
   str('chassisNumber', 'Chassis number').trim().notEmpty().withMessage('Chassis number is required'),
-  str('fleetNumber', 'Fleet number').trim().notEmpty().withMessage('Fleet number is required'),
+  str('fleetNumber', 'Site number').trim().notEmpty().withMessage('Site number is required'),
   str('registrationNumber', 'Registration number').trim().notEmpty().withMessage('Registration number is required'),
-  str('make', 'Make').trim().notEmpty().withMessage('Make is required'),
-  str('model', 'Model').trim().notEmpty().withMessage('Model is required'),
+  str('make', 'Brand').trim().notEmpty().withMessage('Brand is required'),
+  str('model', 'Type').trim().notEmpty().withMessage('Type is required'),
   body('year')
     .isInt({ min: 1900, max: new Date().getFullYear() + 1 })
-    .withMessage('Enter a valid year')
+    .withMessage('Enter a valid model year')
     .toInt(),
+  isDate('registrationExpiry', 'Enter the registration expiry date'),
+  body('expectedLifeYears', 'Enter the expected life in years').not().isArray().isInt({ min: 1, max: 100 }).toInt(),
+  body('labourRate', 'Enter the labour charge per hour, above 0').optional({ values: 'null' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  ...['oil', 'transmission'].map((service) =>
+    body(`rates.${service}`, 'Enter the rate per km, above 0').optional({ values: 'null' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat()
+  ),
+  ...KM_INTERVALS.flatMap((service) => [
+    body(`intervals.${service}.everyKm`, 'Enter the interval in km, above 0').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+    body(`intervals.${service}.lastKm`, 'Enter the km at the last service, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  ]),
+  body('intervals.battery.everyMonths', 'Enter the battery interval in months, above 0').not().isArray().isInt({ min: 1, max: 600 }).toInt(),
+  body('intervals.battery.lastDate', 'Choose when the battery was last changed').optional({ values: 'null' }).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).toDate(),
+];
+
+export const validateBusCreate = [
+  ...busRules(),
   str('vendorId', 'Vendor').isMongoId().withMessage('Choose the vendor responsible for this bus'),
-  ...BUS_PARTS.flatMap((p) => partRules(p)),
   handleValidationErrors,
 ];
+
+export const validateBusUpdate = [...busRules(), handleValidationErrors];
 
 export const validateTicketCreate = [
   str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),

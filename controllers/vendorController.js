@@ -18,7 +18,7 @@ export const listVendors = asyncHandler(async (req, res) => {
 
 // POST /api/vendors
 export const createVendor = asyncHandler(async (req, res) => {
-  const { name, email, password, serviceRates } = req.body;
+  const { name, email, password } = req.body;
 
   const existing = await User.findOne({ email });
   if (existing) {
@@ -33,16 +33,7 @@ export const createVendor = asyncHandler(async (req, res) => {
     email,
     password: hashed,
     role: 'vendor',
-    serviceRates: { minor: serviceRates?.minor, major: serviceRates?.major },
   });
 
   res.status(201).json({ success: true, message: 'Vendor account created', data: vendor });
-});
-
-// PUT /api/vendors/:id/rates  (new VSRs use these; existing ones keep the price they were raised at)
-export const setVendorRates = asyncHandler(async (req, res) => {
-  const { minor, major } = req.body;
-  const vendor = await User.findOneAndUpdate({ _id: req.params.id, role: 'vendor' }, { serviceRates: { minor, major } }, { new: true, runValidators: true });
-  if (!vendor) throw new AppError('Vendor not found', 404, 'NOT_FOUND');
-  res.json({ success: true, message: 'Vendor prices saved', data: vendor });
 });

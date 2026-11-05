@@ -7,77 +7,14 @@
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { BASE, PASSWORD, api, assertNoSecrets, busBody, estimate, run, signInEveryone } from './helpers.js';
 
-const BASE = (process.env.API_URL || 'http://localhost:5000').replace(/\/$/, '') + '/api';
-const run = Date.now().toString(36);
-const PASSWORD = 'TestPass123!';
-
-const api = async (method, path, { token, body } = {}) => {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = { raw: text };
-  }
-  return { status: res.status, body: json, headers: res.headers };
-};
-
-const assertNoSecrets = (value, where = 'response') => {
-  const text = JSON.stringify(value);
-  assert.ok(!/"password"/.test(text), `${where} must not contain a password field`);
-  assert.ok(!/\$2[aby]\$/.test(text), `${where} must not contain a bcrypt hash`);
-};
-
-const users = {};
+let users;
 const ctx = {};
-
-const register = async (role, label) => {
-  const res = await api('POST', '/auth/register', {
-    body: { name: `${label} ${run}`, email: `${label}-${run}@test.muraqaba.dev`, password: PASSWORD, role },
-  });
-  assert.equal(res.status, 201, JSON.stringify(res.body));
-  assert.ok(res.body.token);
-  assert.equal(res.body.user.role, role);
-  assertNoSecrets(res.body);
-  return { token: res.body.token, id: res.body.user.id, email: res.body.user.email };
-};
-
-const signIn = async (email) => {
-  const res = await api('POST', '/auth/login', { body: { email, password: process.env.TEST_STAFF_PASSWORD || PASSWORD } });
-  assert.equal(res.status, 200, `${email}: ${JSON.stringify(res.body)}`);
-  return { token: res.body.token, id: res.body.user.id, email: res.body.user.email };
-};
-
-/** Sends a multipart estimate or reply, the way the browser does. */
-const estimate = async (ticketId, token, fields, suffix = '', files = []) => {
-  const form = new FormData();
-  Object.entries(fields).forEach(([key, value]) => form.set(key, value));
-  files.forEach((file) => form.append('attachments', file));
-  const res = await fetch(`${BASE}/tickets/${ticketId}/estimate${suffix}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-  return { status: res.status, body: await res.json() };
-};
 
 describe('Muraqaba API', () => {
   before(async () => {
-    const health = await api('GET', '/health');
-    assert.equal(health.status, 200, `API not reachable at ${BASE}: ${JSON.stringify(health.body)}`);
-    assert.equal(health.body.db, 'connected');
-
-    // Staff accounts cannot self-register; tests/run.mjs seeds them.
-    users.creator = await signIn('test-creator@muraqaba.test');
-    users.supervisor = await signIn('test-supervisor@muraqaba.test');
-    users.purchasing = await signIn('test-purchasing@muraqaba.test');
-    users.vendor1 = await register('vendor', 'vendor-one');
-    users.vendor2 = await register('vendor', 'vendor-two');
+    users = await signInEveryone();
   });
 
   describe('auth', () => {
@@ -149,22 +86,9 @@ describe('Muraqaba API', () => {
       assert.equal(vendorDenied.status, 403);
     });
 
-    const busPayload = (suffix, vendorId) => ({
-      fleetNumber: `T-${run}-${suffix}`,
-      chassisNumber: `CH-${run}-${suffix}`,
-      registrationNumber: `REG-${run}-${suffix}`,
-      make: 'Hino',
-      model: 'RK8J',
-      year: 2020,
-      vendorId,
-      engine: { serviceKm: 15000, currentKm: 14900 },
-      ac: { serviceKm: 10000, currentKm: 100 },
-      tyre: { serviceKm: 40000, currentKm: 41000 },
-      transmission: { serviceKm: 60000, currentKm: 100 },
-      brakePad: { serviceKm: 20000, currentKm: 100 },
-    });
+    const busPayload = (suffix, vendorId) => busBody(suffix, vendorId, { rates: undefined });
 
-    test('creates a bus, validates parts, rejects duplicates and non-vendor assignees', async () => {
+    test('creates a bus, validates intervals, rejects duplicates and non-vendor assignees', async () => {
       const created = await api('POST', '/buses', { token: users.creator.token, body: busPayload('A', users.vendor1.id) });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       ctx.bus1 = created.body.data;
@@ -175,11 +99,11 @@ describe('Muraqaba API', () => {
       assert.equal(second.status, 201);
       ctx.bus2 = second.body.data;
 
-      const missingPart = { ...busPayload('C', users.vendor1.id) };
-      delete missingPart.brakePad;
-      const invalid = await api('POST', '/buses', { token: users.creator.token, body: missingPart });
+      const missingInterval = busPayload('C', users.vendor1.id);
+      delete missingInterval.intervals;
+      const invalid = await api('POST', '/buses', { token: users.creator.token, body: missingInterval });
       assert.equal(invalid.status, 400);
-      assert.ok(invalid.body.errors.some((e) => e.field.startsWith('brakePad')));
+      assert.ok(invalid.body.errors.some((e) => e.field.startsWith('intervals.')));
 
       const dup = await api('POST', '/buses', { token: users.creator.token, body: busPayload('A', users.vendor1.id) });
       assert.equal(dup.status, 409);
@@ -210,9 +134,7 @@ describe('Muraqaba API', () => {
       assert.equal(typeof manager.body.data.openTickets, 'number');
     });
 
-    test('buses cannot be edited and the vendor directory is not open to purchasing', async () => {
-      const edit = await api('PUT', `/buses/${ctx.bus1._id}`, { token: users.creator.token, body: { make: 'X' } });
-      assert.equal(edit.status, 404);
+    test('the vendor directory is not open to purchasing', async () => {
       const purchasing = await api('GET', '/vendors', { token: users.purchasing.token });
       assert.equal(purchasing.status, 403);
     });
@@ -229,7 +151,7 @@ describe('Muraqaba API', () => {
       for (const currentReading of [undefined, '', -1, 1.5, 'abc', [52000]]) {
         const badReading = await api('POST', '/tickets', {
           token: users.creator.token,
-          body: { busId: ctx.bus1._id, serviceType: 'minor', currentReading },
+          body: { busId: ctx.bus1._id, serviceType: 'oil', currentReading },
         });
         assert.equal(badReading.status, 400, `reading ${JSON.stringify(currentReading)}`);
         assert.equal(badReading.body.errors[0].field, 'currentReading');
@@ -237,7 +159,7 @@ describe('Muraqaba API', () => {
 
       const res = await api('POST', '/tickets', {
         token: users.creator.token,
-        body: { busId: ctx.bus1._id, serviceType: 'repair', repairCategory: 'BATTERY REPLACEMENT', currentReading: 52000, description: 'Battery not holding charge.' },
+        body: { busId: ctx.bus1._id, serviceType: 'battery', currentReading: 52000, description: 'Battery not holding charge.' },
       });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       ctx.ticket = res.body.data;
@@ -369,7 +291,7 @@ describe('Muraqaba API', () => {
 
       const cannotCreate = await api('POST', '/tickets', {
         token: users.purchasing.token,
-        body: { busId: ctx.bus1._id, serviceType: 'minor' },
+        body: { busId: ctx.bus1._id, serviceType: 'oil' },
       });
       assert.equal(cannotCreate.status, 403);
     });
@@ -387,24 +309,8 @@ describe('Muraqaba API', () => {
   });
 
   describe('audit regressions', () => {
-    const newBus = async (suffix, vendorId) => {
-      const res = await api('POST', '/buses', {
-        token: users.creator.token,
-        body: {
-          fleetNumber: `R-${run}-${suffix}`,
-          chassisNumber: `RC-${run}-${suffix}`,
-          registrationNumber: `RR-${run}-${suffix}`,
-          make: 'Isuzu',
-          model: 'LT134',
-          year: 2021,
-          vendorId,
-          engine: { serviceKm: 15000, currentKm: 0 },
-          ac: { serviceKm: 10000, currentKm: 0 },
-          tyre: { serviceKm: 40000, currentKm: 0 },
-          transmission: { serviceKm: 60000, currentKm: 0 },
-          brakePad: { serviceKm: 20000, currentKm: 0 },
-        },
-      });
+    const newBus = async (suffix, vendorId, overrides = { rates: undefined }) => {
+      const res = await api('POST', '/buses', { token: users.creator.token, body: busBody(`R${suffix}`, vendorId, overrides) });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       return res.body.data;
     };
@@ -415,61 +321,26 @@ describe('Muraqaba API', () => {
       return res.body.data;
     };
     const newTicket = async (busId) => {
-      const res = await api('POST', '/tickets', { token: users.creator.token, body: { busId, serviceType: 'minor', currentReading: 52000 } });
+      const res = await api('POST', '/tickets', { token: users.creator.token, body: { busId, serviceType: 'oil', currentReading: 52000 } });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       return res.body.data;
     };
 
-    test('minor and major services take the vendor price per km and skip the negotiation', async () => {
-      const email = `priced-${run}@test.muraqaba.dev`;
-      const created = await api('POST', '/vendors', {
-        token: users.creator.token,
-        body: { name: 'Priced Motors', email, password: PASSWORD, serviceRates: { minor: 0.5, major: 1 } },
-      });
-      assert.equal(created.status, 201, JSON.stringify(created.body));
-      const vendor = created.body.data;
-      assert.equal(vendor.serviceRates.minor, 0.5);
-      const bus = await newBus('PRICE', vendor._id);
-      const raise = (body) => api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, ...body } });
+    test('an agreed price leaves nothing to negotiate, even after a return', async () => {
+      const bus = await newBus('PRICE', users.vendor1.id, {});
+      const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'oil', currentReading: 9000 } });
+      assert.equal(raised.body.data.status, 'pending');
+      const id = raised.body.data._id;
 
-      const first = await raise({ serviceType: 'minor', currentReading: 10000 });
-      assert.equal(first.status, 201, JSON.stringify(first.body));
-      assert.equal(first.body.data.status, 'pending');
-      assert.deepEqual(first.body.data.agreedPrice, { rate: 0.5, km: 10000, amount: 5000 });
-
-      const second = await raise({ serviceType: 'minor', currentReading: 12000 });
-      assert.deepEqual(second.body.data.agreedPrice, { rate: 0.5, km: 2000, amount: 1000 });
-
-      const lower = await raise({ serviceType: 'minor', currentReading: 11000 });
-      assert.equal(lower.status, 400);
-      assert.equal(lower.body.errors[0].field, 'currentReading');
-
-      const major = await raise({ serviceType: 'major', currentReading: 12000 });
-      assert.deepEqual(major.body.data.agreedPrice, { rate: 1, km: 12000, amount: 12000 });
-
-      const repair = await raise({ serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 12000 });
-      assert.equal(repair.body.data.status, 'sentToVendor');
-      assert.equal(repair.body.data.agreedPrice, undefined);
-
-      const reply = await estimate(second.body.data._id, users.creator.token, { note: 'Can we talk?' }, '/reply');
-      assert.equal(reply.status, 409);
-      const returned = await api('PUT', `/tickets/${second.body.data._id}/return`, { token: users.supervisor.token, body: { reason: 'Check it' } });
+      assert.equal((await estimate(id, users.creator.token, { note: 'Can we talk?' }, '/reply')).status, 409);
+      const returned = await api('PUT', `/tickets/${id}/return`, { token: users.supervisor.token, body: { reason: 'Check it' } });
       assert.equal(returned.status, 200);
-      const noTalks = await estimate(second.body.data._id, users.creator.token, { note: 'Can we talk?' }, '/reply');
-      assert.equal(noTalks.status, 409);
-      const again = await api('PUT', `/tickets/${second.body.data._id}/escalate`, { token: users.creator.token });
+      assert.equal((await estimate(id, users.creator.token, { note: 'Can we talk?' }, '/reply')).status, 409);
+      const again = await api('PUT', `/tickets/${id}/escalate`, { token: users.creator.token });
       assert.equal(again.status, 200, JSON.stringify(again.body));
-      const approved = await api('PUT', `/tickets/${second.body.data._id}/approve`, { token: users.supervisor.token });
-      assert.equal(approved.body.data.approvedEstimate, 1000);
+      const approved = await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token });
+      assert.equal(approved.body.data.approvedEstimate, 5000);
       assert.equal(approved.body.data.status, 'approved');
-
-      const setRates = (token, body) => api('PUT', `/vendors/${vendor._id}/rates`, { token, body });
-      assert.equal((await setRates(users.supervisor.token, { minor: 2, major: 3 })).status, 403);
-      assert.equal((await setRates(users.creator.token, { minor: 0, major: 3 })).status, 400);
-      const saved = await setRates(users.creator.token, { minor: 2, major: 3 });
-      assert.equal(saved.status, 200, JSON.stringify(saved.body));
-      assert.equal(saved.body.data.serviceRates.major, 3);
-      assert.equal((await api('PUT', `/vendors/${users.supervisor.id}/rates`, { token: users.creator.token, body: { minor: 2, major: 3 } })).status, 404);
     });
 
     test('daily km sheet: creators fill it, supervisors read it, nobody else sees it', async () => {
@@ -524,12 +395,12 @@ describe('Muraqaba API', () => {
       assert.equal((await put(users.creator.token, { busId: bus._id, date: '2099-01-01', status: 'ready' })).status, 400);
 
       const picked = [
-        [{ serviceType: 'minor' }, 'maintenance'],
-        [{ serviceType: 'major' }, 'maintenance'],
+        [{ serviceType: 'oil' }, 'maintenance'],
+        [{ serviceType: 'transmission' }, 'maintenance'],
         [{ serviceType: 'other' }, 'maintenance'],
         [{ serviceType: 'repair', repairCategory: 'ENGINE' }, 'repair'],
-        [{ serviceType: 'repair', repairCategory: 'TYRE REPLACEMENT' }, 'tyreChange'],
-        [{ serviceType: 'repair', repairCategory: 'BATTERY REPLACEMENT' }, 'batteryChange'],
+        [{ serviceType: 'tyre' }, 'tyreChange'],
+        [{ serviceType: 'battery' }, 'batteryChange'],
         [{ serviceType: 'repair', repairCategory: 'ACCIDENT' }, 'accident'],
       ];
       for (const [body, status] of picked) {
@@ -593,8 +464,8 @@ describe('Muraqaba API', () => {
       assert.equal(row.estimate, 900);
       assert.ok(finished.summary.received[todayIndex] >= 1);
 
-      const minor = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'minor', currentReading: 200 } });
-      assert.equal((await sheet()).rows.find((r) => r._id === minor.body.data._id), undefined, 'minor services are not in the repair process');
+      const oil = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'oil', currentReading: 200 } });
+      assert.equal((await sheet()).rows.find((r) => r._id === oil.body.data._id), undefined, 'oil services are not in the repair process');
     });
 
     test('estimate files upload, stay with those allowed to see them and reject bad types', async () => {
@@ -679,7 +550,7 @@ describe('Muraqaba API', () => {
 
     test('the creator can send a ticket to a vendor other than the bus vendor', async () => {
       const raise = (vendorId) =>
-        api('POST', '/tickets', { token: users.creator.token, body: { busId: ctx.bus1._id, serviceType: 'minor', currentReading: 52000, vendorId } });
+        api('POST', '/tickets', { token: users.creator.token, body: { busId: ctx.bus1._id, serviceType: 'oil', currentReading: 52000, vendorId } });
 
       const res = await raise(users.vendor2.id);
       assert.equal(res.status, 201, JSON.stringify(res.body));
@@ -730,15 +601,8 @@ describe('Muraqaba API', () => {
     });
 
     test('non-finite numbers are rejected', async () => {
-      const bus = await api('POST', '/buses', {
-        token: users.creator.token,
-        body: {
-          fleetNumber: `INF-${run}`, chassisNumber: `INFC-${run}`, registrationNumber: `INFR-${run}`, make: 'Hino', model: 'RK8J', year: 2020,
-          vendorId: users.vendor1.id,
-          engine: { serviceKm: '1e400', currentKm: 0 }, ac: { serviceKm: 1, currentKm: 0 }, tyre: { serviceKm: 1, currentKm: 0 },
-          transmission: { serviceKm: 1, currentKm: 0 }, brakePad: { serviceKm: 1, currentKm: 0 },
-        },
-      });
+      const intervals = { ...busBody('INF', users.vendor1.id).intervals, oil: { everyKm: '1e400', lastKm: 0 } };
+      const bus = await api('POST', '/buses', { token: users.creator.token, body: busBody('INF', users.vendor1.id, { intervals }) });
       assert.equal(bus.status, 400);
     });
 

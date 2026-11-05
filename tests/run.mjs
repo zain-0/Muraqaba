@@ -1,13 +1,14 @@
 /**
  * Self-contained test runner: starts the API on an ephemeral port against a separate
  * `<db>_test` database, seeds the staff accounts the tests sign in with, runs
- * tests/api.test.js against it, then drops that database.
+ * every tests/*.test.js against it one file at a time, then drops that database.
  * Only needs MongoDB to be reachable (docker compose up -d, or npm run db:local).
  *
  *   npm test
  *   API_URL=http://localhost:5000 node --test tests/   # alternative: test a server you started yourself
  */
 import { spawn } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,13 @@ const { port } = server.address();
 const apiUrl = `http://127.0.0.1:${port}`;
 console.log(`Test API on ${apiUrl} (database ${conn.name})`);
 
-const child = spawn(process.execPath, ['--test', join(__dirname, 'api.test.js')], {
+// `npm test -- buses` runs only the files whose name contains that word.
+const wanted = process.argv[2];
+const files = readdirSync(__dirname)
+  .filter((name) => name.endsWith('.test.js') && (!wanted || name.includes(wanted)))
+  .map((name) => join(__dirname, name));
+
+const child = spawn(process.execPath, ['--test', '--test-concurrency=1', ...files], {
   stdio: 'inherit',
   env: { ...process.env, API_URL: apiUrl, TEST_STAFF_PASSWORD: STAFF_PASSWORD },
 });

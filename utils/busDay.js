@@ -6,11 +6,10 @@ import { uaeDay } from './uaeTime.js';
 const LOCKED_STATUSES = ['scrapping', 'removed'];
 
 export const statusForTicket = ({ serviceType, repairCategory }) => {
+  if (serviceType === 'tyre') return 'tyreChange';
+  if (serviceType === 'battery') return 'batteryChange';
   if (serviceType !== 'repair') return 'maintenance';
-  if (repairCategory === 'TYRE REPLACEMENT') return 'tyreChange';
-  if (repairCategory === 'BATTERY REPLACEMENT') return 'batteryChange';
-  if (repairCategory === 'ACCIDENT') return 'accident';
-  return 'repair';
+  return repairCategory === 'ACCIDENT' ? 'accident' : 'repair';
 };
 
 /**

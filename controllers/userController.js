@@ -3,6 +3,7 @@ import Ticket from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
+import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
 
 // GET /api/users/profile
 export const getProfile = asyncHandler(async (req, res) => {
@@ -33,8 +34,11 @@ const countByStatus = async (filter) => {
 };
 
 const busesNeedingService = async (filter) => {
-  const buses = await Bus.find(filter).select('engine ac tyre transmission brakePad');
-  return buses.filter((b) => b.partsDue.length > 0).length;
+  const [buses, latest] = await Promise.all([Bus.find(filter).select('intervals'), latestKmByBus()]);
+  return buses.filter((bus) => {
+    const status = intervalStatus(bus, latest.get(String(bus._id)));
+    return ['oil', 'transmission', 'tyre', 'battery'].some((service) => status[service].state === 'overdue');
+  }).length;
 };
 
 const serviceCreatorDashboard = async (user) => {

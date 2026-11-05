@@ -1,14 +1,12 @@
 import mongoose from 'mongoose';
 
-export const SERVICE_TYPES = ['minor', 'major', 'repair', 'other'];
+export const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'repair', 'other'];
 export const REPAIR_CATEGORIES = [
   'ELECTRICAL',
   'MECHANICAL',
   'AC REPAIR',
   'ENGINE',
   'BODY',
-  'BATTERY REPLACEMENT',
-  'TYRE REPLACEMENT',
   'ACCIDENT',
 ];
 export const TICKET_STATUSES = [
@@ -57,12 +55,25 @@ const NegotiationRoundSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// Minor and major services: the vendor's agreed rate, frozen when the ticket is raised.
+// Oil and transmission services: the rate on the bus times its interval, frozen when the ticket is raised.
 const AgreedPriceSchema = new mongoose.Schema(
   {
     rate: { type: Number, required: true, min: 0 }, // AED per km
     km: { type: Number, required: true, min: 0 },
     amount: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
+// How much of the bus's interval was left or delayed when the ticket was raised. Kept for
+// our own figures; the vendor charges by the interval either way and never sees this.
+const IntervalUsageSchema = new mongoose.Schema(
+  {
+    unit: { type: String, enum: ['km', 'months'], required: true },
+    interval: { type: Number, required: true },
+    actual: { type: Number, required: true },
+    left: { type: Number, required: true },
+    delayed: { type: Number, required: true },
   },
   { _id: false }
 );
@@ -89,6 +100,7 @@ const TicketSchema = new mongoose.Schema(
     status: { type: String, enum: TICKET_STATUSES, default: 'sentToVendor', index: true },
     negotiation: { type: [NegotiationRoundSchema], default: [] },
     agreedPrice: AgreedPriceSchema,
+    intervalUsage: IntervalUsageSchema,
     approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved
     returnReason: { type: String, trim: true, maxlength: 500 }, // never shown to vendors
     history: { type: [HistoryEntrySchema], default: [] },
