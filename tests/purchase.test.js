@@ -157,8 +157,8 @@ describe('purchase invoice', () => {
     assert.ok(!('purchaseInvoice' in seen));
     assert.ok(!JSON.stringify(seen).includes(piNumber('OK')), 'not even in the history notes');
     assert.ok(seen.signatures.some((stamp) => stamp.step === 'approved'), 'the steps of their job stay on it');
-    assert.ok(!seen.signatures.some((stamp) => ['grn', 'purchaseInvoice'].includes(stamp.step)), 'purchasing's own stamps stay with the depot');
-    const inList = (await api('/tickets?status=completed&limit=200', { token: users.vendor1.token })).body.data.find((t) => t._id === a._id);
+    assert.ok(!seen.signatures.some((stamp) => ['grn', 'purchaseInvoice'].includes(stamp.step)), 'the GRN and purchase invoice stamps stay with the depot');
+    const inList = (await api('GET', '/tickets?status=completed&limit=200', { token: users.vendor1.token })).body.data.find((t) => t._id === a._id);
     assert.ok(!inList.signatures.some((stamp) => ['grn', 'purchaseInvoice'].includes(stamp.step)));
   });
 
