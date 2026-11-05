@@ -44,6 +44,7 @@ const busForVendor = (bus) => {
 
 // Steps whose history note is the depot's own: a return reason, a GRN or purchase invoice number.
 const HIDDEN_NOTES = ['returned', 'grnCreated', 'completed'];
+const DEPOT_STAMPS = ['grn', 'purchaseInvoice'];
 
 /** Internal notes and our own figures stay with the depot, so vendors get them stripped. */
 const forViewer = (user, ticket) => {
@@ -54,6 +55,7 @@ const forViewer = (user, ticket) => {
     ...rest,
     busId: busForVendor(json.busId),
     history: (json.history || []).map((h) => (HIDDEN_NOTES.includes(h.status) ? { ...h, note: undefined } : h)),
+    signatures: (json.signatures || []).filter((stamp) => !DEPOT_STAMPS.includes(stamp.step)),
   };
 };
 

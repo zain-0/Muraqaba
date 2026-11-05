@@ -156,6 +156,10 @@ describe('purchase invoice', () => {
     assert.equal(seen.status, 'completed');
     assert.ok(!('purchaseInvoice' in seen));
     assert.ok(!JSON.stringify(seen).includes(piNumber('OK')), 'not even in the history notes');
+    assert.ok(seen.signatures.some((stamp) => stamp.step === 'approved'), 'the steps of their job stay on it');
+    assert.ok(!seen.signatures.some((stamp) => ['grn', 'purchaseInvoice'].includes(stamp.step)), 'purchasing's own stamps stay with the depot');
+    const inList = (await api('/tickets?status=completed&limit=200', { token: users.vendor1.token })).body.data.find((t) => t._id === a._id);
+    assert.ok(!inList.signatures.some((stamp) => ['grn', 'purchaseInvoice'].includes(stamp.step)));
   });
 
   test('the amount can differ from the GRN, and a closed VSR shows on the repair sheet that day', async () => {
