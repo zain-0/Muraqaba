@@ -140,6 +140,14 @@ async function main() {
       ],
     },
     {
+      number: 'LPO-2026-003', vendor: vendor1._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 40000,
+      items: [{ kind: 'maintenance', name: 'Oil and transmission services', description: 'Deducted by price', quantity: 1, unitPrice: 40000, total: 40000 }],
+    },
+    {
+      number: 'LPO-2026-004', vendor: vendor2._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 25000,
+      items: [{ kind: 'maintenance', name: 'Oil and transmission services', description: 'Deducted by price', quantity: 1, unitPrice: 25000, total: 25000 }],
+    },
+    {
       number: 'LPO-2025-014', vendor: vendor1._id, validFrom: new Date('2025-01-01'), validTo: new Date('2025-12-31'), createdBy: purchasing._id, grandTotal: 25500,
       items: [{ kind: 'tyre', name: 'Tyre 295/80 R22.5', description: 'Last year', quantity: 30, unitPrice: 850, total: 25500 }],
     },

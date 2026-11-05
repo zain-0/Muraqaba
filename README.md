@@ -35,7 +35,7 @@ estimateSubmitted ──same negotiation──▶ pending ──approve──▶
 Releasing or getting back the bus moves every linked ticket. Invoice, GRN and purchase invoice stay separate.
 ```
 
-The depot's dates default to now and can be overridden, never into the future. Accepting an invoice takes quantity and amount off the vendor's current LPO for tyres and batteries, amount only for repairs. A short or missing LPO notifies purchasing and the supervisor and never blocks the invoice.
+The depot's dates default to now and can be overridden, never into the future. Accepting an invoice takes quantity and amount off the vendor's current LPO for tyres and batteries, and amount only for repairs, for oil and transmission services (a maintenance line, usually on their own LPO) and for other work. A short or missing LPO notifies purchasing and the supervisor and never blocks the invoice.
 
 Drawn signatures are saved once per person and stamped on escalate, approve, acknowledge, release, invoice accept, GRN and purchase invoice. A stamp keeps the drawing it was made with.
 
@@ -143,6 +143,15 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET, PUT | /api/sheets/readings | read: creator, supervisor; write: creator | Daily km (`?month=YYYY-MM`) |
 | GET, PUT | /api/sheets/status | read: creator, supervisor; write: creator | Daily status (`?month=YYYY-MM`) |
 | GET | /api/sheets/repairs | creator, supervisor | Repair process (`?month=YYYY-MM`) |
+
+## Adding email
+
+Alerts and the weekly report are in the app for now. Every notice passes through `notifyRoles` in `utils/notifications.js`, and every account has an email address, so email is one addition in one place:
+
+1. Add a mail library and SMTP settings to `.env`.
+2. In `notifyRoles`, send when `updateOne` reports `upsertedCount: 1`, so each person gets each notice once. Keep sending outside the write, so a mail failure cannot lose the notice.
+3. Word the email from `type` and `params`. Screens do this in `lib/notifications.ts` in the frontend; the API has no wording of its own yet.
+4. Call `runChecks()` from a timer. Checks only run today when someone reads their notifications, which is enough for the app but not for email, where a person may not have opened it at all. The weekly report's figures come from the same code as `GET /api/reports/weekly`.
 
 ## Production notes
 

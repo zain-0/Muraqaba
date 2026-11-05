@@ -2,6 +2,9 @@
  * In-app notifications. There is no scheduler: reading them runs the checks, at most every few
  * minutes, and each notice has a dedupe key, so a person never gets the same one twice however
  * often the checks run. Screens word the notice from its type and params, in the viewer's language.
+ *
+ * Every notice passes through notifyRoles, which is where email would go. See "Adding email" in
+ * the README.
  */
 import mongoose from 'mongoose';
 import Bus from '../models/Bus.js';
@@ -18,6 +21,7 @@ export const notifyRoles = async (roles, { type, params, link, dedupeKey }) => {
   const users = await User.find({ role: mongoose.trusted({ $in: roles }) }).select('_id');
   await Promise.all(
     users.map((user) =>
+      // upsertedCount is 1 only the first time, so an email sent from here would go out once.
       Notification.updateOne({ user: user._id, dedupeKey }, { $setOnInsert: { type, params, link } }, { upsert: true })
     )
   );

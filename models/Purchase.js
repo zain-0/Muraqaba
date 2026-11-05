@@ -35,8 +35,9 @@ const PurchaseInvoiceSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Which VSRs a line pays for. Tyre and battery lines track quantity and amount, repair lines amount only.
-export const LPO_KINDS = ['tyre', 'battery', 'repair', 'other'];
+// Which VSRs a line pays for. Tyre and battery lines track quantity and amount, the others amount only.
+// Maintenance is oil and transmission services.
+export const LPO_KINDS = ['tyre', 'battery', 'repair', 'maintenance', 'other'];
 
 const LpoItemSchema = new mongoose.Schema(
   {

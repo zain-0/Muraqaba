@@ -180,17 +180,64 @@ describe('LPO', () => {
     assert.equal((await getLpo(small._id)).usedAmount, 0);
   });
 
-  test('no LPO is recorded, and services without an LPO kind take nothing', async () => {
+  test('no LPO is recorded, so someone can look', async () => {
     const context = await setup('NONE');
     const none = await acceptedChange(context, 'tyre', 1, 800);
     assert.equal(none.status, 'invoiceAccepted');
     assert.equal(none.lpoDeduction.status, 'noLpo');
+  });
 
-    const priced = await setup('OIL');
-    await api('PUT', `/buses/${priced.bus._id}`, { token: users.creator.token, body: { ...priced.bus, vendorId: undefined, registrationExpiry: '2030-06-30', rates: { oil: 1 }, intervals: { oil: { everyKm: 1000, lastKm: 0 }, transmission: { everyKm: 1000, lastKm: 0 }, tyre: { everyKm: 1000, lastKm: 0 }, battery: { everyMonths: 18, lastDate: '2026-01-01' } } } });
-    ok(await makeLpo(priced.vendor.id, TYRES));
-    const oil = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: priced.bus._id, serviceType: 'oil', currentReading: 900 } }));
-    const done = await toInvoiceAccepted(users, oil, priced.vendor);
-    assert.equal(done.lpoDeduction, undefined);
+  describe('oil and transmission', () => {
+    /** A bus with rates, so these VSRs are priced from the bus and skip the estimates. */
+    const pricedBus = async (label) => {
+      const vendor = await newVendor(`lpo-${label}`);
+      const bus = await createBus(users, `L${label}`, vendor.id, { rates: { oil: 0.1, transmission: 0.05 } });
+      return { vendor, bus };
+    };
+    const service = async ({ vendor, bus }, serviceType, amount) => {
+      const raised = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType, currentReading: 900 } }));
+      assert.equal(raised.status, 'pending', 'priced from the rate on the bus');
+      return toInvoiceAccepted(users, raised, vendor, { invoice: { amount: String(amount) } });
+    };
+
+    test('both take the price off their own maintenance LPO, and never a quantity', async () => {
+      const context = await pricedBus('MNT');
+      const tyres = ok(await makeLpo(context.vendor.id, TYRES));
+      const maintenance = ok(await makeLpo(context.vendor.id, [{ kind: 'maintenance', name: 'Oil and transmission services', quantity: 1, unitPrice: 50000 }]));
+
+      const oil = await service(context, 'oil', 900);
+      assert.equal(oil.lpoDeduction.status, 'deducted');
+      assert.equal(oil.lpoDeduction.lpoNumber, maintenance.number);
+      assert.equal(oil.lpoDeduction.kind, 'maintenance');
+      assert.equal(oil.lpoDeduction.quantity, 0);
+      assert.equal(oil.lpoDeduction.amount, 900);
+
+      const transmission = await service(context, 'transmission', 3000);
+      assert.equal(transmission.lpoDeduction.lpoNumber, maintenance.number);
+
+      const after = await getLpo(maintenance._id);
+      assert.equal(after.items[0].usedAmount, 3900);
+      assert.equal(after.items[0].usedQuantity, 0);
+      assert.equal(after.items[0].remainingAmount, 46100);
+      assert.equal(after.usage.length, 2, 'the LPO lists both');
+      assert.equal((await getLpo(tyres._id)).usedAmount, 0, 'a tyre LPO is not touched');
+    });
+
+    test('a vendor with no maintenance LPO is flagged, and a tyre LPO does not stand in for one', async () => {
+      const context = await pricedBus('MNO');
+      ok(await makeLpo(context.vendor.id, TYRES));
+      const done = await service(context, 'oil', 900);
+      assert.equal(done.status, 'invoiceAccepted');
+      assert.equal(done.lpoDeduction.status, 'noLpo');
+      assert.equal(done.lpoDeduction.kind, 'maintenance');
+    });
+
+    test('a short maintenance LPO warns on the amount and the invoice still goes through', async () => {
+      const context = await pricedBus('MNS');
+      ok(await makeLpo(context.vendor.id, [{ kind: 'maintenance', name: 'Services', quantity: 1, unitPrice: 500 }]));
+      const done = await service(context, 'oil', 900);
+      assert.equal(done.status, 'invoiceAccepted');
+      assert.equal(done.lpoDeduction.overrun, true);
+    });
   });
 });

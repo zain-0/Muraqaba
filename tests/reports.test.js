@@ -140,6 +140,7 @@ describe('weekly supervisor report', () => {
     await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 9500 } });
     const tyre = await raise(bus._id, { serviceType: 'tyre', currentReading: 9500 });
     await raise(bus._id, { serviceType: 'battery', currentReading: 9500 });
+    const transmission = await raise(bus._id, { serviceType: 'transmission', currentReading: 9500 });
 
     assert.equal((await api('GET', '/reports/weekly', { token: users.creator.token })).status, 403);
     const res = await api('GET', '/reports/weekly', { token: users.supervisor.token });
@@ -148,10 +149,11 @@ describe('weekly supervisor report', () => {
     assert.ok(report.from < report.to);
     assert.ok(report.raised.tyre.some((t) => t._id === tyre._id));
     assert.ok(report.raised.battery.length >= 1);
+    assert.ok(report.raised.transmission.some((t) => t._id === transmission._id), 'transmission is reported too');
     const due = report.due.oil.find((row) => row.fleetNumber === bus.fleetNumber);
     assert.equal(due.state, 'soon');
     assert.equal(due.left, 500);
-    assert.ok(Array.isArray(report.due.tyre) && Array.isArray(report.due.battery));
+    assert.ok(Array.isArray(report.due.tyre) && Array.isArray(report.due.battery) && Array.isArray(report.due.transmission));
   });
 });
 
@@ -193,6 +195,22 @@ describe('notifications', () => {
     assert.equal(open.length, 1, 'the old one stays in history, nothing new');
   });
 
+  test('supervisors hear about transmission services due, like the others', async () => {
+    const vendor = await newVendor('due-t');
+    const bus = await createBus(users, 'DUET', vendor.id, { rates: undefined });
+    const { today } = (await api('GET', '/sheets/readings', { token: users.creator.token })).body.data;
+    await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 59500 } });
+
+    const supervisor = await inbox(users.supervisor.token);
+    const notice = supervisor.data.find((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'transmission');
+    assert.ok(notice, 'transmission is due soon');
+    assert.equal(notice.params.state, 'soon');
+    assert.equal(notice.params.left, 500);
+
+    const report = (await api('GET', '/reports/weekly', { token: users.supervisor.token })).body.data;
+    assert.equal(report.due.transmission.find((row) => row.fleetNumber === bus.fleetNumber).left, 500);
+  });
+
   test('supervisors hear about tyres, batteries and oil due, and vendors hear nothing', async () => {
     const vendor = await newVendor('due');
     const bus = await createBus(users, 'DUEN', vendor.id, { rates: undefined });
@@ -204,7 +222,7 @@ describe('notifications', () => {
     assert.ok(oil, 'oil is overdue');
     assert.equal(oil.params.state, 'overdue');
     assert.equal(oil.params.delayed, 300);
-    assert.ok(!supervisor.data.some((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'transmission'), 'transmission is not on the list');
+    assert.ok(!supervisor.data.some((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'transmission'), 'transmission has plenty left here');
 
     const vendorInbox = await inbox(vendor.token);
     assert.equal(vendorInbox.data.length, 0);

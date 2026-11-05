@@ -105,10 +105,10 @@ export const fleetFigures = asyncHandler(async (req, res) => {
   });
 });
 
-const REPORTED_SERVICES = ['tyre', 'battery', 'oil'];
+const REPORTED_SERVICES = ['tyre', 'battery', 'oil', 'transmission'];
 const REPORT_DAYS = 7;
 
-/** Tyres, batteries and oil that are due soon or overdue, for the report and the alerts. */
+/** Tyres, batteries, oil and transmission services that are due soon or overdue, for the report and the alerts. */
 export const dueServices = async () => {
   const [buses, latest] = await Promise.all([Bus.find().select('fleetNumber make registrationNumber intervals').sort({ fleetNumber: 1 }), latestKmByBus()]);
   const due = Object.fromEntries(REPORTED_SERVICES.map((service) => [service, []]));

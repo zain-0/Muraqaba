@@ -41,6 +41,10 @@ describe('demo data', () => {
       const used = await lpos.findOne({ number: deducted.lpoDeduction.lpoNumber });
       assert.ok(used.usedAmount > 0);
 
+      const maintenance = await tickets.findOne({ 'lpoDeduction.kind': 'maintenance', 'lpoDeduction.status': 'deducted' });
+      assert.ok(maintenance, 'an oil service came off a maintenance LPO');
+      assert.equal(maintenance.lpoDeduction.quantity, 0);
+
       const completed = await tickets.findOne({ status: 'completed' });
       assert.ok(completed.grn && completed.purchaseInvoice && completed.signatures.some((s) => s.step === 'purchaseInvoice'));
 

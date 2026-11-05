@@ -1,13 +1,14 @@
 /**
  * When the supervisor accepts an invoice, tyre and battery VSRs take quantity and amount off
- * the vendor's current LPO and repairs take the amount only. A short LPO never stops the
- * invoice: the work is already done, so the overrun is recorded for people to act on.
+ * the vendor's current LPO. Repairs, oil and transmission services and other work take the
+ * amount only. A short LPO never stops the invoice: the work is already done, so the overrun
+ * is recorded for people to act on.
  */
 import mongoose from 'mongoose';
 import { Lpo } from '../models/Purchase.js';
 import { uaeDay } from './uaeTime.js';
 
-const LPO_SERVICES = ['tyre', 'battery', 'repair', 'other'];
+const LINE_FOR_SERVICE = { tyre: 'tyre', battery: 'battery', repair: 'repair', other: 'other', oil: 'maintenance', transmission: 'maintenance' };
 const COUNTED_BY_QUANTITY = ['tyre', 'battery'];
 
 const hasRoom = (item, quantity, amount) => item.total - item.usedAmount >= amount && (!COUNTED_BY_QUANTITY.includes(item.kind) || item.quantity - item.usedQuantity >= quantity);
@@ -18,10 +19,9 @@ const quantityOf = (ticket) => {
   return ticket.breakdown?.unitsFitted ?? (ticket.breakdown?.parts ?? []).reduce((sum, part) => sum + part.quantity, 0);
 };
 
-/** Returns what to record on the ticket, or undefined when this service uses no LPO. */
+/** Returns what to record on the ticket, or undefined when there is nothing worth recording. */
 export const deductFromLpo = async (ticket, invoice) => {
-  const kind = ticket.serviceType;
-  if (!LPO_SERVICES.includes(kind)) return undefined;
+  const kind = LINE_FOR_SERVICE[ticket.serviceType];
   const amount = invoice.amount;
   const quantity = quantityOf(ticket);
 
