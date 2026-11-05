@@ -93,6 +93,7 @@ describe('GRN', () => {
 
     const seen = await getTicket(ticket._id, users.vendor1.token);
     assert.ok(!('grn' in seen));
+    assert.ok(!JSON.stringify(seen).includes(grnNumber('DOC')), 'not even in the history notes');
   });
 
   test('the batch downloads as a real Excel file', async () => {
@@ -153,6 +154,7 @@ describe('purchase invoice', () => {
     const seen = await getTicket(a._id, users.vendor1.token);
     assert.equal(seen.status, 'completed');
     assert.ok(!('purchaseInvoice' in seen));
+    assert.ok(!JSON.stringify(seen).includes(piNumber('OK')), 'not even in the history notes');
   });
 
   test('the amount can differ from the GRN, and a closed VSR shows on the repair sheet that day', async () => {

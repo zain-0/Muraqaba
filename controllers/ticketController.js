@@ -42,6 +42,9 @@ const busForVendor = (bus) => {
   return { _id, fleetNumber, registrationNumber, chassisNumber, make, model, year };
 };
 
+// Steps whose history note is the depot's own: a return reason, a GRN or purchase invoice number.
+const HIDDEN_NOTES = ['returned', 'grnCreated', 'completed'];
+
 /** Internal notes and our own figures stay with the depot, so vendors get them stripped. */
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
@@ -50,7 +53,7 @@ const forViewer = (user, ticket) => {
   return {
     ...rest,
     busId: busForVendor(json.busId),
-    history: (json.history || []).map((h) => (h.status === 'returned' ? { ...h, note: undefined } : h)),
+    history: (json.history || []).map((h) => (HIDDEN_NOTES.includes(h.status) ? { ...h, note: undefined } : h)),
   };
 };
 
