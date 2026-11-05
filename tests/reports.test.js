@@ -168,7 +168,7 @@ describe('notifications', () => {
     const vendor = await newVendor('expiry');
     const soon = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const bus = await createBus(users, 'EXP', vendor.id, { registrationExpiry: soon });
-    const far = await createBus(users, 'FAR', vendor.id, { registrationExpiry: '2099-01-01' });
+    const far = await createBus(users, 'FAR', vendor.id, { registrationExpiry: '2035-01-01' });
 
     const first = await inbox(users.creator.token);
     const mine = first.data.filter((n) => n.type === 'registrationExpiring' && n.params.fleetNumber === bus.fleetNumber);
@@ -189,7 +189,7 @@ describe('notifications', () => {
     const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const bus = await createBus(users, 'REN', vendor.id, { registrationExpiry: soon });
     await inbox(users.creator.token);
-    await api('PUT', `/buses/${bus._id}`, { token: users.creator.token, body: busBody('REN', vendor.id, { registrationExpiry: '2099-01-01' }) });
+    await api('PUT', `/buses/${bus._id}`, { token: users.creator.token, body: busBody('REN', vendor.id, { registrationExpiry: '2035-01-01' }) });
     const after = await inbox(users.creator.token);
     const open = after.data.filter((n) => n.type === 'registrationExpiring' && n.params.fleetNumber === bus.fleetNumber);
     assert.equal(open.length, 1, 'the old one stays in history, nothing new');

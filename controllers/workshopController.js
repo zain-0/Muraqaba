@@ -41,6 +41,12 @@ const assertAfterPreviousStep = (ticket, date) => {
   if (previous && uaeDay(date) < uaeDay(previous)) throw fieldError('date', 'This date is before the step before it');
 };
 
+/** "VSR-1b", "VSR-1b and VSR-1c", "VSR-1b, VSR-1c and VSR-1d". */
+const listOf = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+/** Two presses of the same button: the first moved the VSR, so the second finds nothing to move. */
+const alreadyMoved = (ticket) => new AppError(`This step has already been recorded (this one is ${ticket.status})`, 409, 'INVALID_STATE');
+
 // A bus at a workshop barely moves, so a reading this far above the last is a typing slip.
 const READING_MARGIN_KM = 20000;
 
@@ -103,18 +109,21 @@ export const releaseVehicle = asyncHandler(async (req, res) => {
   assertAfterPreviousStep(ticket, req.body.date);
 
   const family = await familyOf(ticket);
-  const waiting = family.find((member) => NOT_YET_AT_THE_WORKSHOP.includes(member.status));
-  if (waiting) throw new AppError(`${waiting.vsrNumber} is still waiting. It has to be approved or declined before the bus can leave.`, 409, 'NOT_READY');
+  const waiting = family.filter((member) => NOT_YET_AT_THE_WORKSHOP.includes(member.status)).map((member) => member.vsrNumber).sort();
+  if (waiting.length === 1) throw new AppError(`${waiting[0]} is still waiting. It has to be approved or declined before the bus can leave.`, 409, 'NOT_READY');
+  if (waiting.length > 1) throw new AppError(`${listOf(waiting)} are still waiting. They have to be approved or declined before the bus can leave.`, 409, 'NOT_READY');
 
   // Anything already gone stays as it is, so a job that got left behind can always be released later.
   const moving = family.filter((member) => AT_THE_WORKSHOP.includes(member.status));
+  const self = moving.find((member) => member._id.equals(ticket._id));
+  if (!self) throw alreadyMoved(family.find((member) => member._id.equals(ticket._id)) ?? ticket);
   const when = req.body.date || new Date();
   moving.forEach((member) => {
     stamp(member, req.user, 'vehicleReleased');
     step(member, 'vehicleReleased', req.user, { date: when, fields: { releasedAt: WHEN } });
   });
   await Promise.all(moving.map((member) => member.save()));
-  await respond(res, moving.find((member) => member._id.equals(ticket._id)), 'Bus released. The service creator confirms when it is back.');
+  await respond(res, self, 'Bus released. The service creator confirms when it is back.');
 });
 
 /** The service this VSR did has just been done, so the bus's interval counts from here. */
@@ -135,6 +144,8 @@ export const markVehicleReturned = asyncHandler(async (req, res) => {
   assertReading(km, ticket.vehicle?.receivedKm ?? ticket.currentReading);
   const when = date || new Date();
   const family = (await familyOf(ticket)).filter((member) => member.status === 'vehicleReleased');
+  const self = family.find((member) => member._id.equals(ticket._id));
+  if (!self) throw alreadyMoved({ status: 'vehicleReturned' });
   family.forEach((member) => {
     step(member, 'vehicleReturned', req.user, {
       date: when,
@@ -145,7 +156,7 @@ export const markVehicleReturned = asyncHandler(async (req, res) => {
   await Promise.all(family.map((member) => member.save()));
   await Promise.all(family.map((member) => moveLastService(member, km, when)));
   await BusDailyReading.updateOne({ bus: ticket.busId, date: uaeDay(when) }, { $setOnInsert: { km, by: req.user._id } }, { upsert: true });
-  await respond(res, family.find((member) => member._id.equals(ticket._id)), 'Bus is back. The vendor can now send the invoice.');
+  await respond(res, self, 'Bus is back. The vendor can now send the invoice.');
 });
 
 // PUT /api/tickets/:id/invoice/received  (creator)

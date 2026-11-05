@@ -13,6 +13,7 @@ import { deductFromLpo } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
 import { notifyLpoProblem } from '../utils/notifications.js';
 import { assertScanConfigured, scanQuotation, SCANNABLE_TYPES } from '../utils/quotationScan.js';
+import { CASE_BLIND } from '../utils/unique.js';
 
 /**
  * Build the Mongo filter a user is allowed to see, combined with optional query filters.
@@ -48,7 +49,8 @@ const DEPOT_STEPS = ['invoiceReceived', 'forwardedToPurchase', 'grnCreated'];
 
 /** What a vendor may read of one history entry. */
 const historyForVendor = (entry) => {
-  if (entry.status === 'returned') return { ...entry, note: undefined }; // the reason is internal
+  // The supervisor's reason for returning, and what the creator wrote to the supervisor, are internal.
+  if (entry.status === 'returned' || entry.status === 'pending') return { ...entry, note: undefined };
   if (entry.status === 'completed') return { ...entry, note: undefined, by: undefined, effectiveAt: undefined }; // purchasing closed it
   return entry;
 };
@@ -209,14 +211,29 @@ const linkedTo = async (user, ticket) => {
   return user.role === 'purchaseManager' ? linked.filter((t) => PURCHASE_VISIBLE_STATUSES.includes(t.status)) : linked;
 };
 
+/**
+ * The vendor's other VSRs whose current invoice carries the same number, in any letter case.
+ * One invoice can honestly cover two jobs, so staff are told rather than the vendor refused.
+ */
+const sameInvoiceNumber = async (ticket) => {
+  const number = ticket.invoice?.invoiceNumber;
+  if (!number) return [];
+  const vendor = ticket.vendorId?._id ?? ticket.vendorId;
+  const invoices = await Invoice.find({ vendorId: vendor, invoiceNumber: number, ticketId: mongoose.trusted({ $ne: ticket._id }) }).collation(CASE_BLIND).select('_id');
+  if (!invoices.length) return [];
+  const tickets = await Ticket.find({ invoice: mongoose.trusted({ $in: invoices.map((invoice) => invoice._id) }) }).select('vsrNumber').sort({ vsrNumber: 1 });
+  return tickets.map(({ _id, vsrNumber }) => ({ _id, vsrNumber }));
+};
+
 // GET /api/tickets/:id
 export const getTicketById = asyncHandler(async (req, res) => {
   const ticket = await loadVisibleTicket(req);
 
   // Every invoice ever submitted for this ticket, oldest first, so the UI can show rejections and resubmissions.
   const invoices = await Invoice.find({ ticketId: ticket._id }).sort({ createdAt: 1 });
+  const duplicateInvoiceNumber = req.user.role === 'vendor' ? undefined : await sameInvoiceNumber(ticket);
 
-  res.json({ success: true, data: { ...forViewer(req.user, ticket), invoices, linkedTickets: await linkedTo(req.user, ticket) } });
+  res.json({ success: true, data: { ...forViewer(req.user, ticket), invoices, linkedTickets: await linkedTo(req.user, ticket), duplicateInvoiceNumber } });
 });
 
 // PUT /api/tickets/:id/approve  (supervisor)
@@ -269,11 +286,31 @@ export const correctTicketDetails = asyncHandler(async (req, res) => {
   if (ticket.negotiation.length && !fields.vendorId.equals(ticket.vendorId)) {
     throw new AppError('The vendor cannot be changed once estimates have started. Raise a new VSR instead.', 409, 'INVALID_STATE');
   }
+  // A VSR priced from the bus rate has no estimates to fall back on, and one priced by estimate
+  // has a negotiation the rate would silently override, so neither can turn into the other.
+  if (Boolean(fields.agreedPrice) !== Boolean(ticket.agreedPrice)) {
+    throw new AppError('This change would switch how the VSR is priced, between the bus rate and the vendor\'s estimate. Raise a new VSR instead.', 409, 'INVALID_STATE');
+  }
+  // The price was set when the VSR was raised. Only another bus or service is priced afresh.
+  const samePricing = fields.busId.equals(ticket.busId) && fields.serviceType === ticket.serviceType && fields.vendorId.equals(ticket.vendorId);
+  if (samePricing) delete fields.agreedPrice;
+  const busChanged = !fields.busId.equals(ticket.busId);
   ticket.set(fields);
+  if (busChanged && ticket.breakdown?.labourHours) await repriceLabour(ticket);
   ticket.transition('returned', req.user._id, 'Details corrected');
   await ticket.save();
   await respond(res, ticket, 'VSR details saved');
 });
+
+/** Labour is charged at the bus's own rate, so a VSR moved to another bus takes that bus's rate. */
+const repriceLabour = async (ticket) => {
+  const { labourRate } = await Bus.findById(ticket.busId).select('labourRate');
+  const { breakdown } = ticket;
+  breakdown.labourRate = labourRate;
+  breakdown.labourTotal = money(breakdown.labourHours * (labourRate ?? 0));
+  breakdown.quotationTotal = money(breakdown.partsTotal + breakdown.labourTotal + (breakdown.consumables ?? 0));
+  compareWithEstimate(ticket);
+};
 
 // POST /api/tickets/:id/estimate  (vendor who owns the ticket; multipart, with files)
 export const submitEstimate = asyncHandler(async (req, res) => {

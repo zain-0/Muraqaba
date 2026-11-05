@@ -10,7 +10,7 @@ import mongoose from 'mongoose';
 import Bus from '../models/Bus.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
-import { uaeDay } from './uaeTime.js';
+import { uaeDay, uaeDaysUntil } from './uaeTime.js';
 import { dueServices } from '../controllers/reportController.js';
 
 const CHECK_EVERY_MS = Number(process.env.NOTIFICATION_CHECK_MS ?? 5 * 60 * 1000);
@@ -28,9 +28,10 @@ export const notifyRoles = async (roles, { type, params, link, dedupeKey }) => {
 };
 
 const checkRegistrations = async () => {
-  const now = Date.now();
+  const now = new Date();
   const buses = await Bus.find().select('fleetNumber registrationNumber registrationExpiry');
-  const expiring = buses.filter((bus) => bus.registrationExpiry.getTime() - now <= EXPIRY_WARNING_DAYS * DAY_MS);
+  // Counted in UAE calendar days, so it reads the same at 01:00 as at 23:00.
+  const expiring = buses.filter((bus) => uaeDaysUntil(bus.registrationExpiry, now) <= EXPIRY_WARNING_DAYS);
   await Promise.all(
     expiring.map((bus) =>
       notifyRoles(['serviceCreator'], {
@@ -39,7 +40,7 @@ const checkRegistrations = async () => {
           fleetNumber: bus.fleetNumber,
           registrationNumber: bus.registrationNumber,
           expiry: bus.registrationExpiry,
-          daysLeft: Math.ceil((bus.registrationExpiry.getTime() - now) / DAY_MS),
+          daysLeft: uaeDaysUntil(bus.registrationExpiry, now),
         },
         link: `/buses/${bus._id}`,
         // A renewal is a new date, so it would warn again a year later.

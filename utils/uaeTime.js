@@ -8,6 +8,11 @@ export const uaeDay = (when = new Date()) => new Date(when.getTime() + UAE_OFFSE
 
 export const uaeMonth = (when = new Date()) => uaeDay(when).slice(0, 7);
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whole UAE calendar days from the day of `from` to the day of `when`; negative once it has passed. */
+export const uaeDaysUntil = (when, from = new Date()) => (Date.parse(uaeDay(when)) - Date.parse(uaeDay(from))) / DAY_MS;
+
 /** Every day of a 'YYYY-MM' month. */
 export const daysInMonth = (month) => {
   const [year, monthNumber] = month.split('-').map(Number);

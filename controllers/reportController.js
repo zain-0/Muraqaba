@@ -25,7 +25,20 @@ const matchesType = (ticket, type) => {
 
 const yearRange = (year) => mongoose.trusted({ $gte: startOfUaeDay(`${year}-01-01`), $lte: endOfUaeDay(`${year}-12-31`) });
 
-const brandsOf = async () => (await Bus.distinct('make')).sort();
+/** A brand typed as "hino" on one bus and "Hino" on another is one brand. */
+const brandKey = (make) => String(make ?? '').trim().toLowerCase();
+const sameBrand = (make, brand) => brandKey(make) === brandKey(brand);
+
+// Each brand once, spelt the way most buses spell it.
+const brandsOf = async () => {
+  const spellings = new Map();
+  (await Bus.find().select('make')).forEach(({ make }) => {
+    const counts = spellings.get(brandKey(make)) ?? new Map();
+    counts.set(make, (counts.get(make) ?? 0) + 1);
+    spellings.set(brandKey(make), counts);
+  });
+  return [...spellings.values()].map((counts) => [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]).sort((a, b) => a.localeCompare(b));
+};
 
 const money = (value) => Math.round(value * 100) / 100;
 
@@ -49,7 +62,7 @@ export const runQuery = asyncHandler(async (req, res) => {
   if (isBreakdown) filter.isBreakdown = isBreakdown === 'true';
 
   const tickets = await Ticket.find(filter).select('serviceType repairCategory createdAt busId vendorId invoice').populate('busId', 'make fleetNumber').populate('vendorId', 'name').populate('invoice', 'amount status');
-  const matching = tickets.filter((ticket) => matchesType(ticket, type) && (!brand || ticket.busId?.make === brand));
+  const matching = tickets.filter((ticket) => matchesType(ticket, type) && (!brand || sameBrand(ticket.busId?.make, brand)));
 
   const groups = new Map();
   matching.forEach((ticket) => {
@@ -91,10 +104,10 @@ export const fleetFigures = asyncHandler(async (req, res) => {
     const figure = FLEET_KINDS[kindOf(ticket)];
     if (!figure) return;
     const make = ticket.busId?.make ?? '';
-    const row = byBrand.get(make) ?? { brand: make, ...emptyCounts() };
+    const row = byBrand.get(brandKey(make)) ?? { brand: make, ...emptyCounts() };
     row[figure] += 1;
-    byBrand.set(make, row);
-    if (brand && make !== brand) return;
+    byBrand.set(brandKey(make), row);
+    if (brand && !sameBrand(make, brand)) return;
     months[Number(uaeMonth(ticket.createdAt).slice(5)) - 1][figure] += 1;
     totals[figure] += 1;
   });
@@ -127,7 +140,8 @@ export const dueServices = async () => {
 // GET /api/reports/weekly  (the last seven days, and what is due now)
 export const weeklyReport = asyncHandler(async (req, res) => {
   const to = new Date();
-  const from = new Date(to.getTime() - REPORT_DAYS * 24 * 60 * 60 * 1000);
+  // Seven whole UAE days, today being the last of them.
+  const from = startOfUaeDay(uaeDay(new Date(to.getTime() - (REPORT_DAYS - 1) * 24 * 60 * 60 * 1000)));
   const tickets = await Ticket.find({ createdAt: mongoose.trusted({ $gte: from, $lte: to }), serviceType: mongoose.trusted({ $in: REPORTED_SERVICES }), status: NOT_DECLINED })
     .select('vsrNumber serviceType status createdAt busId vendorId intervalUsage')
     .sort({ createdAt: -1 })

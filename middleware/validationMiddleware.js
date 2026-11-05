@@ -26,11 +26,57 @@ const qstr = (field) => query(field).optional().isString().withMessage(`${field}
 
 // Largest kilometre reading or amount we accept; also rejects "1e400" (Infinity).
 const MAX_NUMBER = 1e12;
+const TOO_LARGE = 'That number is too large';
+const WHOLE = 'Enter a whole number';
+const TWO_DECIMALS = 'Use at most 2 decimals';
+
+/** Money is in fils at the finest: no more than two decimals. */
+const twoDecimals = (value) => {
+  const scaled = Number(value) * 100;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-6;
+};
+
+/**
+ * A number field. `message` covers anything that is not a number in range at the low end;
+ * a number that is too large, has decimals where only whole ones fit, or has more decimals
+ * than money does, each gets its own message, so the screen says what is actually wrong.
+ */
+const number = (field, message, { above, min = 0, max = MAX_NUMBER, whole = false, money = false } = {}) =>
+  body(field)
+    .not()
+    .isArray()
+    .withMessage(message)
+    .isFloat(above === undefined ? { min } : { gt: above })
+    .withMessage(message)
+    .bail()
+    .custom((value) => Number(value) <= max)
+    .withMessage(TOO_LARGE)
+    .bail()
+    .custom((value) => !whole || Number.isInteger(Number(value)))
+    .withMessage(WHOLE)
+    .custom((value) => !money || twoDecimals(value))
+    .withMessage(TWO_DECIMALS)
+    .toFloat();
+
+/** A whole number of kilometres: decimals and minus signs share one message, size its own. */
+const km = (field, message) => body(field, message).not().isArray().isInt({ min: 0 }).bail().custom((value) => Number(value) <= MAX_NUMBER).withMessage(TOO_LARGE).toInt();
+
+/** Text that must be there, within a length the screens can show. */
+const requiredText = (field, label, required, max) =>
+  str(field, label).trim().notEmpty().withMessage(required).bail().isLength({ max }).withMessage(`Keep this to ${max} characters or fewer`);
 const MAX_PAGE = 100000;
 
 const email = () => str('email', 'Email').trim().toLowerCase().isEmail().withMessage('Enter a valid email address');
 const password = () =>
-  str('password', 'Password').isLength({ min: 6, max: 128 }).withMessage('Password must be at least 6 characters');
+  str('password', 'Password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters')
+    .bail()
+    .isLength({ max: 128 })
+    .withMessage('Keep the password to 128 characters or fewer')
+    .bail()
+    .matches(/\S/)
+    .withMessage('Password cannot be only spaces');
 const name = () => str('name', 'Name').trim().isLength({ min: 2, max: 80 }).withMessage('Name must be between 2 and 80 characters');
 const note = (field = 'note') =>
   body(field).optional({ values: 'falsy' }).isString().withMessage('Note must be text').trim().isLength({ max: 500 }).withMessage('Note is too long (500 characters max)');
@@ -58,30 +104,57 @@ export const validateVendorCreate = [
 
 const KM_INTERVALS = ['oil', 'transmission', 'tyre'];
 
-const isDate = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).toDate();
+const isDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).bail();
+
+const yearsAhead = (years) => {
+  const limit = new Date();
+  limit.setUTCFullYear(limit.getUTCFullYear() + years);
+  return limit;
+};
+
+// Rate times interval is the price of the service, which has to stay a sensible amount.
+const priceFits = (service) => (value, { req }) => !(Number(value) * Number(req.body.intervals?.[service]?.everyKm) > MAX_NUMBER);
+
+// A battery was changed between the bus being built (a model year can start the year before) and today.
+const batteryDateFits = (value, { req }) => {
+  const when = new Date(value);
+  const year = Number(req.body.year);
+  const built = Number.isInteger(year) ? new Date(Date.UTC(year - 1, 0, 1)) : new Date(0);
+  return when >= built && when <= endOfUaeDay(uaeDay());
+};
 
 const busRules = () => [
-  str('chassisNumber', 'Chassis number').trim().notEmpty().withMessage('Chassis number is required'),
-  str('fleetNumber', 'Site number').trim().notEmpty().withMessage('Site number is required'),
-  str('registrationNumber', 'Registration number').trim().notEmpty().withMessage('Registration number is required'),
-  str('make', 'Brand').trim().notEmpty().withMessage('Brand is required'),
-  str('model', 'Type').trim().notEmpty().withMessage('Type is required'),
+  requiredText('chassisNumber', 'Chassis number', 'Chassis number is required', 30),
+  requiredText('fleetNumber', 'Site number', 'Site number is required', 30),
+  requiredText('registrationNumber', 'Registration number', 'Registration number is required', 30),
+  requiredText('make', 'Brand', 'Brand is required', 60),
+  requiredText('model', 'Type', 'Type is required', 60),
   body('year')
     .isInt({ min: 1900, max: new Date().getFullYear() + 1 })
     .withMessage('Enter a valid model year')
     .toInt(),
-  isDate('registrationExpiry', 'Enter the registration expiry date'),
+  isDay('registrationExpiry', 'Enter the registration expiry date')
+    .custom((value) => new Date(value) <= yearsAhead(10))
+    .withMessage('Choose an expiry date within the next 10 years')
+    .toDate(),
   body('expectedLifeYears', 'Enter the expected life in years').not().isArray().isInt({ min: 1, max: 100 }).toInt(),
-  body('labourRate', 'Enter the labour charge per hour, above 0').optional({ values: 'null' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  number('labourRate', 'Enter the labour charge per hour, above 0', { above: 0, money: true }).optional({ values: 'null' }),
   ...['oil', 'transmission'].map((service) =>
-    body(`rates.${service}`, 'Enter the rate per km, above 0').optional({ values: 'null' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat()
+    number(`rates.${service}`, 'Enter the rate per km, above 0', { above: 0, money: true })
+      .custom(priceFits(service))
+      .withMessage('That rate makes the service price too large')
+      .optional({ values: 'null' })
   ),
   ...KM_INTERVALS.flatMap((service) => [
-    body(`intervals.${service}.everyKm`, 'Enter the interval in km, above 0').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
-    body(`intervals.${service}.lastKm`, 'Enter the km at the last service, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+    number(`intervals.${service}.everyKm`, 'Enter the interval in km, above 0', { above: 0, whole: true }),
+    number(`intervals.${service}.lastKm`, 'Enter the km at the last service, 0 or more', { whole: true }).optional({ values: 'null' }),
   ]),
   body('intervals.battery.everyMonths', 'Enter the battery interval in months, above 0').not().isArray().isInt({ min: 1, max: 600 }).toInt(),
-  body('intervals.battery.lastDate', 'Choose when the battery was last changed').optional({ values: 'null' }).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).toDate(),
+  isDay('intervals.battery.lastDate', 'Choose when the battery was last changed')
+    .custom(batteryDateFits)
+    .withMessage('Choose a date from the year the bus was built until today')
+    .toDate()
+    .optional({ values: 'null' }),
 ];
 
 export const validateBusCreate = [
@@ -100,11 +173,7 @@ export const validateTicketCreate = [
     .isString()
     .isIn(REPAIR_CATEGORIES)
     .withMessage('Choose a repair category for repair VSRs'),
-  body('currentReading', 'Enter the current reading as a whole number of kilometres')
-    .not()
-    .isArray()
-    .isInt({ min: 0, max: MAX_NUMBER })
-    .toInt(),
+  km('currentReading', 'Enter the current reading as a whole number of kilometres'),
   body('vendorId', 'Choose a vendor').optional({ values: 'falsy' }).isString().isMongoId(),
   body('isBreakdown', 'Breakdown must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
   body('description')
@@ -131,7 +200,7 @@ const sheetDay = () => [
 
 export const validateReadingUpdate = [
   ...sheetDay(),
-  body('km', 'Enter the reading as a whole number of kilometres').optional({ values: 'null' }).not().isArray().isInt({ min: 0, max: MAX_NUMBER }).toInt(),
+  km('km', 'Enter the reading as a whole number of kilometres').optional({ values: 'null' }),
   handleValidationErrors,
 ];
 
@@ -144,18 +213,21 @@ export const validateBusStatusUpdate = [
 const NEGOTIATION_NOTE = 'Keep the note to 1000 characters or fewer';
 const roundNote = () => body('note', NEGOTIATION_NOTE).optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 });
 
-const daysToComplete = () => body('daysToComplete', 'Enter the number of days to complete the work').not().isArray().isInt({ min: 1, max: 3650 }).toInt();
+const daysToComplete = () => body('daysToComplete', 'Enter a whole number of days, from 1 to 3650').not().isArray().isInt({ min: 1, max: 3650 }).toInt();
+
+/** A number someone copies off a document: needed, and short enough to show. */
+const referenceNumber = (field, label, required) => requiredText(field, label, required, 60).withMessage('Keep the number to 60 characters or fewer');
 
 export const validateEstimate = [
-  body('amount', 'Enter the estimate amount').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
-  str('quotationNumber', 'Quotation number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the quotation number'),
+  number('amount', 'Enter the estimate amount', { above: 0, money: true }),
+  referenceNumber('quotationNumber', 'Quotation number', 'Enter the quotation number'),
   daysToComplete(),
   roundNote(),
   handleValidationErrors,
 ];
 
 export const validateEstimateReply = [
-  body('amount', 'Enter a counter amount above 0, or leave it empty').optional({ values: 'falsy' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  number('amount', 'Enter a counter amount above 0, or leave it empty', { above: 0, money: true }).optional({ values: 'falsy' }),
   roundNote(),
   handleValidationErrors,
 ];
@@ -170,7 +242,7 @@ const stepDate = () =>
     .custom((value) => new Date(value) <= endOfUaeDay(uaeDay()))
     .toDate();
 
-const reading = () => body('km', 'Enter the reading as a whole number of kilometres').not().isArray().isInt({ min: 0, max: MAX_NUMBER }).toInt();
+const reading = () => km('km', 'Enter the reading as a whole number of kilometres');
 
 export const validateStepDate = [stepDate(), handleValidationErrors];
 
@@ -193,7 +265,7 @@ const validIdList = (value) => {
 };
 const BATCH_MESSAGE = 'Choose at least one VSR';
 
-const documentNumber = () => str('number', 'Number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the number');
+const documentNumber = () => referenceNumber('number', 'Number', 'Enter the number');
 const documentNotes = () => body('notes', 'Keep the notes to 1000 characters or fewer').optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 });
 
 export const validateGrn = [
@@ -210,10 +282,16 @@ export const validatePurchaseInvoice = [
   documentNumber(),
   str('grnId', 'GRN').isMongoId().withMessage('Choose a GRN'),
   stepDate(),
-  body('amount', 'Enter an amount, 0 or more').optional({ values: 'falsy' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  number('amount', 'Enter an amount, 0 or more', { money: true }).optional({ values: 'falsy' }),
   documentNotes(),
   handleValidationErrors,
 ];
+
+// Tyres and batteries come off an LPO by the unit, so a line of them is a whole number.
+const countedInWholeUnits = (value, { req, path }) => {
+  const kind = req.body.items?.[Number(/\[(\d+)\]/.exec(path)?.[1])]?.kind;
+  return !['tyre', 'battery'].includes(kind) || Number.isInteger(Number(value));
+};
 
 const isoDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true });
 
@@ -226,8 +304,8 @@ export const validateLpo = [
   body('items.*.kind', 'Choose what this item is for').isString().isIn(LPO_KINDS),
   body('items.*.name', 'Enter the item name').isString().trim().isLength({ min: 1, max: 120 }),
   optionalText('items.*.description', 300),
-  body('items.*.quantity', 'Enter a quantity above 0').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
-  body('items.*.unitPrice', 'Enter a unit price, 0 or more').not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  number('items.*.quantity', 'Enter a quantity above 0', { above: 0 }).custom(countedInWholeUnits).withMessage(WHOLE),
+  number('items.*.unitPrice', 'Enter a unit price, 0 or more', { money: true }),
   handleValidationErrors,
 ];
 
@@ -249,11 +327,11 @@ export const validateBreakdown = [
   optionalText('parts.*.description', 300),
   optionalText('parts.*.code', 60),
   optionalText('parts.*.partNumber', 60),
-  body('parts.*.quantity', 'Enter a quantity above 0').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
-  body('parts.*.unitPrice', 'Enter a unit price, 0 or more').not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
-  body('labourHours', 'Enter the labour hours, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: 100000 }).toFloat(),
-  body('consumables', 'Enter the consumables and other costs, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
-  body('unitsFitted', 'Enter how many were fitted, above 0').optional({ values: 'null' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  number('parts.*.quantity', 'Enter a quantity above 0', { above: 0 }),
+  number('parts.*.unitPrice', 'Enter a unit price, 0 or more', { money: true }),
+  number('labourHours', 'Enter the labour hours, 0 or more', { max: 100000, money: true }).optional({ values: 'null' }),
+  number('consumables', 'Enter the consumables and other costs, 0 or more', { money: true }).optional({ values: 'null' }),
+  number('unitsFitted', 'Enter how many were fitted, above 0', { above: 0, whole: true }).optional({ values: 'null' }),
   optionalText('remarks', 1000),
   handleValidationErrors,
 ];
@@ -270,12 +348,12 @@ export const validateTicketReturn = [
 ];
 
 export const validateInvoiceSubmit = [
-  body('amount').isFloat({ min: 0, max: MAX_NUMBER }).withMessage('Amount must be 0 or more').toFloat(),
+  number('amount', 'Amount must be 0 or more', { money: true }),
   str('description', 'Description')
     .trim()
     .isLength({ min: 10, max: 500 })
     .withMessage('Description must be between 10 and 500 characters'),
-  str('invoiceNumber', 'Invoice number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the invoice number'),
+  referenceNumber('invoiceNumber', 'Invoice number', 'Enter the invoice number'),
   handleValidationErrors,
 ];
 
@@ -287,8 +365,8 @@ export const validateTicketDecline = [
 ];
 
 export const validateAdditionalJob = [
-  body('amount', 'Enter the estimate amount').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
-  str('quotationNumber', 'Quotation number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the quotation number'),
+  number('amount', 'Enter the estimate amount', { above: 0, money: true }),
+  referenceNumber('quotationNumber', 'Quotation number', 'Enter the quotation number'),
   daysToComplete(),
   str('serviceType', 'Service type').isIn(['repair', 'tyre', 'battery', 'other']).withMessage('Choose what kind of work this is'),
   body('repairCategory').if(body('serviceType').equals('repair')).isString().isIn(REPAIR_CATEGORIES).withMessage('Choose a repair category for repair VSRs'),

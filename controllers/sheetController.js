@@ -6,7 +6,29 @@ import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { USER_FIELDS } from '../utils/query.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
-const sheetBuses = () => Bus.find().sort({ fleetNumber: 1 }).select('fleetNumber registrationNumber make model');
+/**
+ * The buses on a sheet, each with the first day it was on the fleet: the day it was added, or
+ * an earlier day the sheets already hold for it (history entered for a bus added later).
+ */
+const sheetBuses = async (lastDay) => {
+  const [buses, firstReading, firstStatus] = await Promise.all([
+    Bus.find().sort({ fleetNumber: 1 }).select('fleetNumber registrationNumber make model createdAt'),
+    BusDailyReading.aggregate([{ $group: { _id: '$bus', first: { $min: '$date' } } }]),
+    BusStatusChange.aggregate([{ $group: { _id: '$bus', first: { $min: '$date' } } }]),
+  ]);
+  const earliest = new Map();
+  [...firstReading, ...firstStatus].forEach(({ _id, first }) => {
+    const key = String(_id);
+    if (!earliest.has(key) || first < earliest.get(key)) earliest.set(key, first);
+  });
+  return buses
+    .map((bus) => {
+      const added = uaeDay(bus.createdAt ?? new Date());
+      const sheet = earliest.get(String(bus._id));
+      return Object.assign(bus, { firstDay: sheet && sheet < added ? sheet : added });
+    })
+    .filter((bus) => bus.firstDay <= lastDay);
+};
 
 const busSummary = ({ _id, fleetNumber, registrationNumber, make, model }) => ({ _id, fleetNumber, registrationNumber, make, model });
 
@@ -15,12 +37,33 @@ const assertDayCanChange = async (busId, date) => {
   if (!(await Bus.exists({ _id: busId }))) throw new AppError('Bus not found', 404, 'NOT_FOUND');
 };
 
+// A bus covers far less than this in a day; more than it between two readings is a typing slip.
+const MOST_KM_A_DAY = 2000;
+const READING_MARGIN_KM = 20000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const readingError = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'km', message }]);
+
+/** An odometer only goes up, and only as far as a bus can drive between two readings. */
+const assertReadingFits = async (busId, date, km) => {
+  const [earlier, later] = await Promise.all([
+    BusDailyReading.findOne({ bus: busId, date: mongoose.trusted({ $lt: date }) }).sort({ date: -1 }),
+    BusDailyReading.findOne({ bus: busId, date: mongoose.trusted({ $gt: date }) }).sort({ date: 1 }),
+  ]);
+  if (earlier && km < earlier.km) throw readingError('This is lower than the reading on an earlier day');
+  if (later && km > later.km) throw readingError('This is higher than the reading on a later day');
+  if (earlier) {
+    const days = (Date.parse(date) - Date.parse(earlier.date)) / DAY_MS;
+    if (km - earlier.km > Math.max(READING_MARGIN_KM, days * MOST_KM_A_DAY)) throw readingError('This is far above the earlier reading. Check it.');
+  }
+};
+
 // GET /api/sheets/readings?month=YYYY-MM
 export const getReadingSheet = asyncHandler(async (req, res) => {
   const month = req.query.month || uaeMonth();
   const days = daysInMonth(month);
   const [buses, readings] = await Promise.all([
-    sheetBuses(),
+    sheetBuses(days.at(-1)),
     BusDailyReading.find({ date: mongoose.trusted({ $gte: days[0], $lte: days.at(-1) }) }),
   ]);
   const byBus = new Map();
@@ -43,6 +86,7 @@ export const setReading = asyncHandler(async (req, res) => {
     await BusDailyReading.deleteOne({ bus: busId, date });
     return res.json({ success: true, message: 'Reading removed' });
   }
+  await assertReadingFits(busId, date, km);
   await BusDailyReading.updateOne({ bus: busId, date }, { $set: { km, by: req.user._id } }, { upsert: true, runValidators: true });
   return res.json({ success: true, message: 'Reading saved' });
 });
@@ -53,7 +97,7 @@ export const getStatusSheet = asyncHandler(async (req, res) => {
   const days = daysInMonth(month);
   const today = uaeDay();
   const [buses, changes] = await Promise.all([
-    sheetBuses(),
+    sheetBuses(days.at(-1)),
     BusStatusChange.find({ date: mongoose.trusted({ $lte: days.at(-1) }) }).sort({ date: 1 }),
   ]);
   const byBus = new Map();
@@ -69,7 +113,7 @@ export const getStatusSheet = asyncHandler(async (req, res) => {
     let next = 0;
     let status = 'ready';
     const cells = days.map((day, index) => {
-      if (day > today) return null;
+      if (day > today || day < bus.firstDay) return null; // a bus is counted only once it is on the fleet
       let changedToday = null;
       while (next < list.length && list[next].date <= day) {
         status = list[next].status;

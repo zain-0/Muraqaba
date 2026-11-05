@@ -8,12 +8,22 @@ import { toIdList } from '../middleware/validationMiddleware.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { USER_FIELDS, paginate } from '../utils/query.js';
 import { uaeDay } from '../utils/uaeTime.js';
+import { assertNoClash } from '../utils/unique.js';
+import { REPAIR_CATEGORY_LABELS } from '../models/Ticket.js';
 import { assertCanSign, stamp } from '../utils/signatures.js';
 import { withStoredAttachments } from '../utils/uploads.js';
 
 const money = (value) => Math.round(value * 100) / 100;
 
 const SERVICE_LABELS = { oil: 'Oil service', transmission: 'Transmission service', tyre: 'Tyre change', battery: 'Battery change', repair: 'Repair', other: 'Other' };
+
+const serviceLabel = ({ serviceType, repairCategory }) =>
+  serviceType === 'repair' && repairCategory ? `Repair: ${REPAIR_CATEGORY_LABELS[repairCategory] ?? repairCategory}` : SERVICE_LABELS[serviceType];
+
+// An Excel date is a day; midnight UTC of the UAE day shows that day in any time zone.
+const excelDay = (when) => new Date(`${uaeDay(when)}T00:00:00Z`);
+
+const dateError = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'date', message }]);
 
 const loadBatch = async (ids) => {
   const tickets = await Ticket.find({ _id: mongoose.trusted({ $in: ids }) }).populate('busId', 'fleetNumber registrationNumber make').populate('vendorId', USER_FIELDS).populate('invoice');
@@ -50,10 +60,10 @@ export const exportBatch = asyncHandler(async (req, res) => {
     { header: 'Registration', key: 'registration', width: 16 },
     { header: 'Brand', key: 'brand', width: 14 },
     { header: 'Vendor', key: 'vendor', width: 24 },
-    { header: 'Service', key: 'service', width: 14 },
+    { header: 'Service', key: 'service', width: 22 },
     { header: 'Quotation number', key: 'quotation', width: 18 },
     { header: 'Invoice number', key: 'invoice', width: 18 },
-    { header: 'Invoice date', key: 'date', width: 13 },
+    { header: 'Invoice date', key: 'date', width: 13, style: { numFmt: 'dd mmm yyyy' } },
     { header: 'Amount (AED)', key: 'amount', width: 14, style: { numFmt: '#,##0.00' } },
   ];
   sheet.getRow(1).font = { bold: true };
@@ -64,10 +74,10 @@ export const exportBatch = asyncHandler(async (req, res) => {
       registration: ticket.busId?.registrationNumber,
       brand: ticket.busId?.make,
       vendor: ticket.vendorId?.name,
-      service: SERVICE_LABELS[ticket.serviceType],
+      service: serviceLabel(ticket),
       quotation: ticket.latestEstimate()?.quotationNumber,
       invoice: ticket.invoice?.invoiceNumber,
-      date: ticket.invoice?.submittedAt ? uaeDay(ticket.invoice.submittedAt) : undefined,
+      date: ticket.invoice?.submittedAt ? excelDay(ticket.invoice.submittedAt) : undefined,
       amount: ticket.invoice?.amount,
     });
   });
@@ -83,6 +93,11 @@ export const exportBatch = asyncHandler(async (req, res) => {
 export const createGrn = asyncHandler(async (req, res) => {
   const { number, ticketIds, date, notes } = req.body;
   const tickets = await loadBatch(ticketIds);
+  const onGrn = tickets.find((ticket) => ticket.grn);
+  if (onGrn) {
+    const held = await Grn.findById(onGrn.grn).select('number');
+    throw new AppError(`${onGrn.vsrNumber} is already on GRN ${held?.number}`, 409, 'INVALID_STATE');
+  }
   const waiting = tickets.find((ticket) => ticket.status !== 'forwardedToPurchase');
   if (waiting) throw new AppError(`${waiting.vsrNumber} has not been forwarded to purchasing`, 409, 'INVALID_STATE');
   const vendors = new Set(tickets.map((ticket) => String(ticket.vendorId._id)));
@@ -90,6 +105,10 @@ export const createGrn = asyncHandler(async (req, res) => {
     const message = 'A GRN covers one vendor. Choose VSRs from a single vendor.';
     throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'ticketIds', message }]);
   }
+
+  const reached = tickets.map((ticket) => uaeDay(ticket.forwardedAt ?? ticket.updatedAt)).sort().at(-1);
+  if (date && uaeDay(date) < reached) throw dateError('A GRN cannot be dated before its VSRs reached purchasing');
+  await assertNoClash(Grn, { number });
 
   assertCanSign(req.user);
   const when = date ?? new Date();
@@ -143,6 +162,8 @@ export const createPurchaseInvoice = asyncHandler(async (req, res) => {
   const grn = await Grn.findById(grnId);
   if (!grn) throw new AppError('GRN not found', 404, 'NOT_FOUND');
   if (grn.purchaseInvoice) throw new AppError('This GRN already has a purchase invoice', 409, 'INVALID_STATE');
+  if (date && uaeDay(date) < uaeDay(grn.date)) throw dateError('A purchase invoice cannot be dated before its GRN');
+  await assertNoClash(PurchaseInvoice, { number });
 
   assertCanSign(req.user);
   const when = date ?? new Date();
@@ -197,6 +218,7 @@ export const listLpos = asyncHandler(async (req, res) => {
 export const createLpo = asyncHandler(async (req, res) => {
   const { number, vendorId, validFrom, validTo, items } = req.body;
   const vendor = await assertVendorExists(vendorId);
+  await assertNoClash(Lpo, { number });
   const lines = items.map(({ kind, name, description, quantity, unitPrice }) => ({ kind, name, description, quantity, unitPrice, total: money(quantity * unitPrice) }));
   const lpo = await Lpo.create({
     number,

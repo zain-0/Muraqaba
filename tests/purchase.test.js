@@ -119,7 +119,7 @@ describe('GRN', () => {
     assert.ok(flat.includes(a.vsrNumber) && flat.includes(b.vsrNumber));
     assert.ok(flat.includes(bus.fleetNumber));
     assert.ok(rows[1].includes(900) && rows[2].includes(250));
-    assert.ok(rows[1].includes('Repair'), 'the kind of work reads as a word, not a code');
+    assert.ok(rows[1].some((value) => /^Repair: [A-Z][a-z]/.test(String(value))), 'the kind of work reads as words, not a code');
     assert.ok(rows[3].includes(1150), 'the last row adds them up');
 
     const none = await fetch(`${BASE}/grns/export?ticketIds=`, { headers: { Authorization: `Bearer ${users.purchasing.token}` } });

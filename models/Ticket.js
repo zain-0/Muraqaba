@@ -10,6 +10,9 @@ export const REPAIR_CATEGORIES = [
   'BODY',
   'ACCIDENT',
 ];
+/** How a repair category reads in English, for files such as the GRN's Excel sheet. */
+export const REPAIR_CATEGORY_LABELS = { ELECTRICAL: 'Electrical', MECHANICAL: 'Mechanical', 'AC REPAIR': 'AC repair', ENGINE: 'Engine', BODY: 'Body', ACCIDENT: 'Accident' };
+
 export const TICKET_STATUSES = [
   'sentToVendor', // created, waiting for the vendor's estimate
   'estimateSubmitted', // vendor sent an estimate; the creator replies or escalates it

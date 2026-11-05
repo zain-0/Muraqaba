@@ -6,6 +6,9 @@ import { BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { BUS_POPULATE } from '../utils/query.js';
 import { latestKmByBus, withIntervalStatus } from '../utils/intervals.js';
+import { assertNoClash } from '../utils/unique.js';
+
+const identityOf = ({ fleetNumber, registrationNumber, chassisNumber }) => ({ fleetNumber, registrationNumber, chassisNumber });
 
 export const assertVendorExists = async (vendorId) => {
   const vendor = await User.findById(vendorId);
@@ -59,6 +62,7 @@ const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model
 // POST /api/buses
 export const createBus = asyncHandler(async (req, res) => {
   const vendor = await assertVendorExists(req.body.vendorId);
+  await assertNoClash(Bus, identityOf(req.body));
   const bus = await Bus.create({ ...busFields(req.body), vendor: vendor._id });
   await bus.populate(BUS_POPULATE);
   res.status(201).json({ success: true, message: 'Bus added to the fleet', data: bus });
@@ -68,6 +72,7 @@ export const createBus = asyncHandler(async (req, res) => {
 export const updateBus = asyncHandler(async (req, res) => {
   const bus = await Bus.findById(req.params.id);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+  await assertNoClash(Bus, identityOf(req.body), bus._id);
   bus.set(busFields(req.body));
   await bus.save();
   await bus.populate(BUS_POPULATE);
