@@ -322,14 +322,14 @@ const compareWithEstimate = (ticket) => {
 
 const checkBreakdownAgainstEstimate = (ticket) => {
   if (!ticket.latestEstimate()) {
-    throw new AppError('The vendor has to send an estimate before this can go to the supervisor.', 409, 'INVALID_STATE');
+    throw new AppError('The vendor has to send an estimate before this can go to the supervisor.', 409, 'NOT_READY');
   }
   if (!ticket.breakdown) {
-    throw new AppError('Fill in the parts and labour before sending this to the supervisor.', 409, 'INVALID_STATE');
+    throw new AppError('Fill in the parts and labour before sending this to the supervisor.', 409, 'NOT_READY');
   }
   compareWithEstimate(ticket);
   if (ticket.breakdown.discount < 0) {
-    throw new AppError('The parts and labour total is below the vendor\'s estimate. Correct them or reply to the vendor.', 409, 'INVALID_STATE');
+    throw new AppError('The parts and labour total is below the vendor\'s estimate. Correct them or reply to the vendor.', 409, 'NOT_READY');
   }
 };
 

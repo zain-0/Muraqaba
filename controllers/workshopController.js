@@ -104,7 +104,7 @@ export const releaseVehicle = asyncHandler(async (req, res) => {
 
   const family = await familyOf(ticket);
   const waiting = family.find((member) => NOT_YET_AT_THE_WORKSHOP.includes(member.status));
-  if (waiting) throw new AppError(`${waiting.vsrNumber} is still waiting. It has to be approved or declined before the bus can leave.`, 409, 'INVALID_STATE');
+  if (waiting) throw new AppError(`${waiting.vsrNumber} is still waiting. It has to be approved or declined before the bus can leave.`, 409, 'NOT_READY');
 
   // Anything already gone stays as it is, so a job that got left behind can always be released later.
   const moving = family.filter((member) => AT_THE_WORKSHOP.includes(member.status));

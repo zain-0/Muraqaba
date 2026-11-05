@@ -129,6 +129,7 @@ describe('parts, labour and the check against the estimate', () => {
     const early = await api('PUT', `/tickets/${ticket._id}/escalate`, { token: users.creator.token });
     assert.equal(early.status, 409);
     assert.match(early.body.message, /parts/i);
+    assert.equal(early.body.code, 'NOT_READY', 'nothing changed under them, so the screen must not say it did');
 
     await saveBreakdown(ticket._id);
     const sent = await api('PUT', `/tickets/${ticket._id}/escalate`, { token: users.creator.token });
@@ -152,6 +153,7 @@ describe('parts, labour and the check against the estimate', () => {
     const refused = await api('PUT', `/tickets/${ticket._id}/escalate`, { token: users.creator.token });
     assert.equal(refused.status, 409);
     assert.match(refused.body.message, /below/i);
+    assert.equal(refused.body.code, 'NOT_READY');
 
     await multipart(`/tickets/${ticket._id}/estimate/reply`, users.creator.token, { note: 'That is above the parts and labour' });
     await estimate(ticket._id, users.vendor1.token, { ...FULL_ESTIMATE, amount: '950' });

@@ -86,7 +86,7 @@ npm test -- workshop     # only the files with this word in their name
 
 Interactive docs: `http://localhost:5000/api-docs` (regenerate with `npm run docs:generate`).
 
-All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION_ERROR`, `NO_TOKEN`, `TOKEN_EXPIRED`, `FORBIDDEN`, `NOT_FOUND`, `DUPLICATE`, `INVALID_STATE`, `RATE_LIMITED`) and a `message` safe to show to users. Lists return `{ data, count, total, page, pages }` and accept `?page=&limit=&sort=newest|oldest`.
+All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION_ERROR`, `NO_TOKEN`, `TOKEN_EXPIRED`, `FORBIDDEN`, `NOT_FOUND`, `DUPLICATE`, `INVALID_STATE` (someone moved it first), `NOT_READY` (something still has to be done first), `SIGNATURE_REQUIRED`, `SCAN_NOT_CONFIGURED`, `SCAN_FAILED`, `RATE_LIMITED`) and a `message` safe to show to users. Lists return `{ data, count, total, page, pages }` and accept `?page=&limit=&sort=newest|oldest`.
 
 | Method | Path | Roles | Purpose |
 | --- | --- | --- | --- |

@@ -114,6 +114,7 @@ describe('additional jobs', () => {
 
     const blocked = await put(parent._id, 'vehicle/release', users.vendor1.token);
     assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, 'NOT_READY');
     assert.match(blocked.body.message, new RegExp(job.vsrNumber));
     assert.equal((await read(parent._id)).status, 'readyForDelivery');
 
