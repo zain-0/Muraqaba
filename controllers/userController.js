@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import Ticket from '../models/Ticket.js';
+import Ticket, { PURCHASE_VISIBLE_STATUSES, TICKET_STATUSES } from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
@@ -13,19 +13,7 @@ export const getProfile = asyncHandler(async (req, res) => {
 /** Count tickets grouped by status for the given filter. */
 const countByStatus = async (filter) => {
   const rows = await Ticket.aggregate([{ $match: filter }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
-  const counts = {
-    sentToVendor: 0,
-    estimateSubmitted: 0,
-    estimateCountered: 0,
-    pending: 0,
-    returned: 0,
-    approved: 0,
-    acknowledged: 0,
-    invoiceSubmitted: 0,
-    invoiceAccepted: 0,
-    invoiceRejected: 0,
-    completed: 0,
-  };
+  const counts = Object.fromEntries(TICKET_STATUSES.map((status) => [status, 0]));
   rows.forEach((r) => {
     counts[r._id] = r.n;
   });
@@ -54,7 +42,7 @@ const serviceCreatorDashboard = async (user) => {
     myTickets: mine,
     fleet: { buses, busesNeedingService: busesDue },
     // Things only this role can move forward.
-    actionRequired: all.estimateSubmitted + all.returned + busesDue,
+    actionRequired: all.estimateSubmitted + all.returned + all.acknowledged + all.vehicleReleased + all.invoiceAccepted + all.invoiceReceived + busesDue,
   };
 };
 
@@ -82,16 +70,14 @@ const vendorDashboard = async (user) => {
     role: user.role,
     tickets,
     fleet: { buses, busesNeedingService: busesDue },
-    actionRequired: tickets.sentToVendor + tickets.estimateCountered + tickets.approved + tickets.acknowledged + tickets.invoiceRejected + tickets.invoiceAccepted,
+    actionRequired: tickets.sentToVendor + tickets.estimateCountered + tickets.approved + tickets.vehicleSent + tickets.vehicleReceived + tickets.workInProgress + tickets.readyForDelivery + tickets.vehicleReturned + tickets.invoiceRejected,
   };
 };
 
 const purchaseManagerDashboard = async (user) => {
   const [tickets, amounts] = await Promise.all([
     // Same scope as the purchase manager's ticket list: only tickets that have an invoice.
-    countByStatus({
-      status: mongoose.trusted({ $in: ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'] }),
-    }),
+    countByStatus({ status: mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES }) }),
     Invoice.aggregate([
       { $group: { _id: '$status', n: { $sum: 1 }, amount: { $sum: '$amount' } } },
     ]),
@@ -105,7 +91,7 @@ const purchaseManagerDashboard = async (user) => {
     role: user.role,
     tickets,
     invoices,
-    actionRequired: 0, // read-only role
+    actionRequired: tickets.forwardedToPurchase + tickets.grnCreated,
   };
 };
 

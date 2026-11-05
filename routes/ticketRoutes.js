@@ -18,8 +18,17 @@ import {
   submitInvoice,
   acceptInvoice,
   rejectInvoice,
-  completeTicket,
 } from '../controllers/ticketController.js';
+import {
+  markVehicleSent,
+  markVehicleReceived,
+  startWork,
+  markReady,
+  releaseVehicle,
+  markVehicleReturned,
+  markInvoiceReceived,
+  forwardToPurchase,
+} from '../controllers/workshopController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
 import {
@@ -35,6 +44,9 @@ import {
   validateAttachmentParams,
   validateObjectId,
   validateTicketListQuery,
+  validateStepDate,
+  validateVehicleReceived,
+  validateVehicleReturned,
 } from '../middleware/validationMiddleware.js';
 
 import { parseAttachments } from '../utils/uploads.js';
@@ -68,9 +80,16 @@ router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, p
 router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
 router.put('/:id/breakdown', roleMiddleware(CREATORS), validateObjectId, validateBreakdown, saveBreakdown);
 router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateAcknowledge, acknowledgeTicket);
-router.post('/:id/invoice', roleMiddleware(['vendor']), validateObjectId, validateInvoiceSubmit, submitInvoice);
+router.put('/:id/vehicle/sent', roleMiddleware(CREATORS), validateObjectId, validateStepDate, markVehicleSent);
+router.put('/:id/vehicle/received', roleMiddleware(['vendor']), validateObjectId, validateVehicleReceived, markVehicleReceived);
+router.put('/:id/work/start', roleMiddleware(['vendor']), validateObjectId, validateStepDate, startWork);
+router.put('/:id/work/ready', roleMiddleware(['vendor']), validateObjectId, validateStepDate, markReady);
+router.put('/:id/vehicle/release', roleMiddleware(['vendor']), validateObjectId, validateStepDate, releaseVehicle);
+router.put('/:id/vehicle/returned', roleMiddleware(CREATORS), validateObjectId, validateVehicleReturned, markVehicleReturned);
+router.post('/:id/invoice', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateInvoiceSubmit, submitInvoice);
 router.put('/:id/invoice/accept', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, acceptInvoice);
 router.put('/:id/invoice/reject', roleMiddleware(['supervisor']), validateObjectId, validateInvoiceReject, rejectInvoice);
-router.put('/:id/complete', roleMiddleware(['vendor']), validateObjectId, validateTransitionNote, completeTicket);
+router.put('/:id/invoice/received', roleMiddleware(CREATORS), validateObjectId, validateStepDate, markInvoiceReceived);
+router.put('/:id/forward', roleMiddleware(CREATORS), validateObjectId, validateStepDate, forwardToPurchase);
 
 export default router;

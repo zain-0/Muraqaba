@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { AttachmentSchema } from './shared.js';
 
 export const INVOICE_STATUSES = ['invoicePending', 'approved', 'rejected'];
 
@@ -8,6 +9,7 @@ const InvoiceSchema = new mongoose.Schema(
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     invoiceNumber: { type: String, trim: true, maxlength: 60 }, // the reference number used by the vendor
     amount: { type: Number, required: true, min: 0 },
+    attachments: { type: [AttachmentSchema], default: [] },
     description: { type: String, required: true, trim: true, maxlength: 1000 },
     status: { type: String, enum: INVOICE_STATUSES, default: 'invoicePending', index: true },
     submittedAt: { type: Date, default: Date.now },

@@ -7,7 +7,7 @@
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE, PASSWORD, api, assertNoSecrets, busBody, estimate, fillBreakdown, run, signInEveryone } from './helpers.js';
+import { BASE, PASSWORD, api, assertNoSecrets, busBody, estimate, fillBreakdown, fromAcknowledgedToReturned, multipart, run, signInEveryone, submitInvoice, fileOf } from './helpers.js';
 
 let users;
 const ctx = {};
@@ -232,14 +232,14 @@ describe('Muraqaba API', () => {
       assert.equal(ack.body.data.status, 'acknowledged');
     });
 
-    test('invoice submit, reject, resubmit, accept, complete', async () => {
-      const bad = await api('POST', `/tickets/${ctx.ticket._id}/invoice`, { token: users.vendor1.token, body: { amount: -5, description: 'x' } });
+    test('invoice submit, reject, resubmit, accept', async () => {
+      await fromAcknowledgedToReturned(users, ctx.ticket._id, users.vendor1);
+      const send = (fields) => multipart(`/tickets/${ctx.ticket._id}/invoice`, users.vendor1.token, fields, [fileOf('invoice.pdf')]);
+
+      const bad = await send({ amount: '-5', description: 'x', invoiceNumber: 'INV-0' });
       assert.equal(bad.status, 400);
 
-      const submit = await api('POST', `/tickets/${ctx.ticket._id}/invoice`, {
-        token: users.vendor1.token,
-        body: { amount: 12000, description: 'New battery and labour', invoiceNumber: 'INV-1' },
-      });
+      const submit = await send({ amount: '12000', description: 'New battery and labour', invoiceNumber: 'INV-1' });
       assert.equal(submit.status, 201, JSON.stringify(submit.body));
       assert.equal(submit.body.data.status, 'invoiceSubmitted');
       assert.equal(submit.body.data.invoice.amount, 12000);
@@ -256,13 +256,7 @@ describe('Muraqaba API', () => {
       assert.equal(reject.body.data.invoice.status, 'rejected');
       assert.equal(reject.body.data.invoice.rejectionReason, 'Please itemise labour.');
 
-      const completeTooEarly = await api('PUT', `/tickets/${ctx.ticket._id}/complete`, { token: users.vendor1.token });
-      assert.equal(completeTooEarly.status, 409);
-
-      const resubmit = await api('POST', `/tickets/${ctx.ticket._id}/invoice`, {
-        token: users.vendor1.token,
-        body: { amount: 11000, description: 'Battery 9000, labour 2000', invoiceNumber: 'INV-2' },
-      });
+      const resubmit = await send({ amount: '11000', description: 'Battery 9000, labour 2000', invoiceNumber: 'INV-2' });
       assert.equal(resubmit.status, 201);
       assert.equal(resubmit.body.data.status, 'invoiceSubmitted');
 
@@ -274,18 +268,13 @@ describe('Muraqaba API', () => {
       const accept = await api('PUT', `/tickets/${ctx.ticket._id}/invoice/accept`, { token: users.supervisor.token });
       assert.equal(accept.status, 200);
       assert.equal(accept.body.data.status, 'invoiceAccepted');
-
-      const complete = await api('PUT', `/tickets/${ctx.ticket._id}/complete`, { token: users.vendor1.token });
-      assert.equal(complete.status, 200);
-      assert.equal(complete.body.data.status, 'completed');
-      assert.ok(complete.body.data.completedAt);
     });
 
     test('purchase manager sees invoiced tickets only', async () => {
       const list = await api('GET', '/tickets', { token: users.purchasing.token });
       assert.equal(list.status, 200);
       assert.ok(list.body.data.some((t) => t._id === ctx.ticket._id));
-      assert.ok(list.body.data.every((t) => ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'].includes(t.status)));
+      assert.ok(list.body.data.every((t) => ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed'].includes(t.status)));
 
       const pending = await api('GET', '/tickets?status=pending', { token: users.purchasing.token });
       assert.equal(pending.body.data.length, 0);
@@ -456,16 +445,26 @@ describe('Muraqaba API', () => {
       await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token });
       assert.equal(await stage(), 'estimateApproved');
       await api('PUT', `/tickets/${id}/acknowledge`, { token: users.vendor1.token });
+      assert.equal(await stage(), 'estimateApproved');
+      await api('PUT', `/tickets/${id}/vehicle/sent`, { token: users.creator.token });
       assert.equal(await stage(), 'goneForRepair');
-      await api('POST', `/tickets/${id}/invoice`, { token: users.vendor1.token, body: { amount: 900, description: 'Engine work and labour', invoiceNumber: `INV-${run}` } });
-      assert.equal(await stage(), 'invoicing');
-      await api('PUT', `/tickets/${id}/invoice/accept`, { token: users.supervisor.token });
-      await api('PUT', `/tickets/${id}/complete`, { token: users.vendor1.token });
-      const finished = await sheet();
-      const row = finished.rows.find((r) => r._id === id);
+      await api('PUT', `/tickets/${id}/vehicle/received`, { token: users.vendor1.token, body: { km: 110 } });
+      await api('PUT', `/tickets/${id}/work/start`, { token: users.vendor1.token });
+      await api('PUT', `/tickets/${id}/work/ready`, { token: users.vendor1.token });
+      await api('PUT', `/tickets/${id}/vehicle/release`, { token: users.vendor1.token });
+      assert.equal(await stage(), 'goneForRepair');
+      await api('PUT', `/tickets/${id}/vehicle/returned`, { token: users.creator.token, body: { km: 120 } });
+      const back = await sheet();
+      const row = back.rows.find((r) => r._id === id);
       assert.equal(row.stage, 'received');
       assert.equal(row.estimate, 900);
-      assert.ok(finished.summary.received[todayIndex] >= 1);
+      assert.ok(back.summary.received[todayIndex] >= 1);
+      await submitInvoice(id, users.vendor1);
+      assert.equal(await stage(), 'invoicing');
+      await api('PUT', `/tickets/${id}/invoice/accept`, { token: users.supervisor.token });
+      await api('PUT', `/tickets/${id}/invoice/received`, { token: users.creator.token });
+      await api('PUT', `/tickets/${id}/forward`, { token: users.creator.token });
+      assert.equal(await stage(), 'invoicing');
 
       const oil = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'oil', currentReading: 200 } });
       assert.equal((await sheet()).rows.find((r) => r._id === oil.body.data._id), undefined, 'oil services are not in the repair process');
@@ -614,12 +613,9 @@ describe('Muraqaba API', () => {
       const ticket = await toApproval(await newTicket(bus._id), users.vendor2);
       await api('PUT', `/tickets/${ticket._id}/approve`, { token: users.supervisor.token });
       await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor2.token });
+      await fromAcknowledgedToReturned(users, ticket._id, users.vendor2);
 
-      const attempts = await Promise.all(
-        [1, 2, 3].map((n) =>
-          api('POST', `/tickets/${ticket._id}/invoice`, { token: users.vendor2.token, body: { amount: 100 * n, description: `Invoice attempt ${n}` } })
-        )
-      );
+      const attempts = await Promise.all([1, 2, 3].map((n) => submitInvoice(ticket._id, users.vendor2, { amount: String(100 * n), description: `Invoice attempt ${n}` })));
       const statuses = attempts.map((a) => a.status).sort();
       assert.equal(statuses.filter((s) => s === 201).length, 1, statuses.join());
       assert.ok(statuses.filter((s) => s !== 201).every((s) => s === 409), statuses.join());
@@ -638,7 +634,7 @@ describe('Muraqaba API', () => {
         assert.ok(res.body.data.tickets, key);
       }
       const vendor = await api('GET', '/users/dashboard', { token: users.vendor1.token });
-      assert.ok(vendor.body.data.tickets.completed >= 1);
+      assert.ok(vendor.body.data.tickets.total >= 1);
     });
 
     test('profile hides the password hash', async () => {

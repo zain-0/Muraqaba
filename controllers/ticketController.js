@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import Ticket from '../models/Ticket.js';
+import Ticket, { PURCHASE_VISIBLE_STATUSES } from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
 import { nextVsrNumber } from '../models/Counter.js';
@@ -10,9 +10,6 @@ import { UPLOAD_DIR, storedPath, withStoredAttachments } from '../utils/uploads.
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
 
-// Statuses the purchase manager is concerned with (anything that has an invoice).
-const PURCHASE_MANAGER_STATUSES = ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'completed'];
-
 /**
  * Build the Mongo filter a user is allowed to see, combined with optional query filters.
  * Operator objects built here are server-controlled, so they are marked trusted; the global
@@ -21,9 +18,9 @@ const PURCHASE_MANAGER_STATUSES = ['invoiceSubmitted', 'invoiceAccepted', 'invoi
 const buildListFilter = (user, q = {}) => {
   const filter = {};
   if (user.role === 'vendor') filter.vendorId = user._id;
-  if (user.role === 'purchaseManager') filter.status = mongoose.trusted({ $in: PURCHASE_MANAGER_STATUSES });
+  if (user.role === 'purchaseManager') filter.status = mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES });
   if (q.status) {
-    if (user.role === 'purchaseManager' && !PURCHASE_MANAGER_STATUSES.includes(q.status)) {
+    if (user.role === 'purchaseManager' && !PURCHASE_VISIBLE_STATUSES.includes(q.status)) {
       filter.status = mongoose.trusted({ $in: [] }); // outside this role's scope: return nothing rather than leak
     } else {
       filter.status = q.status;
@@ -53,26 +50,26 @@ const forViewer = (user, ticket) => {
   };
 };
 
-const loadTicket = async (id) => {
+export const loadTicket = async (id) => {
   const ticket = await Ticket.findById(id);
   if (!ticket) throw new AppError('VSR not found', 404, 'NOT_FOUND');
   return ticket;
 };
 
-const assertVendorOwns = (ticket, user) => {
+export const assertVendorOwns = (ticket, user) => {
   if (!ticket.vendorId.equals(user._id)) {
     throw new AppError('This VSR is assigned to a different vendor', 403, 'FORBIDDEN');
   }
 };
 
-const assertStatus = (ticket, allowed, explanation) => {
+export const assertStatus = (ticket, allowed, explanation) => {
   const list = Array.isArray(allowed) ? allowed : [allowed];
   if (!list.includes(ticket.status)) {
     throw new AppError(explanation, 409, 'INVALID_STATE');
   }
 };
 
-const respond = async (res, ticket, message, status = 200) => {
+export const respond = async (res, ticket, message, status = 200) => {
   await ticket.populate(TICKET_POPULATE);
   res.status(status).json({ success: true, message, data: forViewer(res.req.user, ticket) });
 };
@@ -177,7 +174,7 @@ const loadVisibleTicket = async (req) => {
     // Respond as if it does not exist so vendors cannot enumerate other vendors' tickets.
     throw new AppError('VSR not found', 404, 'NOT_FOUND');
   }
-  if (req.user.role === 'purchaseManager' && !PURCHASE_MANAGER_STATUSES.includes(ticket.status)) {
+  if (req.user.role === 'purchaseManager' && !PURCHASE_VISIBLE_STATUSES.includes(ticket.status)) {
     // Same scope as the list: purchasing only sees tickets that have an invoice.
     throw new AppError('VSR not found', 404, 'NOT_FOUND');
   }
@@ -336,7 +333,8 @@ export const escalateTicket = asyncHandler(async (req, res) => {
 // GET /api/tickets/:id/attachments/:attachmentId
 export const downloadAttachment = asyncHandler(async (req, res) => {
   const ticket = await loadVisibleTicket(req);
-  const attachment = ticket.negotiation.flatMap((round) => round.attachments).find((a) => a._id.equals(req.params.attachmentId));
+  const invoices = await Invoice.find({ ticketId: ticket._id }).select('attachments');
+  const attachment = [...ticket.negotiation, ...invoices].flatMap((holder) => holder.attachments).find((a) => a._id.equals(req.params.attachmentId));
   if (!attachment) throw new AppError('File not found', 404, 'NOT_FOUND');
   res.attachment(attachment.name);
   res.type(attachment.mimeType);
@@ -357,7 +355,7 @@ export const acknowledgeTicket = asyncHandler(async (req, res) => {
   }
   ticket.transition('acknowledged', req.user._id, req.body?.note);
   await ticket.save();
-  await respond(res, ticket, 'VSR acknowledged. Submit an invoice when the work is done.');
+  await respond(res, ticket, 'VSR acknowledged. The service creator sends the bus.');
 });
 
 // POST /api/tickets/:id/invoice  (vendor who owns the ticket)
@@ -367,24 +365,23 @@ export const submitInvoice = asyncHandler(async (req, res) => {
   assertVendorOwns(ticket, req.user);
   assertStatus(
     ticket,
-    ['acknowledged', 'invoiceRejected'],
-    `An invoice can only be submitted after the VSR is acknowledged or after a rejection (this one is ${ticket.status})`
+    ['vehicleReturned', 'invoiceRejected'],
+    `An invoice can only be submitted after the bus is back or after a rejection (this one is ${ticket.status})`
   );
+  if (!req.files?.length) {
+    const message = 'Attach the invoice';
+    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'attachments', message }]);
+  }
 
-  const invoice = new Invoice({
-    ticketId: ticket._id,
-    vendorId: req.user._id,
-    amount,
-    description,
-    invoiceNumber: invoiceNumber || undefined,
+  await withStoredAttachments(req.files, async (attachments) => {
+    const invoice = new Invoice({ ticketId: ticket._id, vendorId: req.user._id, amount, description, invoiceNumber, attachments });
+    // Save the ticket first: if a concurrent submission already moved it, the version
+    // check rejects this one and no orphan invoice is written.
+    ticket.invoice = invoice._id;
+    ticket.transition('invoiceSubmitted', req.user._id, `Invoice ${invoiceNumber}`);
+    await ticket.save();
+    await invoice.save();
   });
-
-  // Save the ticket first: if a concurrent submission already moved it, the version
-  // check rejects this one and no orphan invoice is written.
-  ticket.invoice = invoice._id;
-  ticket.transition('invoiceSubmitted', req.user._id, invoiceNumber ? `Invoice ${invoiceNumber}` : undefined);
-  await ticket.save();
-  await invoice.save();
   await respond(res, ticket, 'Invoice submitted for supervisor review', 201);
 });
 
@@ -403,7 +400,7 @@ export const acceptInvoice = asyncHandler(async (req, res) => {
 
   ticket.transition('invoiceAccepted', req.user._id, req.body?.note);
   await ticket.save();
-  await respond(res, ticket, 'Invoice accepted. The vendor can now close the VSR.');
+  await respond(res, ticket, 'Invoice accepted. The service creator receives it and forwards it to purchasing.');
 });
 
 // PUT /api/tickets/:id/invoice/reject  (supervisor)
@@ -423,14 +420,4 @@ export const rejectInvoice = asyncHandler(async (req, res) => {
   ticket.transition('invoiceRejected', req.user._id, req.body?.reason);
   await ticket.save();
   await respond(res, ticket, 'Invoice rejected. The vendor has been asked to resubmit.');
-});
-
-// PUT /api/tickets/:id/complete  (vendor who owns the ticket)
-export const completeTicket = asyncHandler(async (req, res) => {
-  const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
-  assertStatus(ticket, 'invoiceAccepted', `The invoice must be accepted before the VSR can be closed (this one is ${ticket.status})`);
-  ticket.transition('completed', req.user._id, req.body?.note);
-  await ticket.save();
-  await respond(res, ticket, 'VSR completed');
 });

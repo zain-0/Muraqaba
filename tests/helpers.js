@@ -105,8 +105,58 @@ export const multipart = async (path, token, fields, files = []) => {
 export const estimate = (ticketId, token, fields, suffix = '', files = []) =>
   multipart(`/tickets/${ticketId}/estimate${suffix}`, token, suffix ? fields : { quotationNumber: 'Q-1', daysToComplete: '3', ...fields }, files);
 
+export const fileOf = (name, content = '%PDF-1.4 test') => new File([content], name, { type: 'application/pdf' });
+
 /** The simplest breakdown that checks out against an estimate of this amount. */
 export const fillBreakdown = async (users, ticketId, amount) => {
   const res = await api('PUT', `/tickets/${ticketId}/breakdown`, { token: users.creator.token, body: { consumables: amount } });
   assert.equal(res.status, 200, JSON.stringify(res.body));
+};
+
+const ok = (res) => {
+  assert.ok(res.status < 300, JSON.stringify(res.body));
+  return res.body.data;
+};
+
+/** Walks a raised VSR up to the vendor's acknowledgement. Repairs get an estimate of AED 900. */
+export const toAcknowledged = async (users, ticket, vendor) => {
+  const id = ticket._id;
+  if (ticket.status === 'sentToVendor') {
+    ok(await estimate(id, vendor.token, { amount: '900' }));
+    await fillBreakdown(users, id, 900);
+    ok(await api('PUT', `/tickets/${id}/escalate`, { token: users.creator.token }));
+  }
+  ok(await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token }));
+  return ok(await api('PUT', `/tickets/${id}/acknowledge`, { token: vendor.token, body: { daysToComplete: 3 } }));
+};
+
+/** From acknowledged to the bus being back with the creator. */
+export const fromAcknowledgedToReturned = async (users, id, vendor, { km = 6000, date } = {}) => {
+  const put = (path, token, body) => api('PUT', `/tickets/${id}/${path}`, { token, body });
+  ok(await put('vehicle/sent', users.creator.token));
+  ok(await put('vehicle/received', vendor.token, { km }));
+  ok(await put('work/start', vendor.token));
+  ok(await put('work/ready', vendor.token));
+  ok(await put('vehicle/release', vendor.token));
+  return ok(await put('vehicle/returned', users.creator.token, { km, date, replacedPartsReceived: true }));
+};
+
+export const toVehicleReturned = async (users, ticket, vendor, options) => {
+  await toAcknowledged(users, ticket, vendor);
+  return fromAcknowledgedToReturned(users, ticket._id, vendor, options);
+};
+
+export const submitInvoice = (ticketId, vendor, fields = {}) =>
+  multipart(`/tickets/${ticketId}/invoice`, vendor.token, { amount: '900', description: 'Work done as estimated', invoiceNumber: `INV-${run}-${ticketId.slice(-6)}`, ...fields }, [fileOf('invoice.pdf')]);
+
+export const toInvoiceAccepted = async (users, ticket, vendor, options = {}) => {
+  await toVehicleReturned(users, ticket, vendor, options);
+  ok(await submitInvoice(ticket._id, vendor, options.invoice));
+  return ok(await api('PUT', `/tickets/${ticket._id}/invoice/accept`, { token: users.supervisor.token }));
+};
+
+export const toForwarded = async (users, ticket, vendor, options) => {
+  await toInvoiceAccepted(users, ticket, vendor, options);
+  ok(await api('PUT', `/tickets/${ticket._id}/invoice/received`, { token: users.creator.token }));
+  return ok(await api('PUT', `/tickets/${ticket._id}/forward`, { token: users.creator.token }));
 };

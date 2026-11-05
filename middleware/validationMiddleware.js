@@ -2,6 +2,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import { ROLES } from '../models/User.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
+import { endOfUaeDay, uaeDay } from '../utils/uaeTime.js';
 
 export const handleValidationErrors = (req, res, next) => {
   const result = validationResult(req);
@@ -158,6 +159,29 @@ export const validateEstimateReply = [
   handleValidationErrors,
 ];
 
+// Every date defaults to now when left out and can be overridden, but not into the future.
+const stepDate = () =>
+  body('date', 'Choose a valid date, today or earlier')
+    .optional({ values: 'falsy' })
+    .isString()
+    .matches(/^\d{4}-\d{2}-\d{2}/)
+    .isISO8601({ strict: true })
+    .custom((value) => new Date(value) <= endOfUaeDay(uaeDay()))
+    .toDate();
+
+const reading = () => body('km', 'Enter the reading as a whole number of kilometres').not().isArray().isInt({ min: 0, max: MAX_NUMBER }).toInt();
+
+export const validateStepDate = [stepDate(), handleValidationErrors];
+
+export const validateVehicleReceived = [stepDate(), reading(), handleValidationErrors];
+
+export const validateVehicleReturned = [
+  stepDate(),
+  reading(),
+  body('replacedPartsReceived', 'Replaced parts received must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
+  handleValidationErrors,
+];
+
 export const validateAcknowledge = [note(), daysToComplete().optional({ values: 'null' }), handleValidationErrors];
 
 const optionalText = (field, max) => body(field, `Keep this to ${max} characters or fewer`).optional({ values: 'falsy' }).isString().trim().isLength({ max });
@@ -193,7 +217,7 @@ export const validateInvoiceSubmit = [
     .trim()
     .isLength({ min: 10, max: 500 })
     .withMessage('Description must be between 10 and 500 characters'),
-  body('invoiceNumber').optional({ values: 'falsy' }).isString().trim().isLength({ max: 60 }).withMessage('Invoice number is too long'),
+  str('invoiceNumber', 'Invoice number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the invoice number'),
   handleValidationErrors,
 ];
 

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { AttachmentSchema } from './shared.js';
 
 export const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'repair', 'other'];
 export const REPAIR_CATEGORIES = [
@@ -16,31 +17,39 @@ export const TICKET_STATUSES = [
   'pending', // creator escalated the estimate, waiting for supervisor approval
   'returned', // supervisor sent it back with a reason; the creator corrects, replies or escalates again
   'approved', // supervisor approved, waiting for the vendor to acknowledge
-  'acknowledged', // vendor accepted the job; work in progress, waiting for an invoice
+  'acknowledged', // vendor accepted the job; the creator sends the bus
+  'vehicleSent', // the creator sent the bus; the vendor confirms it arrived
+  'vehicleReceived', // the bus is at the vendor
+  'workInProgress',
+  'readyForDelivery',
+  'vehicleReleased', // the vendor let the bus go; the creator confirms it is back
+  'vehicleReturned', // the bus is back; waiting for the vendor's invoice
   'invoiceSubmitted', // vendor submitted an invoice, waiting for supervisor review
-  'invoiceAccepted', // supervisor accepted the invoice; vendor can close the ticket
+  'invoiceAccepted', // supervisor accepted the invoice; the creator receives it
   'invoiceRejected', // supervisor rejected the invoice; vendor must resubmit
-  'completed', // vendor closed the ticket after invoice acceptance
+  'invoiceReceived', // the creator has the invoice and forwards it to purchasing
+  'forwardedToPurchase', // purchasing makes the GRN
+  'grnCreated', // purchasing makes the purchase invoice
+  'completed', // the purchase invoice closes the ticket
 ];
 
-// Status that ends the lifecycle.
+// Statuses that end the lifecycle.
 export const CLOSED_STATUSES = ['completed'];
+
+// What the purchase manager is concerned with: anything that has an invoice.
+export const PURCHASE_VISIBLE_STATUSES = ['invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed'];
 
 const HistoryEntrySchema = new mongoose.Schema(
   {
     status: { type: String, enum: TICKET_STATUSES, required: true },
-    at: { type: Date, default: Date.now },
+    at: { type: Date, default: Date.now }, // when it was really recorded
+    effectiveAt: Date, // the date the person gave, if the step has one
+    km: { type: Number, min: 0 },
     by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     note: { type: String, trim: true, maxlength: 500 },
   },
   { _id: false }
 );
-
-const AttachmentSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  size: { type: Number, required: true },
-  mimeType: { type: String, required: true },
-});
 
 // One message in the estimate negotiation: the vendor's estimate or the creator's reply.
 const NegotiationRoundSchema = new mongoose.Schema(
@@ -138,6 +147,17 @@ const TicketSchema = new mongoose.Schema(
     status: { type: String, enum: TICKET_STATUSES, default: 'sentToVendor', index: true },
     negotiation: { type: [NegotiationRoundSchema], default: [] },
     breakdown: BreakdownSchema,
+    vehicle: {
+      sentAt: Date,
+      receivedAt: Date,
+      receivedKm: { type: Number, min: 0 },
+      workStartedAt: Date,
+      readyAt: Date,
+      releasedAt: Date,
+      returnedAt: Date,
+      returnedKm: { type: Number, min: 0 },
+      replacedPartsReceived: Boolean,
+    },
     agreedPrice: AgreedPriceSchema,
     intervalUsage: IntervalUsageSchema,
     approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved
@@ -154,6 +174,8 @@ const TicketSchema = new mongoose.Schema(
     invoiceAcceptedAt: Date,
     invoiceRejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     invoiceRejectedAt: Date,
+    invoiceReceivedAt: Date,
+    forwardedAt: Date,
     completedAt: Date,
     statusUpdated: Date,
   },
@@ -170,11 +192,11 @@ TicketSchema.index({ vendorId: 1, status: 1 });
  * Move the ticket to a new status and record who did it. Keeps the per-status
  * timestamp fields in sync so existing consumers keep working.
  */
-TicketSchema.methods.transition = function transition(status, userId, note) {
+TicketSchema.methods.transition = function transition(status, userId, note, { effectiveAt, km } = {}) {
   const now = new Date();
   this.status = status;
   this.statusUpdated = now;
-  this.history.push({ status, at: now, by: userId, note });
+  this.history.push({ status, at: now, effectiveAt, km, by: userId, note });
   switch (status) {
     case 'approved':
       this.initialApprovedBy = userId;

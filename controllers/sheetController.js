@@ -97,7 +97,7 @@ export const setBusStatus = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Status saved. It stays until someone changes it.' });
 });
 
-export const REPAIR_STAGES = ['waitingEstimate', 'negotiation', 'waitingApproval', 'estimateApproved', 'goneForRepair', 'invoicing', 'received'];
+export const REPAIR_STAGES = ['waitingEstimate', 'negotiation', 'waitingApproval', 'estimateApproved', 'goneForRepair', 'received', 'invoicing', 'closed'];
 
 const STAGE_OF_STATUS = {
   sentToVendor: 'waitingEstimate',
@@ -106,11 +106,20 @@ const STAGE_OF_STATUS = {
   returned: 'negotiation',
   pending: 'waitingApproval',
   approved: 'estimateApproved',
-  acknowledged: 'goneForRepair',
+  acknowledged: 'estimateApproved',
+  vehicleSent: 'goneForRepair',
+  vehicleReceived: 'goneForRepair',
+  workInProgress: 'goneForRepair',
+  readyForDelivery: 'goneForRepair',
+  vehicleReleased: 'goneForRepair',
+  vehicleReturned: 'received',
   invoiceSubmitted: 'invoicing',
   invoiceRejected: 'invoicing',
   invoiceAccepted: 'invoicing',
-  completed: 'received',
+  invoiceReceived: 'invoicing',
+  forwardedToPurchase: 'invoicing',
+  grnCreated: 'invoicing',
+  completed: 'closed',
 };
 
 /** The ticket's stage at a moment, read back from its history; null if it did not exist yet. */
@@ -167,7 +176,7 @@ export const getRepairSheet = asyncHandler(async (req, res) => {
     })
     .filter(Boolean);
 
-  // How many buses sat in each stage on each day. "Received" counts the day it happened, not every day after.
+  // How many buses sat in each stage on each day. "Closed" counts the day it happened, not every day after.
   const summary = Object.fromEntries(REPAIR_STAGES.map((s) => [s, days.map(() => null)]));
   days.forEach((day, index) => {
     if (day > today) return;
@@ -175,7 +184,7 @@ export const getRepairSheet = asyncHandler(async (req, res) => {
     const moment = endOfUaeDay(day);
     tickets.forEach((t) => {
       const stage = stageAt(t, moment);
-      if (!stage || (stage === 'received' && completedOn(t) !== day)) return;
+      if (!stage || (stage === 'closed' && completedOn(t) !== day)) return;
       buses[stage].add(String(t.busId?._id ?? t.busId));
     });
     REPAIR_STAGES.forEach((s) => {
