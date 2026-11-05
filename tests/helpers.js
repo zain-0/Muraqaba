@@ -102,4 +102,11 @@ export const multipart = async (path, token, fields, files = []) => {
 };
 
 /** A vendor's estimate, or with suffix '/reply' a creator's reply. */
-export const estimate = (ticketId, token, fields, suffix = '', files = []) => multipart(`/tickets/${ticketId}/estimate${suffix}`, token, fields, files);
+export const estimate = (ticketId, token, fields, suffix = '', files = []) =>
+  multipart(`/tickets/${ticketId}/estimate${suffix}`, token, suffix ? fields : { quotationNumber: 'Q-1', daysToComplete: '3', ...fields }, files);
+
+/** The simplest breakdown that checks out against an estimate of this amount. */
+export const fillBreakdown = async (users, ticketId, amount) => {
+  const res = await api('PUT', `/tickets/${ticketId}/breakdown`, { token: users.creator.token, body: { consumables: amount } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+};

@@ -104,6 +104,7 @@ export const validateTicketCreate = [
     .isInt({ min: 0, max: MAX_NUMBER })
     .toInt(),
   body('vendorId', 'Choose a vendor').optional({ values: 'falsy' }).isString().isMongoId(),
+  body('isBreakdown', 'Breakdown must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
   body('description')
     .optional({ values: 'falsy' })
     .isString()
@@ -141,8 +142,12 @@ export const validateBusStatusUpdate = [
 const NEGOTIATION_NOTE = 'Keep the note to 1000 characters or fewer';
 const roundNote = () => body('note', NEGOTIATION_NOTE).optional({ values: 'falsy' }).isString().trim().isLength({ max: 1000 });
 
+const daysToComplete = () => body('daysToComplete', 'Enter the number of days to complete the work').not().isArray().isInt({ min: 1, max: 3650 }).toInt();
+
 export const validateEstimate = [
   body('amount', 'Enter the estimate amount').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  str('quotationNumber', 'Quotation number').trim().isLength({ min: 1, max: 60 }).withMessage('Enter the quotation number'),
+  daysToComplete(),
   roundNote(),
   handleValidationErrors,
 ];
@@ -150,6 +155,24 @@ export const validateEstimate = [
 export const validateEstimateReply = [
   body('amount', 'Enter a counter amount above 0, or leave it empty').optional({ values: 'falsy' }).not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
   roundNote(),
+  handleValidationErrors,
+];
+
+export const validateAcknowledge = [note(), daysToComplete().optional({ values: 'null' }), handleValidationErrors];
+
+const optionalText = (field, max) => body(field, `Keep this to ${max} characters or fewer`).optional({ values: 'falsy' }).isString().trim().isLength({ max });
+
+export const validateBreakdown = [
+  body('parts', 'Parts must be a list').optional({ values: 'null' }).isArray({ max: 200 }),
+  body('parts.*.name', 'Enter the part name').isString().trim().isLength({ min: 1, max: 120 }),
+  optionalText('parts.*.description', 300),
+  optionalText('parts.*.code', 60),
+  optionalText('parts.*.partNumber', 60),
+  body('parts.*.quantity', 'Enter a quantity above 0').not().isArray().isFloat({ gt: 0, max: MAX_NUMBER }).toFloat(),
+  body('parts.*.unitPrice', 'Enter a unit price, 0 or more').not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  body('labourHours', 'Enter the labour hours, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: 100000 }).toFloat(),
+  body('consumables', 'Enter the consumables and other costs, 0 or more').optional({ values: 'null' }).not().isArray().isFloat({ min: 0, max: MAX_NUMBER }).toFloat(),
+  optionalText('remarks', 1000),
   handleValidationErrors,
 ];
 

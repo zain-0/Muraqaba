@@ -9,6 +9,7 @@ import {
   approveTicket,
   returnTicket,
   correctTicketDetails,
+  saveBreakdown,
   submitEstimate,
   replyToEstimate,
   escalateTicket,
@@ -29,6 +30,8 @@ import {
   validateTicketReturn,
   validateEstimate,
   validateEstimateReply,
+  validateBreakdown,
+  validateAcknowledge,
   validateAttachmentParams,
   validateObjectId,
   validateTicketListQuery,
@@ -63,7 +66,8 @@ router.put('/:id/details', roleMiddleware(CREATORS), validateObjectId, validateT
 router.post('/:id/estimate', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateEstimate, submitEstimate);
 router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, parseAttachments, validateEstimateReply, replyToEstimate);
 router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
-router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateTransitionNote, acknowledgeTicket);
+router.put('/:id/breakdown', roleMiddleware(CREATORS), validateObjectId, validateBreakdown, saveBreakdown);
+router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateAcknowledge, acknowledgeTicket);
 router.post('/:id/invoice', roleMiddleware(['vendor']), validateObjectId, validateInvoiceSubmit, submitInvoice);
 router.put('/:id/invoice/accept', roleMiddleware(['supervisor']), validateObjectId, validateTransitionNote, acceptInvoice);
 router.put('/:id/invoice/reject', roleMiddleware(['supervisor']), validateObjectId, validateInvoiceReject, rejectInvoice);

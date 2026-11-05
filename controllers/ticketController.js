@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
+import { nextVsrNumber } from '../models/Counter.js';
 import { assertVendorExists } from './busController.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { TICKET_POPULATE, paginate } from '../utils/query.js';
@@ -44,7 +45,7 @@ const busForVendor = (bus) => {
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
   if (user.role !== 'vendor') return json;
-  const { returnReason, intervalUsage, ...rest } = json;
+  const { returnReason, intervalUsage, isBreakdown, breakdown, ...rest } = json;
   return {
     ...rest,
     busId: busForVendor(json.busId),
@@ -95,7 +96,7 @@ const assertReadingAfterLastService = (usage) => {
 };
 
 /** The fields the creator fills in, shared by raising a ticket and correcting a returned one. */
-const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId }) => {
+const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown }) => {
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
   const vendor = await assertVendorExists(vendorId || bus.vendor);
@@ -107,6 +108,7 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
     repairCategory: serviceType === 'repair' ? repairCategory : undefined,
     description,
     currentReading,
+    isBreakdown: Boolean(isBreakdown),
     vendorId: vendor._id,
     agreedPrice: priceFromBusRate({ bus, vendor, serviceType }),
     intervalUsage,
@@ -118,7 +120,7 @@ export const createTicket = asyncHandler(async (req, res) => {
   const fields = await requestFields(req.body);
   // An agreed price leaves nothing to negotiate, so it goes straight to the supervisor.
   const status = fields.agreedPrice ? 'pending' : 'sentToVendor';
-  const ticket = new Ticket({ ...fields, status, createdBy: req.user._id });
+  const ticket = new Ticket({ ...fields, vsrNumber: await nextVsrNumber(), status, createdBy: req.user._id });
   ticket.history.push({ status, by: req.user._id, note: 'VSR created' });
   await ticket.save();
   // The VSR is real by now, so a problem with the daily sheet must not report it as failed.
@@ -233,7 +235,10 @@ export const submitEstimate = asyncHandler(async (req, res) => {
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, ['sentToVendor', 'estimateCountered'], `An estimate is not needed at this stage (this one is ${ticket.status})`);
   await withStoredAttachments(req.files, async (attachments) => {
-    ticket.negotiation.push({ from: 'vendor', by: req.user._id, amount: req.body.amount, note: req.body.note, attachments });
+    const { amount, quotationNumber, daysToComplete, note } = req.body;
+    const estimateNumber = ticket.negotiation.filter((round) => round.from === 'vendor').length + 1;
+    ticket.negotiation.push({ from: 'vendor', by: req.user._id, amount, quotationNumber, daysToComplete, estimateNumber, note, attachments });
+    ticket.daysToComplete = daysToComplete;
     ticket.transition('estimateSubmitted', req.user._id, 'Estimate sent');
     await ticket.save();
   });
@@ -260,13 +265,68 @@ export const replyToEstimate = asyncHandler(async (req, res) => {
   await respond(res, ticket, 'Reply sent to the vendor', 201);
 });
 
+const money = (value) => Math.round(value * 100) / 100;
+
+/** The latest estimate may have changed since the breakdown was saved, so this always re-reads it. */
+const compareWithEstimate = (ticket) => {
+  const estimateAmount = ticket.latestEstimate()?.amount;
+  ticket.breakdown.estimateAmount = estimateAmount;
+  ticket.breakdown.discount = estimateAmount === undefined ? undefined : money(ticket.breakdown.quotationTotal - estimateAmount);
+};
+
+const checkBreakdownAgainstEstimate = (ticket) => {
+  if (!ticket.latestEstimate()) {
+    throw new AppError('The vendor has to send an estimate before this can go to the supervisor.', 409, 'INVALID_STATE');
+  }
+  if (!ticket.breakdown) {
+    throw new AppError('Fill in the parts and labour before sending this to the supervisor.', 409, 'INVALID_STATE');
+  }
+  compareWithEstimate(ticket);
+  if (ticket.breakdown.discount < 0) {
+    throw new AppError('The parts and labour total is below the vendor\'s estimate. Correct them or reply to the vendor.', 409, 'INVALID_STATE');
+  }
+};
+
+// PUT /api/tickets/:id/breakdown  (creator)
+export const saveBreakdown = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  assertStatus(ticket, ['estimateSubmitted', 'estimateCountered', 'returned'], `Parts and labour can only change while the price is open (this one is ${ticket.status})`);
+  if (ticket.agreedPrice) throw new AppError('This VSR uses an agreed price, so it has no parts and labour to fill in.', 409, 'INVALID_STATE');
+
+  const { parts = [], labourHours = 0, consumables = 0, remarks } = req.body;
+  if (!parts.length && !labourHours && !consumables) {
+    const message = 'Add at least one part, labour hours or consumables';
+    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'parts', message }]);
+  }
+  const { labourRate } = await Bus.findById(ticket.busId).select('labourRate');
+  if (labourHours && !labourRate) {
+    const message = 'This bus has no labour charge. Add it on the bus first.';
+    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'labourHours', message }]);
+  }
+
+  const lines = parts.map((part) => ({ ...part, total: money(part.quantity * part.unitPrice) }));
+  const partsTotal = money(lines.reduce((sum, line) => sum + line.total, 0));
+  const labourTotal = money(labourHours * (labourRate ?? 0));
+  ticket.breakdown = {
+    parts: lines,
+    partsTotal,
+    labourHours,
+    labourRate,
+    labourTotal,
+    consumables,
+    quotationTotal: money(partsTotal + labourTotal + consumables),
+    remarks,
+  };
+  compareWithEstimate(ticket);
+  await ticket.save();
+  await respond(res, ticket, 'Parts and labour saved');
+});
+
 // PUT /api/tickets/:id/escalate  (creator)
 export const escalateTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, ['estimateSubmitted', 'returned'], `Only a VSR with an estimate to review can be sent to the supervisor (this one is ${ticket.status})`);
-  if (!ticket.agreedPrice && !ticket.latestEstimate()) {
-    throw new AppError('The vendor has to send an estimate before this can go to the supervisor.', 409, 'INVALID_STATE');
-  }
+  if (!ticket.agreedPrice) checkBreakdownAgainstEstimate(ticket);
   ticket.returnReason = undefined;
   ticket.transition('pending', req.user._id, req.body?.note || 'Sent to the supervisor for approval');
   await ticket.save();
@@ -290,6 +350,11 @@ export const acknowledgeTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'approved', `A VSR must be approved before it can be acknowledged (this one is ${ticket.status})`);
+  if (req.body?.daysToComplete) ticket.daysToComplete = req.body.daysToComplete;
+  if (!ticket.daysToComplete) {
+    const message = 'Enter the number of days to complete the work';
+    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'daysToComplete', message }]);
+  }
   ticket.transition('acknowledged', req.user._id, req.body?.note);
   await ticket.save();
   await respond(res, ticket, 'VSR acknowledged. Submit an invoice when the work is done.');

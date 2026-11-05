@@ -48,6 +48,9 @@ const NegotiationRoundSchema = new mongoose.Schema(
     from: { type: String, enum: ['vendor', 'creator'], required: true },
     by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     amount: { type: Number, min: 0 }, // optional on a creator's reply
+    quotationNumber: { type: String, trim: true, maxlength: 60 }, // vendor's estimates only, like the next two
+    daysToComplete: { type: Number, min: 1 },
+    estimateNumber: { type: Number, min: 1 }, // Estimate 1, Estimate 2 and so on
     note: { type: String, trim: true, maxlength: 1000 },
     attachments: { type: [AttachmentSchema], default: [] },
     at: { type: Date, default: Date.now },
@@ -78,8 +81,41 @@ const IntervalUsageSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One line of what the vendor's quotation lists. The creator types these so the vendor doesn't have to.
+const BreakdownPartSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true, maxlength: 120 },
+    description: { type: String, trim: true, maxlength: 300 },
+    code: { type: String, trim: true, maxlength: 60 },
+    partNumber: { type: String, trim: true, maxlength: 60 },
+    quantity: { type: Number, required: true, min: 0 },
+    unitPrice: { type: Number, required: true, min: 0 },
+    total: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
+// What the job is made of, checked against the vendor's estimate before it goes for approval.
+// Vendors never see this. discount is the quotation total minus the estimate.
+const BreakdownSchema = new mongoose.Schema(
+  {
+    parts: { type: [BreakdownPartSchema], default: [] },
+    partsTotal: { type: Number, required: true, min: 0 },
+    labourHours: { type: Number, default: 0, min: 0 },
+    labourRate: { type: Number, min: 0 }, // from the bus, frozen here
+    labourTotal: { type: Number, default: 0, min: 0 },
+    consumables: { type: Number, default: 0, min: 0 },
+    quotationTotal: { type: Number, required: true, min: 0 },
+    estimateAmount: { type: Number, min: 0 },
+    discount: { type: Number },
+    remarks: { type: String, trim: true, maxlength: 1000 },
+  },
+  { _id: false }
+);
+
 const TicketSchema = new mongoose.Schema(
   {
+    vsrNumber: { type: String, required: true, unique: true, trim: true },
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', required: true, index: true },
     serviceType: { type: String, enum: SERVICE_TYPES, required: true },
     repairCategory: {
@@ -92,6 +128,8 @@ const TicketSchema = new mongoose.Schema(
     description: { type: String, trim: true, maxlength: 1000 },
     // Odometer in km when the ticket was raised. The API requires it; older tickets have none.
     currentReading: { type: Number, min: 0 },
+    isBreakdown: { type: Boolean, default: false }, // broke down on the road; our own statistics, not for vendors
+    daysToComplete: { type: Number, min: 1 }, // the vendor's latest promise
 
     // The vendor doing the work: the bus's vendor unless the creator chose another.
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -99,6 +137,7 @@ const TicketSchema = new mongoose.Schema(
 
     status: { type: String, enum: TICKET_STATUSES, default: 'sentToVendor', index: true },
     negotiation: { type: [NegotiationRoundSchema], default: [] },
+    breakdown: BreakdownSchema,
     agreedPrice: AgreedPriceSchema,
     intervalUsage: IntervalUsageSchema,
     approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved

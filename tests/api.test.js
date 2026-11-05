@@ -7,7 +7,7 @@
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { BASE, PASSWORD, api, assertNoSecrets, busBody, estimate, run, signInEveryone } from './helpers.js';
+import { BASE, PASSWORD, api, assertNoSecrets, busBody, estimate, fillBreakdown, run, signInEveryone } from './helpers.js';
 
 let users;
 const ctx = {};
@@ -210,6 +210,7 @@ describe('Muraqaba API', () => {
       const second = await estimate(ctx.ticket._id, users.vendor1.token, { amount: '1100' });
       assert.equal(second.body.data.negotiation.length, 3);
       assert.equal((await api('PUT', `/tickets/${ctx.ticket._id}/escalate`, { token: users.vendor1.token })).status, 403);
+      await fillBreakdown(users, ctx.ticket._id, 1100);
       const escalated = await api('PUT', `/tickets/${ctx.ticket._id}/escalate`, { token: users.creator.token });
       assert.equal(escalated.status, 200, JSON.stringify(escalated.body));
       assert.equal(escalated.body.data.status, 'pending');
@@ -316,6 +317,7 @@ describe('Muraqaba API', () => {
     };
     const toApproval = async (ticket, vendor) => {
       await estimate(ticket._id, vendor.token, { amount: '800' });
+      await fillBreakdown(users, ticket._id, 800);
       const res = await api('PUT', `/tickets/${ticket._id}/escalate`, { token: users.creator.token });
       assert.equal(res.status, 200, JSON.stringify(res.body));
       return res.body.data;
@@ -448,6 +450,7 @@ describe('Muraqaba API', () => {
 
       await estimate(id, users.vendor1.token, { amount: '900' });
       assert.equal(await stage(), 'negotiation');
+      await fillBreakdown(users, id, 900);
       await api('PUT', `/tickets/${id}/escalate`, { token: users.creator.token });
       assert.equal(await stage(), 'waitingApproval');
       await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token });
