@@ -12,6 +12,7 @@ import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { uaeDay, uaeDaysUntil } from './uaeTime.js';
 import { dueServices } from '../controllers/reportController.js';
+import { offFleetBusIds } from './busDay.js';
 
 const CHECK_EVERY_MS = Number(process.env.NOTIFICATION_CHECK_MS ?? 5 * 60 * 1000);
 const EXPIRY_WARNING_DAYS = 30;
@@ -32,7 +33,8 @@ const checkRegistrations = async () => {
   // A bus not registered yet has no expiry to warn about.
   const buses = await Bus.find({ registrationExpiry: mongoose.trusted({ $exists: true }) }).select('fleetNumber registrationNumber registrationExpiry');
   // Counted in UAE calendar days, so it reads the same at 01:00 as at 23:00.
-  const expiring = buses.filter((bus) => uaeDaysUntil(bus.registrationExpiry, now) <= EXPIRY_WARNING_DAYS);
+  const offFleet = await offFleetBusIds(); // a scrapped or removed bus is not renewed
+  const expiring = buses.filter((bus) => !offFleet.has(String(bus._id)) && uaeDaysUntil(bus.registrationExpiry, now) <= EXPIRY_WARNING_DAYS);
   await Promise.all(
     expiring.map((bus) =>
       notifyRoles(['serviceCreator'], {

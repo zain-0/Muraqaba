@@ -562,7 +562,7 @@ describe('brake pads', () => {
     assert.equal((await api('GET', '/reports/weekly', { token: users.creator.token })).status, 403);
     const res = await api('GET', '/reports/weekly', { token: users.purchasing.token });
     assert.equal(res.status, 200, JSON.stringify(res.body));
-    assert.ok(res.body.data.raised.brakePads.some((row) => row._id === id(raised)));
+    assert.ok(res.body.data.raised.brakePads.some((row) => row._id === id(raised)), `a VSR raised now is in this week: ${JSON.stringify({ from: res.body.data.from, to: res.body.data.to, createdAt: raised.createdAt, rows: res.body.data.raised.brakePads })}`);
     assert.ok(Array.isArray(res.body.data.due.brakePads));
   });
 

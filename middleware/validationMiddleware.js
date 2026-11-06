@@ -29,19 +29,21 @@ const MAX_NUMBER = 1e12;
 const TOO_LARGE = 'That number is too large';
 const WHOLE = 'Enter a whole number';
 const TWO_DECIMALS = 'Use at most 2 decimals';
+const FOUR_DECIMALS = 'Use at most 4 decimals';
 
-/** Money is in fils at the finest: no more than two decimals. */
-const twoDecimals = (value) => {
-  const scaled = Number(value) * 100;
+/** No more decimals than `places`. Money is in fils at the finest, so two. */
+const atMostDecimals = (value, places) => {
+  const scaled = Number(value) * 10 ** places;
   return Math.abs(scaled - Math.round(scaled)) < 1e-6;
 };
+const twoDecimals = (value) => atMostDecimals(value, 2);
 
 /**
  * A number field. `message` covers anything that is not a number in range at the low end;
  * a number that is too large, has decimals where only whole ones fit, or has more decimals
  * than money does, each gets its own message, so the screen says what is actually wrong.
  */
-const number = (field, message, { above, min = 0, max = MAX_NUMBER, whole = false, money = false } = {}) =>
+const number = (field, message, { above, min = 0, max = MAX_NUMBER, whole = false, money = false, rate = false } = {}) =>
   body(field)
     .not()
     .isArray()
@@ -56,6 +58,8 @@ const number = (field, message, { above, min = 0, max = MAX_NUMBER, whole = fals
     .withMessage(WHOLE)
     .custom((value) => !money || twoDecimals(value))
     .withMessage(TWO_DECIMALS)
+    .custom((value) => !rate || atMostDecimals(value, 4))
+    .withMessage(FOUR_DECIMALS)
     .toFloat();
 
 /** A whole number of kilometres: decimals and minus signs share one message, size its own. */
@@ -155,7 +159,8 @@ const busRules = () => [
   body('expectedLifeYears', 'Enter the expected life in years').not().isArray().isInt({ min: 1, max: 100 }).toInt(),
   number('labourRate', 'Enter the labour charge per hour, above 0', { above: 0, money: true }).optional({ values: 'null' }),
   ...['oil', 'transmission'].map((service) =>
-    number(`rates.${service}`, 'Enter the rate per km, above 0', { above: 0, money: true })
+    // A rate per km is finer than money: 3,300 for a 40,000 km service is 0.0825 a km.
+    number(`rates.${service}`, 'Enter the rate per km, above 0', { above: 0, rate: true })
       .custom(priceFits(service))
       .withMessage('That rate makes the service price too large')
       .optional({ values: 'null' })

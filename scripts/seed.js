@@ -4,6 +4,7 @@
  *
  *   npm run seed          # adds demo data if the demo accounts do not exist yet
  *   npm run seed:reset    # wipes everything first
+ *   node scripts/seed.js --reset --client <folder>   # a depot's own records instead (scripts/clientSeed.js)
  *
  * All demo accounts share the password in SEED_PASSWORD (default: Password123!).
  */
@@ -27,9 +28,13 @@ import { stamp } from '../utils/signatures.js';
 import { uaeDay } from '../utils/uaeTime.js';
 import { UPLOAD_DIR, storedPath } from '../utils/uploads.js';
 import { demoPdf, signatureDataUrl } from './demoFiles.js';
+import seedClient from './clientSeed.js';
 
 const PASSWORD = process.env.SEED_PASSWORD || 'Password123!';
 const reset = process.argv.includes('--reset');
+// --client <folder>: load a depot's own records from that folder instead of the made-up demo (see clientSeed.js).
+const clientAt = process.argv.indexOf('--client');
+const clientFolder = clientAt === -1 ? undefined : process.argv[clientAt + 1];
 
 const ACCOUNTS = [
   { name: 'Sara Ahmed', email: 'creator@muraqaba.dev', role: 'serviceCreator' },
@@ -79,6 +84,14 @@ async function main() {
     console.log('Cleared existing data');
   } else if (await User.exists({ email: ACCOUNTS[0].email })) {
     console.log('Demo accounts already exist. Run with --reset to recreate everything.');
+    await mongoose.connection.close();
+    return;
+  }
+
+  if (clientAt !== -1) {
+    if (!clientFolder || clientFolder.startsWith('--')) throw new Error('Give the folder after --client, for example --client ../client-data');
+    // The same staff accounts as the demo; the vendors come from the client's records.
+    await seedClient(clientFolder, { password: PASSWORD, staff: ACCOUNTS.filter((account) => account.role !== 'vendor') });
     await mongoose.connection.close();
     return;
   }

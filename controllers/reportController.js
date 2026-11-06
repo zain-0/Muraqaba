@@ -18,6 +18,7 @@ import { BUS_DAY_STATUSES, BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler } from '../middleware/errorMiddleware.js';
 import { COUNTED, fleetBuses, fleetDays, statusSummary } from '../utils/fleetDays.js';
 import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
+import { offFleetBusIds } from '../utils/busDay.js';
 import { USER_FIELDS } from '../utils/query.js';
 import { BANDS, averageDays, bandIndex, brandKey, committedFils, daysOfYear, isLate, kindOf, kmInMonth, ratio, spendFils, spendPerKm, toAed, toFils, workshopDays } from '../utils/reportMaths.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
@@ -479,9 +480,11 @@ const REPORT_DAYS = 7;
 
 /** Services that are due soon or overdue, for the weekly report and the alerts. */
 export const dueServices = async () => {
-  const [buses, latest] = await Promise.all([Bus.find().select('fleetNumber make registrationNumber intervals').sort({ fleetNumber: 1 }), latestKmByBus()]);
+  const [buses, latest, offFleet] = await Promise.all([Bus.find().select('fleetNumber make registrationNumber intervals').sort({ fleetNumber: 1 }), latestKmByBus(), offFleetBusIds()]);
   const due = Object.fromEntries(REPORTED_SERVICES.map((service) => [service, []]));
   buses.forEach((bus) => {
+    // A scrapped or removed bus is not serviced any more.
+    if (offFleet.has(String(bus._id))) return;
     const status = intervalStatus(bus, latest.get(String(bus._id)));
     REPORTED_SERVICES.forEach((service) => {
       // A bus added before brake pads had an interval has none, so nothing can be due.

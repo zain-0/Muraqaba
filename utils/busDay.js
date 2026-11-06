@@ -5,6 +5,19 @@ import { uaeDay } from './uaeTime.js';
 // A bus marked as leaving the fleet stays that way until someone changes it by hand.
 const LOCKED_STATUSES = ['scrapping', 'removed'];
 
+/**
+ * Buses whose status on `day` is scrapping or removed: off the fleet, so no service or
+ * registration is due on them. The status holds from its date until the next change.
+ */
+export const offFleetBusIds = async (day = uaeDay()) => {
+  const latest = await BusStatusChange.aggregate([
+    { $match: { date: mongoose.trusted({ $lte: day }) } },
+    { $sort: { date: -1 } },
+    { $group: { _id: '$bus', status: { $first: '$status' } } },
+  ]);
+  return new Set(latest.filter((row) => LOCKED_STATUSES.includes(row.status)).map((row) => String(row._id)));
+};
+
 export const statusForTicket = ({ serviceType, repairCategory }) => {
   if (serviceType === 'tyre') return 'tyreChange';
   if (serviceType === 'battery') return 'batteryChange';

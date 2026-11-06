@@ -5,6 +5,7 @@ import { SignatureImage } from '../models/User.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
+import { offFleetBusIds } from '../utils/busDay.js';
 
 // GET /api/users/signature  (your own)
 export const getSignature = asyncHandler(async (req, res) => {
@@ -46,8 +47,9 @@ const depotTurns = async (filter) => {
 };
 
 const busesNeedingService = async (filter) => {
-  const [buses, latest] = await Promise.all([Bus.find(filter).select('intervals'), latestKmByBus()]);
+  const [buses, latest, offFleet] = await Promise.all([Bus.find(filter).select('intervals'), latestKmByBus(), offFleetBusIds()]);
   return buses.filter((bus) => {
+    if (offFleet.has(String(bus._id))) return false; // scrapped or removed
     const status = intervalStatus(bus, latest.get(String(bus._id)));
     // Brake pads only on buses that have the interval; older buses have none.
     return ['oil', 'transmission', 'tyre', 'battery', 'brakePads'].some((service) => status[service]?.state === 'overdue');

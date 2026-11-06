@@ -350,7 +350,7 @@ describe('browser testing findings', () => {
         [{ make: 'B'.repeat(61) }, 'make', 'Keep this to 60 characters or fewer'],
         [{ intervals: intervals({ oil: { everyKm: 10000.5, lastKm: 0 } }) }, 'intervals.oil.everyKm', 'Enter a whole number'],
         [{ intervals: intervals({ tyre: { everyKm: 40000, lastKm: 1000.75 } }) }, 'intervals.tyre.lastKm', 'Enter a whole number'],
-        [{ rates: { oil: 0.0001, transmission: 1 } }, 'rates.oil', 'Use at most 2 decimals'],
+        [{ rates: { oil: 0.00001, transmission: 1 } }, 'rates.oil', 'Use at most 4 decimals'],
         [{ labourRate: 50.125 }, 'labourRate', 'Use at most 2 decimals'],
         [{ rates: { oil: 1, transmission: 999999999999 } }, 'rates.transmission', 'That rate makes the service price too large'],
         [{ registrationExpiry: '9999-12-31' }, 'registrationExpiry', 'Choose an expiry date within the next 10 years'],

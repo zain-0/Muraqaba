@@ -8,8 +8,8 @@ import mongoose from 'mongoose';
 import { Lpo } from '../models/Purchase.js';
 import { uaeDay } from './uaeTime.js';
 
-const LINE_FOR_SERVICE = { tyre: 'tyre', battery: 'battery', repair: 'repair', brakePads: 'repair', other: 'other', oil: 'maintenance', transmission: 'maintenance' };
-const COUNTED_BY_QUANTITY = ['tyre', 'battery'];
+export const LINE_FOR_SERVICE = { tyre: 'tyre', battery: 'battery', repair: 'repair', brakePads: 'repair', other: 'other', oil: 'maintenance', transmission: 'maintenance' };
+export const COUNTED_BY_QUANTITY = ['tyre', 'battery'];
 
 const hasRoom = (item, quantity, amount) => item.total - item.usedAmount >= amount && (!COUNTED_BY_QUANTITY.includes(item.kind) || item.quantity - item.usedQuantity >= quantity);
 
