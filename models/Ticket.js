@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { AttachmentSchema } from './shared.js';
 
-export const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'repair', 'other'];
+export const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'brakePads', 'repair', 'other'];
+// The last four come from the depot's own repair log (2026-11-06).
 export const REPAIR_CATEGORIES = [
   'ELECTRICAL',
   'MECHANICAL',
@@ -9,9 +10,34 @@ export const REPAIR_CATEGORIES = [
   'ENGINE',
   'BODY',
   'ACCIDENT',
+  'DIAGNOSTIC',
+  'DRIVETRAIN',
+  'SUSPENSION',
+  'BRAKES',
 ];
 /** How a repair category reads in English, for files such as the GRN's Excel sheet. */
-export const REPAIR_CATEGORY_LABELS = { ELECTRICAL: 'Electrical', MECHANICAL: 'Mechanical', 'AC REPAIR': 'AC repair', ENGINE: 'Engine', BODY: 'Body', ACCIDENT: 'Accident' };
+export const REPAIR_CATEGORY_LABELS = {
+  ELECTRICAL: 'Electrical',
+  MECHANICAL: 'Mechanical',
+  'AC REPAIR': 'AC repair',
+  ENGINE: 'Engine',
+  BODY: 'Body',
+  ACCIDENT: 'Accident',
+  DIAGNOSTIC: 'Diagnostic & inspection',
+  DRIVETRAIN: 'Drivetrain & axle',
+  SUSPENSION: 'Suspension & steering',
+  BRAKES: 'Brake system',
+};
+
+// Why a job costs the depot nothing: the vendor's estimate of AED 0 has to say which.
+export const NO_CHARGE_REASONS = ['warranty', 'goodwill', 'insurance', 'freeOfCharge'];
+
+// Where the work is done. At the depot the vendor comes to the bus, so the bus makes no trip.
+export const WORK_LOCATIONS = ['vendorWorkshop', 'depot', 'thirdParty'];
+
+// Accident details are for the depot's own records and never reach vendors.
+export const ACCIDENT_SEVERITIES = ['minor', 'medium', 'major'];
+export const ACCIDENT_FAULTS = ['ourDriver', 'otherParty', 'unknown'];
 
 export const TICKET_STATUSES = [
   'sentToVendor', // created, waiting for the vendor's estimate
@@ -64,6 +90,7 @@ const NegotiationRoundSchema = new mongoose.Schema(
     quotationNumber: { type: String, trim: true, maxlength: 60 }, // vendor's estimates only, like the next two
     daysToComplete: { type: Number, min: 1 },
     estimateNumber: { type: Number, min: 1 }, // Estimate 1, Estimate 2 and so on
+    noChargeReason: { type: String, enum: NO_CHARGE_REASONS }, // vendor's estimates of AED 0 only
     note: { type: String, trim: true, maxlength: 1000 },
     attachments: { type: [AttachmentSchema], default: [] },
     at: { type: Date, default: Date.now },
@@ -156,6 +183,16 @@ const SignatureStampSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const AccidentSchema = new mongoose.Schema(
+  {
+    severity: { type: String, enum: ACCIDENT_SEVERITIES, required: true },
+    fault: { type: String, enum: ACCIDENT_FAULTS, required: true },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    updatedAt: Date,
+  },
+  { _id: false }
+);
+
 const TicketSchema = new mongoose.Schema(
   {
     vsrNumber: { type: String, required: true, unique: true, trim: true },
@@ -173,6 +210,8 @@ const TicketSchema = new mongoose.Schema(
       },
     },
     description: { type: String, trim: true, maxlength: 1000 },
+    location: { type: String, enum: WORK_LOCATIONS, default: 'vendorWorkshop' },
+    accident: AccidentSchema, // repair VSRs in the ACCIDENT category; never shown to vendors
     // Odometer in km when the ticket was raised. The API requires it; older tickets have none.
     currentReading: { type: Number, min: 0 },
     isBreakdown: { type: Boolean, default: false }, // broke down on the road; our own statistics, not for vendors
@@ -199,6 +238,8 @@ const TicketSchema = new mongoose.Schema(
     agreedPrice: AgreedPriceSchema,
     intervalUsage: IntervalUsageSchema,
     approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved
+    // Set when the approved estimate was AED 0: the job closes when the bus is back, with no invoice.
+    noChargeReason: { type: String, enum: NO_CHARGE_REASONS },
     returnReason: { type: String, trim: true, maxlength: 500 }, // never shown to vendors
     history: { type: [HistoryEntrySchema], default: [] },
     signatures: { type: [SignatureStampSchema], default: [] },

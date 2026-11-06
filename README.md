@@ -115,15 +115,16 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/tickets/:id/return | supervisor | pending → returned (`reason`, hidden from vendors) |
 | PUT | /api/tickets/:id/decline | supervisor | Additional job only: pending → declined (`reason`) |
 | PUT | /api/tickets/:id/details | creator, supervisor | Correct a returned ticket |
+| PUT | /api/tickets/:id/accident | creator, supervisor | Accident repairs only, any status: `severity` (minor, medium, major), `fault` (ourDriver, otherParty, unknown). Never shown to vendors |
 | GET | /api/tickets/:id/attachments/:attachmentId | anyone who can see the ticket | Download a document |
 | PUT | /api/tickets/:id/acknowledge | vendor (owner) | approved → acknowledged; `daysToComplete` when it has an agreed price |
 | POST | /api/tickets/:id/additional | vendor (owner) | Multipart: additional job with its first estimate |
 | PUT | /api/tickets/:id/vehicle/sent | creator, supervisor | acknowledged → vehicleSent |
 | PUT | /api/tickets/:id/vehicle/received | vendor (owner) | vehicleSent → vehicleReceived (`km`) |
-| PUT | /api/tickets/:id/work/start | vendor (owner) | vehicleReceived → workInProgress |
+| PUT | /api/tickets/:id/work/start | vendor (owner) | vehicleReceived → workInProgress. At the depot: acknowledged → workInProgress (`km`) |
 | PUT | /api/tickets/:id/work/ready | vendor (owner) | workInProgress → readyForDelivery |
 | PUT | /api/tickets/:id/vehicle/release | vendor (owner) | readyForDelivery → vehicleReleased, with linked tickets |
-| PUT | /api/tickets/:id/vehicle/returned | creator, supervisor | vehicleReleased → vehicleReturned (`km`, `replacedPartsReceived`), with linked tickets |
+| PUT | /api/tickets/:id/vehicle/returned | creator, supervisor | vehicleReleased → vehicleReturned (`km`, `replacedPartsReceived`), with linked tickets. At the depot it confirms the work is done: readyForDelivery → vehicleReturned. A no-charge VSR (approved at AED 0 with a reason) then closes with no invoice |
 | POST | /api/tickets/:id/invoice | vendor (owner) | Multipart with a file: vehicleReturned or invoiceRejected → invoiceSubmitted |
 | PUT | /api/tickets/:id/invoice/accept | supervisor | invoiceSubmitted → invoiceAccepted, takes it off the LPO |
 | PUT | /api/tickets/:id/invoice/reject | supervisor | invoiceSubmitted → invoiceRejected (`reason`) |

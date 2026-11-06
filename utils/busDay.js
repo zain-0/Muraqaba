@@ -8,6 +8,7 @@ const LOCKED_STATUSES = ['scrapping', 'removed'];
 export const statusForTicket = ({ serviceType, repairCategory }) => {
   if (serviceType === 'tyre') return 'tyreChange';
   if (serviceType === 'battery') return 'batteryChange';
+  if (serviceType === 'brakePads') return 'repair';
   if (serviceType !== 'repair') return 'maintenance';
   return repairCategory === 'ACCIDENT' ? 'accident' : 'repair';
 };

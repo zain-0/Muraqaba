@@ -23,7 +23,10 @@ import { CASE_BLIND } from '../utils/unique.js';
 const buildListFilter = (user, q = {}) => {
   const filter = {};
   if (user.role === 'vendor') filter.vendorId = user._id;
-  if (user.role === 'purchaseManager') filter.status = mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES });
+  if (user.role === 'purchaseManager') {
+    filter.status = mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES });
+    filter.noChargeReason = mongoose.trusted({ $exists: false }); // closed without an invoice, so nothing for purchasing
+  }
   if (q.status) {
     if (user.role === 'purchaseManager' && !PURCHASE_VISIBLE_STATUSES.includes(q.status)) {
       filter.status = mongoose.trusted({ $in: [] }); // outside this role's scope: return nothing rather than leak
@@ -35,6 +38,9 @@ const buildListFilter = (user, q = {}) => {
   if (q.mine) filter.createdBy = user._id;
   return filter;
 };
+
+/** Purchasing works from the invoice on. A job at no charge closes without one, so it never reaches them. */
+const visibleToPurchasing = (ticket) => PURCHASE_VISIBLE_STATUSES.includes(ticket.status) && !ticket.noChargeReason;
 
 /** The bus as a vendor may see it: which bus it is, never its rates or intervals. */
 const busForVendor = (bus) => {
@@ -59,7 +65,7 @@ const historyForVendor = (entry) => {
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
   if (user.role !== 'vendor') return json;
-  const { returnReason, intervalUsage, isBreakdown, breakdown, grn, purchaseInvoice, lpoDeduction, forwardedAt, invoiceReceivedAt, ...rest } = json;
+  const { returnReason, intervalUsage, isBreakdown, accident, breakdown, grn, purchaseInvoice, lpoDeduction, forwardedAt, invoiceReceivedAt, ...rest } = json;
   return {
     ...rest,
     busId: busForVendor(json.busId),
@@ -113,14 +119,24 @@ const assertReadingAfterLastService = (usage) => {
 
 /** An odometer cannot read below any service already recorded at a higher km, whatever the work. */
 const assertReadingAfterAnyService = (bus, reading) => {
-  const { oil, transmission, tyre } = bus.intervals;
-  if (reading < Math.max(oil.lastKm, transmission.lastKm, tyre.lastKm)) throw readingError('The reading is lower than the last service recorded for this bus');
+  const { oil, transmission, tyre, brakePads } = bus.intervals;
+  if (reading < Math.max(oil.lastKm, transmission.lastKm, tyre.lastKm, brakePads?.lastKm ?? 0)) throw readingError('The reading is lower than the last service recorded for this bus');
 };
 
+/** Buses added before brake pads were tracked have no interval for them, so a brake-pad job could not be measured. */
+export const assertBusTracks = (bus, serviceType) => {
+  if (serviceType !== 'brakePads' || bus.intervals?.brakePads) return;
+  const message = 'This bus has no brake-pad interval. Add it on the bus first.';
+  throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'serviceType', message }]);
+};
+
+const isAccident = ({ serviceType, repairCategory }) => serviceType === 'repair' && repairCategory === 'ACCIDENT';
+
 /** The fields the creator fills in, shared by raising a ticket and correcting a returned one. */
-const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown }) => {
+const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown, location, accident }, user) => {
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+  assertBusTracks(bus, serviceType);
   const vendor = await assertVendorExists(vendorId || bus.vendor);
   const intervalUsage = usageWhenRaised(bus, serviceType, currentReading);
   assertReadingAfterLastService(intervalUsage);
@@ -132,6 +148,9 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
     description,
     currentReading,
     isBreakdown: Boolean(isBreakdown),
+    // Left out, a new VSR is done at the vendor's workshop and a corrected one stays where it was.
+    ...(location ? { location } : {}),
+    accident: isAccident({ serviceType, repairCategory }) ? { severity: accident.severity, fault: accident.fault, updatedBy: user._id, updatedAt: new Date() } : undefined,
     vendorId: vendor._id,
     agreedPrice: priceFromBusRate({ bus, vendor, serviceType }),
     intervalUsage,
@@ -140,7 +159,7 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
 
 // POST /api/tickets
 export const createTicket = asyncHandler(async (req, res) => {
-  const fields = await requestFields(req.body);
+  const fields = await requestFields(req.body, req.user);
   // An agreed price leaves nothing to negotiate, so it goes straight to the supervisor.
   const status = fields.agreedPrice ? 'pending' : 'sentToVendor';
   const ticket = new Ticket({ ...fields, status, createdBy: req.user._id });
@@ -203,7 +222,7 @@ const loadVisibleTicket = async (req) => {
     // Respond as if it does not exist so vendors cannot enumerate other vendors' tickets.
     throw new AppError('VSR not found', 404, 'NOT_FOUND');
   }
-  if (req.user.role === 'purchaseManager' && !PURCHASE_VISIBLE_STATUSES.includes(ticket.status)) {
+  if (req.user.role === 'purchaseManager' && !visibleToPurchasing(ticket)) {
     // Same scope as the list: purchasing only sees tickets that have an invoice.
     throw new AppError('VSR not found', 404, 'NOT_FOUND');
   }
@@ -214,9 +233,9 @@ const loadVisibleTicket = async (req) => {
 const linkedTo = async (user, ticket) => {
   const root = ticket.parentTicket ?? ticket._id;
   const linked = await Ticket.find({ _id: mongoose.trusted({ $ne: ticket._id }), $or: [{ _id: root }, { parentTicket: root }] })
-    .select('vsrNumber status serviceType')
+    .select('vsrNumber status serviceType noChargeReason')
     .sort({ vsrNumber: 1 });
-  return user.role === 'purchaseManager' ? linked.filter((t) => PURCHASE_VISIBLE_STATUSES.includes(t.status)) : linked;
+  return user.role === 'purchaseManager' ? linked.filter(visibleToPurchasing) : linked;
 };
 
 /**
@@ -248,7 +267,11 @@ export const getTicketById = asyncHandler(async (req, res) => {
 export const approveTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   assertStatus(ticket, 'pending', `Only pending VSRs can be approved (this one is ${ticket.status})`);
-  ticket.approvedEstimate = ticket.agreedPrice?.amount ?? ticket.latestEstimate()?.amount;
+  const latest = ticket.latestEstimate();
+  ticket.approvedEstimate = ticket.agreedPrice?.amount ?? latest?.amount;
+  // Frozen like the amount: an estimate of AED 0 closes when the bus is back, with no invoice. An agreed
+  // price has no vendor estimate, so it can never be at no charge.
+  ticket.noChargeReason = latest?.noChargeReason;
   stamp(ticket, req.user, 'approved');
   ticket.transition('approved', req.user._id, req.body?.note);
   // An additional job's bus is already at the vendor, so it has no sending or receiving of its own.
@@ -260,6 +283,16 @@ export const approveTicket = asyncHandler(async (req, res) => {
   }
   await ticket.save();
   await respond(res, ticket, ticket.parentTicket ? 'Additional job approved. The vendor can work on it.' : 'VSR approved. The vendor has been asked to acknowledge it.');
+});
+
+// PUT /api/tickets/:id/accident  (creator, supervisor; any stage, and never shown to vendors)
+export const updateAccident = asyncHandler(async (req, res) => {
+  const ticket = await loadTicket(req.params.id);
+  if (!isAccident(ticket)) throw new AppError('Only an accident repair has accident details.', 409, 'INVALID_STATE');
+  const { severity, fault } = req.body;
+  ticket.accident = { severity, fault, updatedBy: req.user._id, updatedAt: new Date() };
+  await ticket.save();
+  await respond(res, ticket, 'Accident details saved');
 });
 
 // PUT /api/tickets/:id/return  (supervisor)
@@ -289,7 +322,7 @@ export const correctTicketDetails = asyncHandler(async (req, res) => {
   assertStatus(ticket, 'returned', `Only returned VSRs can be changed (this one is ${ticket.status})`);
   // It travels in its parent's bus, so its bus and kind are not open to change.
   if (ticket.parentTicket) throw new AppError('An additional job cannot be changed. Reply to the vendor or send it for approval again.', 409, 'INVALID_STATE');
-  const fields = await requestFields(req.body);
+  const fields = await requestFields(req.body, req.user);
   // Estimates belong to the vendor who wrote them, and a new vendor must not read a rival's prices.
   if (ticket.negotiation.length && !fields.vendorId.equals(ticket.vendorId)) {
     throw new AppError('The vendor cannot be changed once estimates have started. Raise a new VSR instead.', 409, 'INVALID_STATE');
@@ -326,9 +359,9 @@ export const submitEstimate = asyncHandler(async (req, res) => {
   assertVendorOwns(ticket, req.user);
   assertStatus(ticket, ['sentToVendor', 'estimateCountered'], `An estimate is not needed at this stage (this one is ${ticket.status})`);
   await withStoredAttachments(req.files, async (attachments) => {
-    const { amount, quotationNumber, daysToComplete, note } = req.body;
+    const { amount, quotationNumber, daysToComplete, note, noChargeReason } = req.body;
     const estimateNumber = ticket.negotiation.filter((round) => round.from === 'vendor').length + 1;
-    ticket.negotiation.push({ from: 'vendor', by: req.user._id, amount, quotationNumber, daysToComplete, estimateNumber, note, attachments });
+    ticket.negotiation.push({ from: 'vendor', by: req.user._id, amount, quotationNumber, daysToComplete, estimateNumber, noChargeReason: noChargeReason || undefined, note, attachments });
     ticket.daysToComplete = daysToComplete;
     ticket.transition('estimateSubmitted', req.user._id, `Estimate ${estimateNumber}`);
     await ticket.save();
@@ -366,9 +399,12 @@ const compareWithEstimate = (ticket) => {
 };
 
 const checkBreakdownAgainstEstimate = (ticket) => {
-  if (!ticket.latestEstimate()) {
+  const latest = ticket.latestEstimate();
+  if (!latest) {
     throw new AppError('The vendor has to send an estimate before this can go to the supervisor.', 409, 'NOT_READY');
   }
+  // Work at no charge has no price to check, but parts and labour, once saved, are still compared.
+  if (latest.noChargeReason && !ticket.breakdown) return;
   if (!ticket.breakdown) {
     throw new AppError('Fill in the parts and labour before sending this to the supervisor.', 409, 'NOT_READY');
   }
@@ -474,7 +510,8 @@ export const acknowledgeTicket = asyncHandler(async (req, res) => {
   stamp(ticket, req.user, 'acknowledged');
   ticket.transition('acknowledged', req.user._id, req.body?.note);
   await ticket.save();
-  await respond(res, ticket, 'VSR acknowledged. The service creator sends the bus.');
+  // At the depot the bus is never sent: the vendor comes to it.
+  await respond(res, ticket, ticket.location === 'depot' ? 'VSR acknowledged. Start the work at the depot and enter the reading.' : 'VSR acknowledged. The service creator sends the bus.');
 });
 
 // POST /api/tickets/:id/invoice  (vendor who owns the ticket)

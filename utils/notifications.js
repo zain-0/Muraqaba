@@ -29,7 +29,8 @@ export const notifyRoles = async (roles, { type, params, link, dedupeKey }) => {
 
 const checkRegistrations = async () => {
   const now = new Date();
-  const buses = await Bus.find().select('fleetNumber registrationNumber registrationExpiry');
+  // A bus not registered yet has no expiry to warn about.
+  const buses = await Bus.find({ registrationExpiry: mongoose.trusted({ $exists: true }) }).select('fleetNumber registrationNumber registrationExpiry');
   // Counted in UAE calendar days, so it reads the same at 01:00 as at 23:00.
   const expiring = buses.filter((bus) => uaeDaysUntil(bus.registrationExpiry, now) <= EXPIRY_WARNING_DAYS);
   await Promise.all(

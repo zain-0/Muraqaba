@@ -1,5 +1,5 @@
 /**
- * Service intervals on a bus. Oil, transmission and tyres are counted in km, batteries in
+ * Service intervals on a bus. Oil, transmission, tyres and brake pads are counted in km, batteries in
  * months. Used when a VSR is raised (what was left or delayed) and to say what is due.
  */
 import { BusDailyReading } from '../models/BusDaily.js';
@@ -31,12 +31,16 @@ export const latestKmByBus = async () => {
   return new Map(rows.map((r) => [String(r._id), r.km]));
 };
 
-/** Where a bus stands on each interval right now, for the fleet pages and the alerts. */
+/**
+ * Where a bus stands on each interval right now, for the fleet pages and the alerts. Brake pads
+ * are left out for a bus added before they had an interval.
+ */
 export const intervalStatus = (bus, latestKm, now = new Date()) => {
+  const services = ['oil', 'transmission', 'tyre', 'brakePads', 'battery'].filter((service) => bus.intervals[service]);
   // A bus with nothing on the daily sheet yet is as far as its last recorded service.
-  const currentKm = latestKm ?? Math.max(bus.intervals.oil.lastKm, bus.intervals.transmission.lastKm, bus.intervals.tyre.lastKm);
+  const currentKm = latestKm ?? Math.max(...services.filter((service) => service !== 'battery').map((service) => bus.intervals[service].lastKm));
   const status = { currentKm };
-  ['oil', 'transmission', 'tyre', 'battery'].forEach((service) => {
+  services.forEach((service) => {
     // A reading older than the last service says nothing about how far the bus has gone since.
     const km = service === 'battery' ? currentKm : Math.max(currentKm, bus.intervals[service].lastKm);
     const { unit, interval, actual, left, delayed } = measure(bus, service, km, now);

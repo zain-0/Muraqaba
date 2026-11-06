@@ -15,7 +15,7 @@ import { withStoredAttachments } from '../utils/uploads.js';
 
 const money = (value) => Math.round(value * 100) / 100;
 
-const SERVICE_LABELS = { oil: 'Oil service', transmission: 'Transmission service', tyre: 'Tyre change', battery: 'Battery change', repair: 'Repair', other: 'Other' };
+const SERVICE_LABELS = { oil: 'Oil service', transmission: 'Transmission service', tyre: 'Tyre change', battery: 'Battery change', brakePads: 'Brake pads', repair: 'Repair', other: 'Other' };
 
 const serviceLabel = ({ serviceType, repairCategory }) =>
   serviceType === 'repair' && repairCategory ? `Repair: ${REPAIR_CATEGORY_LABELS[repairCategory] ?? repairCategory}` : SERVICE_LABELS[serviceType];
@@ -51,12 +51,13 @@ const releaseGrnClaim = (grnId) => Ticket.updateMany({ grn: grnId }, { $unset: {
 export const exportBatch = asyncHandler(async (req, res) => {
   // Express 5 parses req.query afresh on every read, so a validator cannot rewrite it.
   const tickets = await loadBatch(toIdList(req.query.ticketIds));
-  if (tickets.some((ticket) => !PURCHASE_VISIBLE_STATUSES.includes(ticket.status))) throw new AppError('One of these VSRs was not found', 404, 'NOT_FOUND');
+  // A job at no charge closes without an invoice, so purchasing never sees it.
+  if (tickets.some((ticket) => !PURCHASE_VISIBLE_STATUSES.includes(ticket.status) || ticket.noChargeReason)) throw new AppError('One of these VSRs was not found', 404, 'NOT_FOUND');
   const book = new ExcelJS.Workbook();
   const sheet = book.addWorksheet('GRN batch');
   sheet.columns = [
     { header: 'VSR', key: 'vsr', width: 14 },
-    { header: 'Site number', key: 'site', width: 14 },
+    { header: 'Side number', key: 'site', width: 14 },
     { header: 'Registration', key: 'registration', width: 16 },
     { header: 'Brand', key: 'brand', width: 14 },
     { header: 'Vendor', key: 'vendor', width: 24 },

@@ -92,6 +92,7 @@ export const busBody = (suffix, vendorId, overrides = {}) => ({
     oil: { everyKm: 10000, lastKm: 0 },
     transmission: { everyKm: 60000, lastKm: 0 },
     tyre: { everyKm: 40000, lastKm: 0 },
+    brakePads: { everyKm: 40000, lastKm: 0 },
     battery: { everyMonths: 18, lastDate: '2026-01-01' },
   },
   vendorId,

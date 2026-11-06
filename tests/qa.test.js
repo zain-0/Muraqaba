@@ -130,7 +130,7 @@ describe('browser testing findings', () => {
       for (const lastDate of ['1900-01-01', '2099-01-01']) {
         const res = await api('POST', '/buses', {
           token: users.creator.token,
-          body: { ...busBody(`BD${lastDate.slice(0, 2)}`, users.vendor1.id), year: 2020, intervals: { oil: { everyKm: 10000, lastKm: 0 }, transmission: { everyKm: 60000, lastKm: 0 }, tyre: { everyKm: 40000, lastKm: 0 }, battery: { everyMonths: 18, lastDate } } },
+          body: { ...busBody(`BD${lastDate.slice(0, 2)}`, users.vendor1.id), year: 2020, intervals: { oil: { everyKm: 10000, lastKm: 0 }, transmission: { everyKm: 60000, lastKm: 0 }, tyre: { everyKm: 40000, lastKm: 0 }, brakePads: { everyKm: 40000, lastKm: 0 }, battery: { everyMonths: 18, lastDate } } },
         });
         assert.equal(res.status, 400, lastDate);
         assert.equal(firstError(res).field, 'intervals.battery.lastDate');

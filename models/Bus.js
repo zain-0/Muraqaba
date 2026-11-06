@@ -19,16 +19,19 @@ const MonthIntervalSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// On screen: fleetNumber is the Site Number, make the Brand, model the Type, year the Model year.
+// On screen: fleetNumber is the Side Number (painted on the bus), make the Brand, model the Type,
+// year the Model year. A new bus may run for months before it is registered, and the depot's
+// records hold no chassis numbers, so both are optional; when given they are unique. Leave them
+// out rather than storing "" or null, or the sparse indexes would see duplicates.
 const BusSchema = new mongoose.Schema(
   {
-    chassisNumber: { type: String, required: true, unique: true, trim: true },
+    chassisNumber: { type: String, unique: true, sparse: true, trim: true },
     fleetNumber: { type: String, required: true, unique: true, trim: true },
-    registrationNumber: { type: String, required: true, unique: true, trim: true },
+    registrationNumber: { type: String, unique: true, sparse: true, trim: true },
     make: { type: String, required: true, trim: true },
     model: { type: String, required: true, trim: true },
     year: { type: Number, required: true, min: 1900 },
-    registrationExpiry: { type: Date, required: true },
+    registrationExpiry: Date, // required by the API whenever there is a registration number
     expectedLifeYears: { type: Number, required: true, min: 1 },
 
     labourRate: { type: Number, min: 0 }, // AED per repair labour hour
@@ -40,6 +43,7 @@ const BusSchema = new mongoose.Schema(
       oil: { type: KmIntervalSchema, required: true },
       transmission: { type: KmIntervalSchema, required: true },
       tyre: { type: KmIntervalSchema, required: true },
+      brakePads: KmIntervalSchema, // 40,000 km on the depot's sheet; buses added before 2026-11-06 may have none
       battery: { type: MonthIntervalSchema, required: true },
     },
 

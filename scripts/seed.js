@@ -71,6 +71,8 @@ async function main() {
     throw new Error('Refusing to seed a production database. Set SEED_ALLOW_PRODUCTION=1 to override.');
   }
   await connectDB({ maxAttempts: 3 });
+  // Clearing keeps the indexes, and older databases have unique ones that a missing chassis or registration number would clash on.
+  await Bus.syncIndexes();
 
   if (reset) {
     await Promise.all([User, SignatureImage, Bus, Ticket, Invoice, Counter, Notification, Grn, PurchaseInvoice, Lpo, BusDailyReading, BusStatusChange].map((M) => M.deleteMany({})));
@@ -105,23 +107,29 @@ async function main() {
     return attachment;
   };
 
-  const intervals = (oil, transmission, tyre, batteryMonthsAgo) => ({
+  // Brake pads every 40,000 km, as on the depot's sheet: BUS-102 is due soon and BUS-103 overdue.
+  const intervals = (oil, transmission, tyre, batteryMonthsAgo, brakePads) => ({
     oil: { everyKm: 10000, lastKm: oil },
     transmission: { everyKm: 60000, lastKm: transmission },
     tyre: { everyKm: 40000, lastKm: tyre },
+    brakePads: { everyKm: 40000, lastKm: brakePads },
     battery: { everyMonths: 18, lastDate: daysAgo(batteryMonthsAgo * 30.5) },
   });
-  const makeBus = (fleetNumber, chassisNumber, registrationNumber, make, model, year, expiryDays, life, labourRate, rates, chosenIntervals, vendor) => ({
-    fleetNumber, chassisNumber, registrationNumber, make, model, year, registrationExpiry: daysAhead(expiryDays), expectedLifeYears: life, labourRate, rates, intervals: chosenIntervals, vendor: vendor._id,
+  // A missing chassis or registration number is left out; a bus not registered yet has no expiry either.
+  const makeBus = (fleetNumber, chassisNumber, registrationNumber, make, model, year, expiryDays, life, labourRate, rates, chosenIntervals, vendor, extra = {}) => ({
+    fleetNumber, chassisNumber, registrationNumber, make, model, year, registrationExpiry: registrationNumber ? daysAhead(expiryDays) : undefined, expectedLifeYears: life, labourRate, rates, intervals: chosenIntervals, vendor: vendor._id, ...extra,
   });
   const buses = await Bus.create([
-    makeBus('BUS-101', 'CH-101-AX', 'DXB-1011', 'Hino', 'Coach', 2019, 400, 15, 70, { oil: 0.12, transmission: 0.05 }, intervals(77000, 60000, 46000, 17), vendor1),
-    makeBus('BUS-102', 'CH-102-BX', 'DXB-1022', 'Yutong', 'City bus', 2021, 200, 12, 65, { oil: 0.1, transmission: 0.05 }, intervals(40000, 20000, 20000, 6), vendor1),
-    makeBus('BUS-103', 'CH-103-CX', 'DXB-1033', 'Isuzu', 'Mini bus', 2018, 20, 12, 60, { oil: 0.09, transmission: 0.04 }, intervals(90000, 40000, 60000, 12), vendor2),
-    makeBus('BUS-104', 'CH-104-DX', 'DXB-1044', 'Hino', 'City bus', 2022, 600, 15, 70, { oil: 0.12, transmission: 0.05 }, intervals(0, 0, 0, 3), vendor2),
-    makeBus('BUS-105', 'CH-105-EX', 'DXB-1055', 'Yutong', 'Coach', 2012, 90, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(235000, 200000, 210000, 2), vendor2),
+    makeBus('BUS-101', 'CH-101-AX', 'DXB-1011', 'Hino', 'Coach', 2019, 400, 15, 70, { oil: 0.12, transmission: 0.05 }, intervals(77000, 60000, 46000, 17, 50000), vendor1),
+    makeBus('BUS-102', 'CH-102-BX', 'DXB-1022', 'Yutong', 'City bus', 2021, 200, 12, 65, { oil: 0.1, transmission: 0.05 }, intervals(40000, 20000, 20000, 6, 12800), vendor1),
+    makeBus('BUS-103', 'CH-103-CX', 'DXB-1033', 'Isuzu', 'Mini bus', 2018, 20, 12, 60, { oil: 0.09, transmission: 0.04 }, intervals(90000, 40000, 60000, 12, 56000), vendor2),
+    makeBus('BUS-104', 'CH-104-DX', 'DXB-1044', 'Hino', 'City bus', 2022, 600, 15, 70, { oil: 0.12, transmission: 0.05 }, intervals(0, 0, 0, 3, 0), vendor2),
+    // An old bus the depot's records hold no chassis number for.
+    makeBus('BUS-105', undefined, 'DXB-1055', 'Yutong', 'Coach', 2012, 90, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(235000, 200000, 210000, 2, 205000), vendor2),
+    // A new bus that arrived three weeks ago and runs on a temporary plate until it is registered.
+    makeBus('BUS-106', 'CH-106-FX', undefined, 'Yutong', 'City bus', 2026, undefined, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(0, 0, 0, 1, 0), vendor1, { createdAt: daysAgo(21) }),
   ]);
-  const [bus101, bus102, bus103, bus104, bus105] = buses;
+  const [bus101, bus102, bus103, bus104, bus105, bus106] = buses;
 
   await Lpo.create([
     {
@@ -154,8 +162,8 @@ async function main() {
   ]);
 
   // Odometers that climb by a steady amount each day, so VSRs and the daily sheet agree.
-  const TODAY_KM = new Map([[bus101, 86500], [bus102, 52400], [bus103, 98200], [bus104, 9100], [bus105, 241000]]);
-  const DAILY_KM = new Map([[bus101, 240], [bus102, 210], [bus103, 260], [bus104, 120], [bus105, 90]]);
+  const TODAY_KM = new Map([[bus101, 86500], [bus102, 52400], [bus103, 98200], [bus104, 9100], [bus105, 241000], [bus106, 3150]]);
+  const DAILY_KM = new Map([[bus101, 240], [bus102, 210], [bus103, 260], [bus104, 120], [bus105, 90], [bus106, 150]]);
   const readingAgo = (bus, n) => TODAY_KM.get(bus) - DAILY_KM.get(bus) * n;
 
   /** What the service creator types from the vendor's quotation, adding up a little above the estimate. */
@@ -175,11 +183,13 @@ async function main() {
   };
 
   /** Create a VSR and replay its lifecycle up to `stage`, with dates spread back from today. */
-  const makeTicket = async ({ bus, serviceType, repairCategory, description, stage, createdDaysAgo, amount = 1500, parts, isBreakdown = false, parent }) => {
+  // A depot job skips the trip; a job at no charge is quoted at AED 0 and closes when the bus is back.
+  const makeTicket = async ({ bus, serviceType, repairCategory, description, stage, createdDaysAgo, amount = 1500, parts, isBreakdown = false, parent, location = 'vendorWorkshop', noChargeReason, accident }) => {
     const vendor = vendorOf(bus);
     const created = daysAgo(createdDaysAgo);
     const currentReading = readingAgo(bus, createdDaysAgo);
     const rate = !parent && bus.rates?.[serviceType];
+    const depot = location === 'depot';
     const ticket = new Ticket({
       vsrNumber: parent ? `${parent.vsrNumber}${String.fromCharCode(97 + (parent.additionalCount += 1))}` : await nextVsrNumber(),
       parentTicket: parent?._id,
@@ -187,6 +197,8 @@ async function main() {
       serviceType,
       repairCategory,
       description,
+      location,
+      accident: accident && { ...accident, updatedBy: creator._id, updatedAt: created },
       currentReading,
       isBreakdown,
       intervalUsage: usageWhenRaised(bus, serviceType, currentReading, created),
@@ -207,7 +219,7 @@ async function main() {
     };
     const sign = (user, name) => stamp(ticket, user, name, when());
 
-    let estimate = amount;
+    let estimate = noChargeReason ? 0 : amount;
     if (rate) {
       const km = bus.intervals[serviceType].everyKm;
       estimate = money(rate * km);
@@ -221,7 +233,7 @@ async function main() {
 
     const estimateRound = async (number, roundAmount, note) => {
       const file = await attach(`Quotation ${ticket.vsrNumber} ${number}.pdf`, [`Quotation Q-${ticket.vsrNumber}-${number}`, `Vendor: ${vendor.name}`, `Bus: ${bus.fleetNumber}`, `Amount: AED ${roundAmount}`, note]);
-      ticket.negotiation.push({ from: 'vendor', by: vendor._id, amount: roundAmount, quotationNumber: `Q-${ticket.vsrNumber}-${number}`, daysToComplete: 2 + number, estimateNumber: number, note, attachments: [file], at: when() });
+      ticket.negotiation.push({ from: 'vendor', by: vendor._id, amount: roundAmount, quotationNumber: `Q-${ticket.vsrNumber}-${number}`, daysToComplete: 2 + number, estimateNumber: number, noChargeReason, note, attachments: [file], at: when() });
       ticket.daysToComplete = 2 + number;
     };
 
@@ -231,15 +243,16 @@ async function main() {
     if (parent) {
       await estimateRound(1, estimate, 'Found during the work. Needs doing before the bus goes back.');
     } else if (reached('estimateSubmitted') && !priced) {
-      await estimateRound(1, Math.round(estimate * 1.15), 'Parts and labour for the job as described.');
+      await estimateRound(1, noChargeReason ? 0 : Math.round(estimate * 1.15), noChargeReason ? 'No charge for this work.' : 'Parts and labour for the job as described.');
       step('estimateSubmitted', vendor, 'Estimate 1');
     }
-    if (reached('estimateCountered') && !priced && !parent) {
+    // There is nothing to bargain over on a job at no charge.
+    if (reached('estimateCountered') && !priced && !parent && !noChargeReason) {
       ticket.negotiation.push({ from: 'creator', by: creator._id, amount: estimate, note: 'Please come down to this amount; we have similar jobs at this price.', at: when() });
       step('estimateCountered', creator, 'Reply sent to the vendor');
     }
     if (reached('pending') && !priced) {
-      if (!parent) {
+      if (!parent && !noChargeReason) {
         await estimateRound(2, estimate, 'Agreed at this amount.');
         step('estimateSubmitted', vendor, 'Estimate 2');
       }
@@ -253,6 +266,7 @@ async function main() {
     }
     if (reached('approved')) {
       ticket.approvedEstimate = estimate;
+      ticket.noChargeReason = noChargeReason;
       sign(supervisor, 'approved');
       step('approved', supervisor);
       if (parent) {
@@ -273,15 +287,21 @@ async function main() {
       ticket.history[ticket.history.length - 1].effectiveAt = at;
       ticket.vehicle[field] = at;
     };
-    if (reached('vehicleSent') && !parent) stepWithDate('vehicleSent', creator, 'sentAt');
-    if (reached('vehicleReceived') && !parent) {
+    if (reached('vehicleSent') && !parent && !depot) stepWithDate('vehicleSent', creator, 'sentAt');
+    if (reached('vehicleReceived') && !parent && !depot) {
       const km = currentReading + DAILY_KM.get(bus);
       stepWithDate('vehicleReceived', vendor, 'receivedAt', { km });
       ticket.vehicle.receivedKm = km;
     }
-    if (reached('workInProgress')) stepWithDate('workInProgress', vendor, 'workStartedAt');
+    if (reached('workInProgress') && depot && !parent) {
+      // At the depot the vendor gives the reading when starting, which stands in for receiving the bus.
+      const km = currentReading + DAILY_KM.get(bus);
+      stepWithDate('workInProgress', vendor, 'workStartedAt', { km });
+      ticket.vehicle.receivedAt = ticket.vehicle.workStartedAt;
+      ticket.vehicle.receivedKm = km;
+    } else if (reached('workInProgress')) stepWithDate('workInProgress', vendor, 'workStartedAt');
     if (reached('readyForDelivery')) stepWithDate('readyForDelivery', vendor, 'readyAt');
-    if (reached('vehicleReleased')) {
+    if (reached('vehicleReleased') && !depot) {
       sign(vendor, 'vehicleReleased');
       stepWithDate('vehicleReleased', vendor, 'releasedAt');
     }
@@ -293,8 +313,15 @@ async function main() {
       if (serviceType === 'battery') bus.intervals.battery.lastDate = when();
       else if (bus.intervals[serviceType]) bus.intervals[serviceType].lastKm = km;
       await bus.save();
+      if (noChargeReason) {
+        // No invoice to wait for: it closes the moment the bus is back.
+        const back = ticket.vehicle.returnedAt;
+        ticket.transition('completed', creator._id, 'No charge', { effectiveAt: back });
+        ticket.history[ticket.history.length - 1].at = back;
+        ticket.completedAt = back;
+      }
     }
-    if (reached('invoiceSubmitted')) {
+    if (reached('invoiceSubmitted') && !noChargeReason) {
       const invoiceFile = await attach(`Invoice ${ticket.vsrNumber}.pdf`, [`Invoice INV-${ticket.vsrNumber}-1`, `Vendor: ${vendor.name}`, `Bus: ${bus.fleetNumber}`, `Amount: AED ${estimate}`]);
       const inv = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount: estimate, description: `Work completed on ${bus.fleetNumber}`, invoiceNumber: `INV-${ticket.vsrNumber}-1`, attachments: [invoiceFile], submittedAt: when() });
       ticket.invoice = inv._id;
@@ -375,7 +402,7 @@ async function main() {
   const history1 = await makeTicket({ bus: bus104, serviceType: 'oil', description: 'First oil service for new vehicle.', stage: 'forwardedToPurchase', createdDaysAgo: 70 });
   const history2 = await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Reverse camera wiring replaced.', stage: 'forwardedToPurchase', createdDaysAgo: 55, amount: 980, isBreakdown: true });
   const history3 = await makeTicket({ bus: bus102, serviceType: 'other', description: 'Interior deep clean and seat repairs after charter.', stage: 'forwardedToPurchase', createdDaysAgo: 40, amount: 750 });
-  const history4 = await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'ACCIDENT', description: 'Front panel damage after a depot collision.', stage: 'forwardedToPurchase', createdDaysAgo: 38, amount: 4200 });
+  const history4 = await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'ACCIDENT', description: 'Front panel damage after a depot collision.', stage: 'forwardedToPurchase', createdDaysAgo: 38, amount: 4200, accident: { severity: 'medium', fault: 'otherParty' } });
   const batch1 = await makeTicket({ bus: bus103, serviceType: 'tyre', description: 'Replace both rear tyres, tread below legal limit.', stage: 'forwardedToPurchase', createdDaysAgo: 22, amount: 4400, parts: [{ name: 'Tyre 225/75 R17.5', code: 'TYR-225', partNumber: 'BR-22575', quantity: 2, unitPrice: 2200 }] });
   const batch2 = await makeTicket({ bus: bus105, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Rear suspension bushes worn on both sides.', stage: 'forwardedToPurchase', createdDaysAgo: 28, amount: 1850 });
   const batch3 = await makeTicket({ bus: bus101, serviceType: 'tyre', description: 'Front tyres worn on the inner edge.', stage: 'forwardedToPurchase', createdDaysAgo: 18, amount: 1700, parts: tyres(2) });
@@ -400,6 +427,12 @@ async function main() {
   await makeTicket({ bus: bus104, serviceType: 'other', description: 'Replace the cracked mirror on the door side.', stage: 'returned', createdDaysAgo: 2, amount: 320 });
   await makeTicket({ bus: bus101, serviceType: 'battery', description: 'Bus failed to start twice this week; battery not holding charge.', stage: 'pending', createdDaysAgo: 1, amount: 620, parts: battery });
   await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Reverse camera screen stays black.', stage: 'sentToVendor', createdDaysAgo: 1 });
+  // Added for the owner's answers of 2026-11-06, after the others so their VSR numbers stay as they were.
+  await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Alternator stopped charging; replaced under the part warranty.', stage: 'vehicleReturned', createdDaysAgo: 20, noChargeReason: 'warranty', parts: [{ name: 'Alternator 24V 150A', code: 'ALT-24', partNumber: 'AL-24150', quantity: 1, unitPrice: 1450 }] });
+  await makeTicket({ bus: bus104, serviceType: 'tyre', location: 'depot', description: 'Front left tyre cut on a kerb; changed at the depot.', stage: 'invoiceAccepted', createdDaysAgo: 12, amount: 850, parts: [{ name: 'Tyre 225/75 R17.5', code: 'TYR-225', partNumber: 'BR-22575', quantity: 1, unitPrice: 900 }] });
+  await makeTicket({ bus: bus106, serviceType: 'battery', location: 'depot', description: 'Bus would not start in the morning; battery to be changed at the depot.', stage: 'readyForDelivery', createdDaysAgo: 2, amount: 620, parts: battery });
+  await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'ACCIDENT', description: 'Rear corner hit a bollard while reversing in the depot.', stage: 'estimateSubmitted', createdDaysAgo: 2, amount: 1800, accident: { severity: 'minor', fault: 'ourDriver' } });
+  await makeTicket({ bus: bus103, serviceType: 'brakePads', description: 'Brake pads past their interval; squealing when braking.', stage: 'pending', createdDaysAgo: 1, amount: 950, parts: [{ name: 'Brake pad set, front axle', code: 'BRK-F', partNumber: 'BP-2210', quantity: 1, unitPrice: 1000 }] });
 
   await closeBatch([history1, batch1, batch2], 'GRN-2026-001', 'PI-2026-001');
   await closeBatch([history2], 'GRN-2026-002', 'PI-2026-002');
@@ -425,6 +458,7 @@ async function main() {
   for (const bus of buses) {
     for (let n = 1; n <= 80; n += 1) {
       if (bus === bus105 && n < 25) continue; // off the road since it went for scrapping
+      if (bus === bus106 && n > 20) continue; // not on the fleet yet
       await BusDailyReading.updateOne(
         { bus: bus._id, date: uaeDay(daysAgo(n)) },
         { $setOnInsert: { km: readingAgo(bus, n), by: creator._id } },

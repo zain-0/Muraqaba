@@ -36,20 +36,31 @@ const countByStatus = async (filter) => {
   return counts;
 };
 
+/**
+ * At the depot the bus makes no trip: after acknowledging, the vendor starts the work, and once
+ * it is ready the creator confirms it is done. These counts move those two steps to the right person.
+ */
+const depotTurns = async (filter) => {
+  const counts = await countByStatus({ ...filter, location: 'depot' });
+  return { acknowledged: counts.acknowledged, readyForDelivery: counts.readyForDelivery };
+};
+
 const busesNeedingService = async (filter) => {
   const [buses, latest] = await Promise.all([Bus.find(filter).select('intervals'), latestKmByBus()]);
   return buses.filter((bus) => {
     const status = intervalStatus(bus, latest.get(String(bus._id)));
-    return ['oil', 'transmission', 'tyre', 'battery'].some((service) => status[service].state === 'overdue');
+    // Brake pads only on buses that have the interval; older buses have none.
+    return ['oil', 'transmission', 'tyre', 'battery', 'brakePads'].some((service) => status[service]?.state === 'overdue');
   }).length;
 };
 
 const serviceCreatorDashboard = async (user) => {
-  const [mine, all, buses, busesDue] = await Promise.all([
+  const [mine, all, buses, busesDue, depot] = await Promise.all([
     countByStatus({ createdBy: user._id }),
     countByStatus({}),
     Bus.countDocuments(),
     busesNeedingService({}),
+    depotTurns({}),
   ]);
   return {
     role: user.role,
@@ -57,7 +68,7 @@ const serviceCreatorDashboard = async (user) => {
     myTickets: mine,
     fleet: { buses, busesNeedingService: busesDue },
     // Things only this role can move forward.
-    actionRequired: all.estimateSubmitted + all.returned + all.acknowledged + all.vehicleReleased + all.invoiceAccepted + all.invoiceReceived + busesDue,
+    actionRequired: all.estimateSubmitted + all.returned + (all.acknowledged - depot.acknowledged) + all.vehicleReleased + depot.readyForDelivery + all.invoiceAccepted + all.invoiceReceived + busesDue,
   };
 };
 
@@ -76,18 +87,20 @@ const supervisorDashboard = async (user) => {
 };
 
 const vendorDashboard = async (user) => {
-  const tickets = await countByStatus({ vendorId: user._id });
+  const [tickets, depot] = await Promise.all([countByStatus({ vendorId: user._id }), depotTurns({ vendorId: user._id })]);
   return {
     role: user.role,
     tickets,
-    actionRequired: tickets.sentToVendor + tickets.estimateCountered + tickets.approved + tickets.vehicleSent + tickets.vehicleReceived + tickets.workInProgress + tickets.readyForDelivery + tickets.vehicleReturned + tickets.invoiceRejected,
+    actionRequired:
+      tickets.sentToVendor + tickets.estimateCountered + tickets.approved + depot.acknowledged + tickets.vehicleSent + tickets.vehicleReceived + tickets.workInProgress + (tickets.readyForDelivery - depot.readyForDelivery) + tickets.vehicleReturned + tickets.invoiceRejected,
   };
 };
 
 const purchaseManagerDashboard = async (user) => {
   const [tickets, amounts] = await Promise.all([
-    // Same scope as the purchase manager's ticket list: only tickets that have an invoice.
-    countByStatus({ status: mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES }) }),
+    // Same scope as the purchase manager's ticket list: only tickets that have an invoice, so a
+    // no-charge job, which closes without one, is left out.
+    countByStatus({ status: mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES }), noChargeReason: mongoose.trusted({ $exists: false }) }),
     Invoice.aggregate([
       { $group: { _id: '$status', n: { $sum: 1 }, amount: { $sum: '$amount' } } },
     ]),

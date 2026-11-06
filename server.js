@@ -2,9 +2,14 @@ import mongoose from 'mongoose';
 import config from './config/config.js';
 import connectDB from './config/db.js';
 import app from './app.js';
+import Bus from './models/Bus.js';
 
 const start = async () => {
   await connectDB();
+  // Chassis and registration numbers became optional on 2026-11-06. Databases built before then
+  // have unique indexes that treat every missing number as the same one, so they are rebuilt sparse.
+  const dropped = await Bus.syncIndexes();
+  if (dropped.length) console.log(`Rebuilt bus indexes: ${dropped.join(', ')}`);
 
   const server = app.listen(config.port, () => {
     console.log(`Muraqaba API listening on port ${config.port} (${config.env})`);

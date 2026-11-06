@@ -20,6 +20,7 @@ import {
   submitInvoice,
   acceptInvoice,
   rejectInvoice,
+  updateAccident,
 } from '../controllers/ticketController.js';
 import {
   markVehicleSent,
@@ -53,6 +54,8 @@ import {
   validateStepDate,
   validateVehicleReceived,
   validateVehicleReturned,
+  validateWorkStart,
+  validateAccident,
 } from '../middleware/validationMiddleware.js';
 
 import { parseAttachments } from '../utils/uploads.js';
@@ -84,6 +87,7 @@ router.put('/:id/return', roleMiddleware(['supervisor']), validateObjectId, vali
 router.put('/:id/decline', roleMiddleware(['supervisor']), validateObjectId, validateTicketDecline, declineTicket);
 router.post('/:id/additional', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateAdditionalJob, createAdditionalJob);
 router.put('/:id/details', roleMiddleware(CREATORS), validateObjectId, validateTicketCreate, correctTicketDetails);
+router.put('/:id/accident', roleMiddleware(CREATORS), validateObjectId, validateAccident, updateAccident); // any stage; never shown to vendors
 router.post('/:id/estimate', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateEstimate, submitEstimate);
 router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, parseAttachments, validateEstimateReply, replyToEstimate);
 router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
@@ -92,7 +96,7 @@ router.put('/:id/breakdown', roleMiddleware(SERVICE_CREATOR), validateObjectId, 
 router.put('/:id/acknowledge', roleMiddleware(['vendor']), validateObjectId, validateAcknowledge, acknowledgeTicket);
 router.put('/:id/vehicle/sent', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateStepDate, markVehicleSent);
 router.put('/:id/vehicle/received', roleMiddleware(['vendor']), validateObjectId, validateVehicleReceived, markVehicleReceived);
-router.put('/:id/work/start', roleMiddleware(['vendor']), validateObjectId, validateStepDate, startWork);
+router.put('/:id/work/start', roleMiddleware(['vendor']), validateObjectId, validateWorkStart, startWork);
 router.put('/:id/work/ready', roleMiddleware(['vendor']), validateObjectId, validateStepDate, markReady);
 router.put('/:id/vehicle/release', roleMiddleware(['vendor']), validateObjectId, validateStepDate, releaseVehicle);
 router.put('/:id/vehicle/returned', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateVehicleReturned, markVehicleReturned);

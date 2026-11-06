@@ -118,7 +118,7 @@
           },
           "fleetNumber": {
             "type": "string",
-            "description": "Shown as the Site Number"
+            "description": "Shown as the Side Number, painted on the bus"
           },
           "registrationNumber": {
             "type": "string"
@@ -310,7 +310,7 @@
           },
           "fleetNumber": {
             "type": "string",
-            "description": "Shown as the Site Number"
+            "description": "Shown as the Side Number, painted on the bus"
           },
           "registrationNumber": {
             "type": "string"
@@ -472,7 +472,7 @@
               },
               "fleetNumber": {
                 "type": "string",
-                "description": "Shown as the Site Number"
+                "description": "Shown as the Side Number, painted on the bus"
               },
               "registrationNumber": {
                 "type": "string"

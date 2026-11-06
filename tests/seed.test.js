@@ -20,10 +20,14 @@ describe('demo data', () => {
     const uri = process.env.MONGO_URI.replace(/\/([^/?]+)(\?.*)?$/, (_m, db, query = '') => `/${db}_seed${query}`);
     const uploads = await mkdtemp(join(tmpdir(), 'muraqaba-seed-'));
     const env = { ...process.env, MONGO_URI: uri, NODE_ENV: 'development', UPLOAD_DIR: uploads, SEED_PASSWORD: 'SeedPass123!' };
-    await run(process.execPath, [join(here, '..', 'scripts', 'seed.js'), '--reset'], { env, timeout: 90000 });
-
     const connection = await mongoose.createConnection(uri).asPromise();
     try {
+      // The live database still has the unique indexes from before chassis and registration became optional.
+      await connection.dropDatabase();
+      await connection.collection('buses').createIndex({ chassisNumber: 1 }, { unique: true, name: 'chassisNumber_1' });
+      await connection.collection('buses').createIndex({ registrationNumber: 1 }, { unique: true, name: 'registrationNumber_1' });
+      await run(process.execPath, [join(here, '..', 'scripts', 'seed.js'), '--reset'], { env, timeout: 90000 });
+
       const tickets = connection.collection('tickets');
       const statuses = await tickets.distinct('status');
       for (const status of ['sentToVendor', 'estimateSubmitted', 'estimateCountered', 'pending', 'returned', 'approved', 'acknowledged', 'vehicleSent', 'vehicleReceived', 'workInProgress', 'readyForDelivery', 'vehicleReleased', 'vehicleReturned', 'invoiceSubmitted', 'invoiceRejected', 'invoiceAccepted', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed']) {
@@ -64,6 +68,40 @@ describe('demo data', () => {
 
       const signed = await connection.collection('users').countDocuments({ signatureImage: { $exists: true } });
       assert.equal(signed, 5, 'everyone can sign straight away');
+
+      // The owner's answers of 2026-11-06.
+      const buses = connection.collection('buses');
+      const fleet = await buses.find().toArray();
+      assert.ok(fleet.every((bus) => bus.intervals.brakePads?.everyKm === 40000), 'every bus has the 40,000 km brake-pad interval');
+      assert.ok(fleet.some((bus) => !('chassisNumber' in bus)), 'a bus without a chassis number');
+      assert.ok(fleet.some((bus) => !('registrationNumber' in bus) && !('registrationExpiry' in bus)), 'a bus not registered yet');
+      assert.ok(fleet.every((bus) => ![bus.chassisNumber, bus.registrationNumber].some((value) => value === null || value === '')), 'missing numbers are left out, never "" or null');
+      const indexes = await buses.indexes();
+      for (const name of ['chassisNumber_1', 'registrationNumber_1']) assert.ok(indexes.find((index) => index.name === name)?.sparse, `${name} is rebuilt sparse`);
+
+      const depot = await tickets.find({ location: 'depot', serviceType: { $in: ['tyre', 'battery'] } }).toArray();
+      assert.ok(depot.length > 0, 'a tyre or battery job done at the depot');
+      for (const ticket of depot) {
+        assert.ok(!ticket.history.some((h) => ['vehicleSent', 'vehicleReceived', 'vehicleReleased'].includes(h.status)), `${ticket.vsrNumber} makes no trip`);
+        const started = ticket.history.find((h) => h.status === 'workInProgress');
+        assert.equal(started.effectiveAt.toISOString(), ticket.vehicle.receivedAt.toISOString(), `${ticket.vsrNumber} starts when the vendor gives the reading`);
+        assert.equal(started.km, ticket.vehicle.receivedKm);
+      }
+
+      const warranty = await tickets.findOne({ serviceType: 'repair', noChargeReason: 'warranty' });
+      assert.ok(warranty, 'a repair under warranty');
+      assert.equal(warranty.approvedEstimate, 0);
+      assert.equal(warranty.status, 'completed');
+      assert.equal(warranty.history.at(-1).note, 'No charge');
+      assert.equal(warranty.history.at(-2).status, 'vehicleReturned');
+      assert.equal(warranty.invoice, undefined);
+      assert.equal(warranty.negotiation.filter((r) => r.from === 'vendor').at(-1).noChargeReason, 'warranty');
+      assert.ok(warranty.breakdown.quotationTotal > 0, 'what the work was worth is on record');
+
+      const accidents = await tickets.find({ repairCategory: 'ACCIDENT' }).toArray();
+      assert.ok(accidents.length > 0);
+      assert.ok(accidents.every((t) => t.accident?.severity && t.accident?.fault), 'every accident has severity and fault');
+      assert.ok(await tickets.findOne({ serviceType: 'brakePads' }), 'a brake-pad VSR');
     } finally {
       await connection.dropDatabase();
       await connection.close();

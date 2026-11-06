@@ -7,6 +7,7 @@ import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { BUS_POPULATE } from '../utils/query.js';
 import { latestKmByBus, withIntervalStatus } from '../utils/intervals.js';
 import { assertNoClash } from '../utils/unique.js';
+import { hasText } from '../middleware/validationMiddleware.js';
 
 const identityOf = ({ fleetNumber, registrationNumber, chassisNumber }) => ({ fleetNumber, registrationNumber, chassisNumber });
 
@@ -39,15 +40,18 @@ export const getBusById = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...withIntervalStatus(bus, km), openTickets } });
 });
 
+/** An empty chassis or registration number is left out, so an edit clears it and the sparse indexes never see "" or null. */
+const present = (value) => (hasText(value) ? value.trim() : undefined);
+
 /** What the add-bus and edit-bus forms can set. The vendor is only chosen when adding. */
 const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model, year, registrationExpiry, expectedLifeYears, labourRate, rates, intervals }) => ({
-  chassisNumber,
+  chassisNumber: present(chassisNumber),
   fleetNumber,
-  registrationNumber,
+  registrationNumber: present(registrationNumber),
   make,
   model,
   year,
-  registrationExpiry,
+  registrationExpiry: present(registrationNumber) ? registrationExpiry : undefined, // a bus not registered yet has no expiry
   expectedLifeYears,
   labourRate,
   rates: { oil: rates?.oil, transmission: rates?.transmission },
@@ -55,6 +59,7 @@ const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model
     oil: { everyKm: intervals.oil.everyKm, lastKm: intervals.oil.lastKm ?? 0 },
     transmission: { everyKm: intervals.transmission.everyKm, lastKm: intervals.transmission.lastKm ?? 0 },
     tyre: { everyKm: intervals.tyre.everyKm, lastKm: intervals.tyre.lastKm ?? 0 },
+    brakePads: { everyKm: intervals.brakePads.everyKm, lastKm: intervals.brakePads.lastKm ?? 0 },
     battery: { everyMonths: intervals.battery.everyMonths, lastDate: intervals.battery.lastDate ?? new Date() },
   },
 });

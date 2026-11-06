@@ -66,7 +66,7 @@ const busInput = {
   required: ['chassisNumber', 'fleetNumber', 'registrationNumber', 'make', 'model', 'year', 'registrationExpiry', 'expectedLifeYears', 'vendorId', 'intervals'],
   properties: {
     chassisNumber: { type: 'string' },
-    fleetNumber: { type: 'string', description: 'Shown as the Site Number' },
+    fleetNumber: { type: 'string', description: 'Shown as the Side Number, painted on the bus' },
     registrationNumber: { type: 'string' },
     make: { type: 'string', description: 'Shown as the Brand' },
     model: { type: 'string', description: 'Shown as the Type' },

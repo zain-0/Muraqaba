@@ -1,6 +1,6 @@
 import { body, param, query, validationResult } from 'express-validator';
 import { ROLES } from '../models/User.js';
-import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES } from '../models/Ticket.js';
+import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES, NO_CHARGE_REASONS, WORK_LOCATIONS, ACCIDENT_SEVERITIES, ACCIDENT_FAULTS } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
 import { LPO_KINDS } from '../models/Purchase.js';
 import { endOfUaeDay, uaeDay } from '../utils/uaeTime.js';
@@ -102,7 +102,7 @@ export const validateVendorCreate = [
   handleValidationErrors,
 ];
 
-const KM_INTERVALS = ['oil', 'transmission', 'tyre'];
+const KM_INTERVALS = ['oil', 'transmission', 'tyre', 'brakePads'];
 
 const isDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).bail();
 
@@ -123,20 +123,35 @@ const batteryDateFits = (value, { req }) => {
   return when >= built && when <= endOfUaeDay(uaeDay());
 };
 
+/** Text that may be left empty; the controller then leaves the field out. */
+export const hasText = (value) => typeof value === 'string' && value.trim() !== '';
+const optionalNumber = (field, label) =>
+  body(field).optional({ values: 'falsy' }).isString().withMessage(`${label} must be text`).trim().isLength({ max: 30 }).withMessage('Keep this to 30 characters or fewer');
+const registered = (value, { req }) => hasText(req.body.registrationNumber);
+
 const busRules = () => [
-  requiredText('chassisNumber', 'Chassis number', 'Chassis number is required', 30),
-  requiredText('fleetNumber', 'Site number', 'Site number is required', 30),
-  requiredText('registrationNumber', 'Registration number', 'Registration number is required', 30),
+  // A new bus can run for months before it is registered, and the depot's records hold no chassis numbers.
+  optionalNumber('chassisNumber', 'Chassis number'),
+  requiredText('fleetNumber', 'Side number', 'Side number is required', 30),
+  optionalNumber('registrationNumber', 'Registration number'),
   requiredText('make', 'Brand', 'Brand is required', 60),
   requiredText('model', 'Type', 'Type is required', 60),
   body('year')
     .isInt({ min: 1900, max: new Date().getFullYear() + 1 })
     .withMessage('Enter a valid model year')
     .toInt(),
-  isDay('registrationExpiry', 'Enter the registration expiry date')
+  body('registrationExpiry', 'Enter the registration expiry date')
+    .if(registered)
+    .isString()
+    .matches(/^\d{4}-\d{2}-\d{2}/)
+    .isISO8601({ strict: true })
+    .bail()
     .custom((value) => new Date(value) <= yearsAhead(10))
     .withMessage('Choose an expiry date within the next 10 years')
     .toDate(),
+  body('registrationExpiry', 'An expiry date goes only with a registration number')
+    .if((value, meta) => !registered(value, meta))
+    .custom((value) => value === undefined || value === null || value === ''),
   body('expectedLifeYears', 'Enter the expected life in years').not().isArray().isInt({ min: 1, max: 100 }).toInt(),
   number('labourRate', 'Enter the labour charge per hour, above 0', { above: 0, money: true }).optional({ values: 'null' }),
   ...['oil', 'transmission'].map((service) =>
@@ -165,6 +180,10 @@ export const validateBusCreate = [
 
 export const validateBusUpdate = [...busRules(), handleValidationErrors];
 
+const SEVERITY = 'Choose how serious the accident was';
+const FAULT = 'Choose who was at fault';
+const isAccident = (value, { req }) => req.body.serviceType === 'repair' && req.body.repairCategory === 'ACCIDENT';
+
 export const validateTicketCreate = [
   str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),
   str('serviceType', 'Service type').isIn(SERVICE_TYPES).withMessage(`Service type must be one of: ${SERVICE_TYPES.join(', ')}`),
@@ -176,6 +195,10 @@ export const validateTicketCreate = [
   km('currentReading', 'Enter the current reading as a whole number of kilometres'),
   body('vendorId', 'Choose a vendor').optional({ values: 'falsy' }).isString().isMongoId(),
   body('isBreakdown', 'Breakdown must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
+  body('location', 'Choose where the work is done').optional({ values: 'falsy' }).isString().isIn(WORK_LOCATIONS),
+  // For the depot's own records: required on an accident repair, and dropped on anything else.
+  body('accident.severity', SEVERITY).if(isAccident).isString().isIn(ACCIDENT_SEVERITIES),
+  body('accident.fault', FAULT).if(isAccident).isString().isIn(ACCIDENT_FAULTS),
   body('description')
     .optional({ values: 'falsy' })
     .isString()
@@ -187,6 +210,12 @@ export const validateTicketCreate = [
 ];
 
 export const validateTransitionNote = [note(), handleValidationErrors];
+
+export const validateAccident = [
+  body('severity', SEVERITY).isString().isIn(ACCIDENT_SEVERITIES),
+  body('fault', FAULT).isString().isIn(ACCIDENT_FAULTS),
+  handleValidationErrors,
+];
 
 export const validateSheetMonth = [
   qstr('month').matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('Choose a valid month'),
@@ -218,8 +247,28 @@ const daysToComplete = () => body('daysToComplete', 'Enter a whole number of day
 /** A number someone copies off a document: needed, and short enough to show. */
 const referenceNumber = (field, label, required) => requiredText(field, label, required, 60).withMessage('Keep the number to 60 characters or fewer');
 
+/**
+ * A vendor's estimate may be AED 0 for warranty, goodwill, insurance or free-of-charge work, and
+ * then has to say which; a reason never goes with a price. A form sends an empty choice as "".
+ */
+const NO_CHARGE = 'Enter an amount above 0, or choose why there is no charge';
+const estimateAmount = () =>
+  number('amount', 'Enter the estimate amount', { money: true })
+    .custom((value, { req }) => Number(value) > 0 || hasText(req.body.noChargeReason))
+    .withMessage(NO_CHARGE);
+const noChargeReason = () =>
+  body('noChargeReason')
+    .optional({ values: 'falsy' })
+    .isString()
+    .isIn(NO_CHARGE_REASONS)
+    .withMessage('Choose a valid reason for no charge')
+    .bail()
+    .custom((value, { req }) => Number(req.body.amount) === 0)
+    .withMessage('A reason for no charge goes only with an amount of 0');
+
 export const validateEstimate = [
-  number('amount', 'Enter the estimate amount', { above: 0, money: true }),
+  estimateAmount(),
+  noChargeReason(),
   referenceNumber('quotationNumber', 'Quotation number', 'Enter the quotation number'),
   daysToComplete(),
   roundNote(),
@@ -247,6 +296,9 @@ const reading = () => km('km', 'Enter the reading as a whole number of kilometre
 export const validateStepDate = [stepDate(), handleValidationErrors];
 
 export const validateVehicleReceived = [stepDate(), reading(), handleValidationErrors];
+
+// At the depot the vendor gives the reading when starting, since the bus was never received.
+export const validateWorkStart = [stepDate(), reading().optional({ values: 'null' }), handleValidationErrors];
 
 export const validateVehicleReturned = [
   stepDate(),
@@ -365,10 +417,11 @@ export const validateTicketDecline = [
 ];
 
 export const validateAdditionalJob = [
-  number('amount', 'Enter the estimate amount', { above: 0, money: true }),
+  estimateAmount(),
+  noChargeReason(),
   referenceNumber('quotationNumber', 'Quotation number', 'Enter the quotation number'),
   daysToComplete(),
-  str('serviceType', 'Service type').isIn(['repair', 'tyre', 'battery', 'other']).withMessage('Choose what kind of work this is'),
+  str('serviceType', 'Service type').isIn(['repair', 'tyre', 'battery', 'brakePads', 'other']).withMessage('Choose what kind of work this is'),
   body('repairCategory').if(body('serviceType').equals('repair')).isString().isIn(REPAIR_CATEGORIES).withMessage('Choose a repair category for repair VSRs'),
   str('description', 'Description').trim().isLength({ min: 10, max: 1000 }).withMessage('Describe the additional work, in 10 to 1000 characters'),
   roundNote(),
@@ -380,7 +433,7 @@ const reportYear = () => qstr('year').isInt({ min: 2000, max: 2100 }).withMessag
 export const validateReportQuery = [
   reportYear(),
   qstr('brand').isLength({ max: 120 }).withMessage('Choose a valid brand'),
-  qstr('type').isIn(['accident', 'repair', 'maintenance', 'oil', 'transmission', 'tyre', 'battery', 'other']).withMessage('Choose a valid kind of work'),
+  qstr('type').isIn(['accident', 'repair', 'maintenance', 'oil', 'transmission', 'tyre', 'battery', 'brakePads', 'other']).withMessage('Choose a valid kind of work'),
   qstr('vendorId').isMongoId().withMessage('Choose a valid vendor'),
   qstr('busId').isMongoId().withMessage('Choose a valid bus'),
   qstr('isBreakdown').isBoolean().withMessage('Breakdown must be yes or no'),

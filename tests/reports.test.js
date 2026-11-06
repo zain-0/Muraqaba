@@ -12,7 +12,9 @@ const raise = async (busId, body) => {
   assert.equal(res.status, 201, JSON.stringify(res.body));
   return res.body.data;
 };
-const repair = (busId, category = 'ENGINE', extra = {}) => raise(busId, { serviceType: 'repair', repairCategory: category, ...extra });
+// Accident repairs need their internal details since 2026-11-06.
+const repair = (busId, category = 'ENGINE', extra = {}) =>
+  raise(busId, { serviceType: 'repair', repairCategory: category, ...(category === 'ACCIDENT' ? { accident: { severity: 'minor', fault: 'unknown' } } : {}), ...extra });
 const YEAR = new Date().getUTCFullYear();
 
 describe('purchasing queries', () => {
