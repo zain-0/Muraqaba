@@ -82,6 +82,38 @@ describe('client seed', () => {
         }
       }
 
+      // Repair and maintenance are one line for one make, the make most of the vendor's buses have (2026-11-09).
+      const fleet = await db('buses').find().toArray();
+      for (const lpo of await db('lpos').find().toArray()) {
+        assert.ok(lpo.items.every((item) => !['repair', 'maintenance'].includes(item.kind)), `${lpo.number} has no old line kinds`);
+        assert.ok(lpo.items.filter((item) => item.kind === 'repairMaintenance').length <= 1, `${lpo.number} has one repair and maintenance line`);
+        const forMake = lpo.items.some((item) => item.kind === 'repairMaintenance');
+        assert.equal(Boolean(lpo.make), forMake, `${lpo.number} names a make only for repair and maintenance`);
+        if (!forMake) continue;
+        const makes = fleet.filter((bus) => String(bus.vendor) === String(lpo.vendor)).map((bus) => bus.make);
+        const most = Math.max(...makes.map((make) => makes.filter((m) => m.toLowerCase() === make.toLowerCase()).length));
+        assert.equal(makes.filter((m) => m.toLowerCase() === lpo.make.toLowerCase()).length, most, `${lpo.number} is for its vendor's main make`);
+      }
+
+      // Each bus's lifecycle is what its latest daily status says.
+      const statusesOf = new Map();
+      data.statusChanges.forEach((change) => statusesOf.set(change.bus, [...(statusesOf.get(change.bus) ?? []), change]));
+      for (const bus of fleet) {
+        const list = (statusesOf.get(bus.fleetNumber) ?? []).sort((a, b) => a.date.localeCompare(b.date));
+        const latest = list.at(-1)?.status;
+        const expected = latest === 'scrapping' ? 'scrapped' : latest === 'removed' ? 'sold' : 'inOperation';
+        assert.equal(bus.lifecycle, expected, `${bus.fleetNumber} lifecycle`);
+        const statusOn = (day) => list.filter((change) => change.date <= day).at(-1)?.status;
+        if (expected === 'scrapped') assert.equal(statusOn(bus.scrappedOn), 'scrapping', `${bus.fleetNumber} scrapped from a Scrapping day`);
+        if (expected === 'sold') {
+          assert.equal(statusOn(bus.sale.date), 'removed', `${bus.fleetNumber} sold on a Removed day`);
+          assert.ok(list.filter((change) => change.date > bus.sale.date).every((change) => change.status === 'removed'), `${bus.fleetNumber} removed from then on`);
+          assert.notEqual(list.filter((change) => change.date < bus.sale.date).at(-1)?.status, 'removed', `${bus.fleetNumber} sold on the first day of that run`);
+          assert.ok(bus.scrappedOn <= bus.sale.date && bus.sale.buyer === undefined && bus.sale.price === undefined, `${bus.fleetNumber} has no buyer or price on record`);
+        }
+      }
+      assert.equal(await db('scraprequests').countDocuments(), 0, 'the records hold no scrap request');
+
       // Odometers never go down, as the daily sheet requires.
       const readings = await db('busdailyreadings').find().sort({ bus: 1, date: 1 }).toArray();
       readings.forEach((r, i) => {

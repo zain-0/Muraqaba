@@ -3,7 +3,7 @@
  * minutes, and each notice has a dedupe key, so a person never gets the same one twice however
  * often the checks run. Screens word the notice from its type and params, in the viewer's language.
  *
- * Every notice passes through notifyRoles, which is where email would go. See "Adding email" in
+ * Every notice passes through notifyUser, which is where email would go. See "Adding email" in
  * the README.
  */
 import mongoose from 'mongoose';
@@ -18,14 +18,14 @@ const CHECK_EVERY_MS = Number(process.env.NOTIFICATION_CHECK_MS ?? 5 * 60 * 1000
 const EXPIRY_WARNING_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const notifyRoles = async (roles, { type, params, link, dedupeKey }) => {
+/** One notice for one person, such as the creator who raised a scrap request. */
+export const notifyUser = (userId, { type, params, link, dedupeKey }) =>
+  // upsertedCount is 1 only the first time, so an email sent from here would go out once.
+  Notification.updateOne({ user: userId, dedupeKey }, { $setOnInsert: { type, params, link } }, { upsert: true });
+
+export const notifyRoles = async (roles, notice) => {
   const users = await User.find({ role: mongoose.trusted({ $in: roles }) }).select('_id');
-  await Promise.all(
-    users.map((user) =>
-      // upsertedCount is 1 only the first time, so an email sent from here would go out once.
-      Notification.updateOne({ user: user._id, dedupeKey }, { $setOnInsert: { type, params, link } }, { upsert: true })
-    )
-  );
+  await Promise.all(users.map((user) => notifyUser(user._id, notice)));
 };
 
 const checkRegistrations = async () => {

@@ -36,8 +36,9 @@ const PurchaseInvoiceSchema = new mongoose.Schema(
 );
 
 // Which VSRs a line pays for. Tyre and battery lines track quantity and amount, the others amount only.
-// Maintenance is oil and transmission services.
-export const LPO_KINDS = ['tyre', 'battery', 'repair', 'maintenance', 'other'];
+// Repairs, brake pads, oil and transmission services all come off one repair and maintenance amount,
+// as on the client's e-LPO (2026-11-09). That line is for one make; tyres and batteries cover every make.
+export const LPO_KINDS = ['repairMaintenance', 'tyre', 'battery', 'other'];
 
 const LpoItemSchema = new mongoose.Schema(
   {
@@ -63,6 +64,8 @@ const LpoSchema = new mongoose.Schema(
   {
     number: { type: String, required: true, unique: true, trim: true, maxlength: 60 },
     vendor: { type: ObjectId, ref: 'User', required: true, index: true },
+    // The make of bus this LPO is for, spelt as on the fleet. Left out, it covers every make.
+    make: { type: String, trim: true, maxlength: 60 },
     validFrom: { type: Date, required: true },
     validTo: { type: Date, required: true },
     items: { type: [LpoItemSchema], required: true },

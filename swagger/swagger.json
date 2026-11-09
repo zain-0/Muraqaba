@@ -28,6 +28,9 @@
       "name": "Buses"
     },
     {
+      "name": "Scrapping"
+    },
+    {
       "name": "Tickets"
     },
     {
@@ -275,10 +278,107 @@
               }
             }
           },
+          "lifecycle": {
+            "type": "string",
+            "enum": [
+              "inOperation",
+              "scrapRequested",
+              "scrapped",
+              "sold"
+            ],
+            "description": "Sold is archived: kept with its history, hidden from current lists, never changed again"
+          },
+          "scrappedOn": {
+            "type": "string",
+            "example": "2026-11-09",
+            "description": "The day the scrap request was approved"
+          },
+          "sale": {
+            "type": "object",
+            "description": "Recorded by the supervisor. A bus migrated from the daily sheet has a date only.",
+            "properties": {
+              "date": {
+                "type": "string",
+                "example": "2026-11-09",
+                "description": "A UAE day, YYYY-MM-DD"
+              },
+              "buyer": {
+                "type": "string"
+              },
+              "price": {
+                "type": "number",
+                "description": "AED"
+              },
+              "note": {
+                "type": "string"
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "_id": {
+                      "type": "string",
+                      "example": "64b7f0c2e1d2a9b1c8a4f123"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "recordedBy": {
+                "type": "object",
+                "properties": {
+                  "_id": {
+                    "type": "string",
+                    "example": "64b7f0c2e1d2a9b1c8a4f123"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "vendor",
+                      "serviceCreator",
+                      "supervisor",
+                      "purchaseManager"
+                    ]
+                  }
+                }
+              },
+              "recordedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
           "intervalStatus": {
             "type": "object",
             "description": "Where each interval stands, from the latest km reading",
             "additionalProperties": true
+          },
+          "openTickets": {
+            "type": "integer",
+            "description": "Detail endpoint only"
+          },
+          "scrapRequests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScrapRequest"
+            },
+            "description": "Detail endpoint only, newest first"
           },
           "createdAt": {
             "type": "string",
@@ -629,10 +729,107 @@
                   }
                 }
               },
+              "lifecycle": {
+                "type": "string",
+                "enum": [
+                  "inOperation",
+                  "scrapRequested",
+                  "scrapped",
+                  "sold"
+                ],
+                "description": "Sold is archived: kept with its history, hidden from current lists, never changed again"
+              },
+              "scrappedOn": {
+                "type": "string",
+                "example": "2026-11-09",
+                "description": "The day the scrap request was approved"
+              },
+              "sale": {
+                "type": "object",
+                "description": "Recorded by the supervisor. A bus migrated from the daily sheet has a date only.",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "example": "2026-11-09",
+                    "description": "A UAE day, YYYY-MM-DD"
+                  },
+                  "buyer": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number",
+                    "description": "AED"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "example": "64b7f0c2e1d2a9b1c8a4f123"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "recordedBy": {
+                    "type": "object",
+                    "properties": {
+                      "_id": {
+                        "type": "string",
+                        "example": "64b7f0c2e1d2a9b1c8a4f123"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "email": {
+                        "type": "string",
+                        "format": "email"
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "vendor",
+                          "serviceCreator",
+                          "supervisor",
+                          "purchaseManager"
+                        ]
+                      }
+                    }
+                  },
+                  "recordedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
               "intervalStatus": {
                 "type": "object",
                 "description": "Where each interval stands, from the latest km reading",
                 "additionalProperties": true
+              },
+              "openTickets": {
+                "type": "integer",
+                "description": "Detail endpoint only"
+              },
+              "scrapRequests": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ScrapRequest"
+                },
+                "description": "Detail endpoint only, newest first"
               },
               "createdAt": {
                 "type": "string",
@@ -651,6 +848,7 @@
               "transmission",
               "tyre",
               "battery",
+              "brakePads",
               "repair",
               "other"
             ]
@@ -1235,6 +1433,199 @@
             "type": "string"
           }
         }
+      },
+      "ScrapRequest": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "64b7f0c2e1d2a9b1c8a4f123"
+          },
+          "bus": {
+            "type": "object",
+            "description": "fleetNumber registrationNumber make model year lifecycle",
+            "additionalProperties": true
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "totalLoss",
+              "highRunningCost",
+              "endOfLife"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "_id": {
+                  "type": "string",
+                  "example": "64b7f0c2e1d2a9b1c8a4f123"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "mimeType": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "cancelled"
+            ]
+          },
+          "createdBy": {
+            "type": "object",
+            "properties": {
+              "_id": {
+                "type": "string",
+                "example": "64b7f0c2e1d2a9b1c8a4f123"
+              },
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "vendor",
+                  "serviceCreator",
+                  "supervisor",
+                  "purchaseManager"
+                ]
+              }
+            }
+          },
+          "decidedBy": {
+            "type": "object",
+            "properties": {
+              "_id": {
+                "type": "string",
+                "example": "64b7f0c2e1d2a9b1c8a4f123"
+              },
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "vendor",
+                  "serviceCreator",
+                  "supervisor",
+                  "purchaseManager"
+                ]
+              }
+            }
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decisionNote": {
+            "type": "string",
+            "description": "The supervisor's note; the reason when turned down"
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LpoPreview": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "repairMaintenance",
+              "tyre",
+              "battery",
+              "other"
+            ]
+          },
+          "make": {
+            "type": "string",
+            "description": "The bus's make"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "found",
+              "noLpo",
+              "notNeeded"
+            ],
+            "description": "notNeeded: other work with no Other line, as when charged"
+          },
+          "lpo": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "_id": {
+                "type": "string",
+                "example": "64b7f0c2e1d2a9b1c8a4f123"
+              },
+              "number": {
+                "type": "string"
+              },
+              "make": {
+                "type": "string",
+                "nullable": true,
+                "description": "null: covers every make"
+              },
+              "validFrom": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "validTo": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "lineTotal": {
+                "type": "number"
+              },
+              "lineRemaining": {
+                "type": "number"
+              },
+              "remainingQuantity": {
+                "type": "number",
+                "nullable": true,
+                "description": "Tyres and batteries only"
+              }
+            }
+          },
+          "fits": {
+            "type": "boolean",
+            "description": "Only when an amount is given and an LPO is found. false: this job would overrun it"
+          }
+        }
       }
     }
   },
@@ -1681,7 +2072,7 @@
         "tags": [
           "Users"
         ],
-        "summary": "Role specific counters, including actionRequired",
+        "summary": "Role specific counters, including actionRequired. The supervisor's has scrapRequestsToDecide, counted in actionRequired.",
         "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
         "security": [
           {
@@ -2132,7 +2523,7 @@
         "tags": [
           "Sheets"
         ],
-        "summary": "Change a bus status from a day onward",
+        "summary": "Change a bus status from a day onward. Scrapping and removed are refused (they come from scrap requests), and so is any day from a scrapped or sold bus's scrappedOn (409).",
         "description": "Roles: serviceCreator",
         "security": [
           {
@@ -2160,7 +2551,15 @@
                     "type": "string"
                   },
                   "status": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "ready",
+                      "repair",
+                      "maintenance",
+                      "tyreChange",
+                      "batteryChange",
+                      "accident"
+                    ]
                   }
                 }
               }
@@ -2210,6 +2609,16 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
             "content": {
               "application/json": {
                 "schema": {
@@ -2606,7 +3015,7 @@
         "tags": [
           "Buses"
         ],
-        "summary": "Bus details with open ticket count",
+        "summary": "Bus details with open ticket count and its scrap requests, newest first",
         "description": "Roles: serviceCreator, supervisor, purchaseManager",
         "security": [
           {
@@ -2683,7 +3092,7 @@
         "tags": [
           "Buses"
         ],
-        "summary": "Edit a bus. New tickets use the changes; the vendor stays as it was.",
+        "summary": "Edit a bus. New tickets use the changes; the vendor stays as it was. A sold bus cannot be edited (409).",
         "description": "Roles: serviceCreator",
         "security": [
           {
@@ -2776,6 +3185,971 @@
           },
           "409": {
             "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/buses/{id}/sale": {
+      "put": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Record the sale of a scrapped bus, which archives it. Multipart form: date (on or after scrappedOn, not in the future), buyer (up to 200 characters), price (AED, 0 or more, 2 decimals), note (up to 1000), attachments. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each). Writes Removed on the daily sheet from the sale day.",
+        "description": "Roles: supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Bus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "date",
+                  "buyer",
+                  "price"
+                ],
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "example": "2026-11-09",
+                    "description": "A UAE day, YYYY-MM-DD"
+                  },
+                  "buyer": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/buses/{id}/sale/attachments/{attachmentId}": {
+      "get": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Download a sale document",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          },
+          {
+            "name": "attachmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrap-requests": {
+      "get": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Scrap requests, newest first",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "busId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest"
+              ],
+              "default": "newest"
+            },
+            "description": "Order by creation date"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ScrapRequest"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pages": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Ask the supervisor to scrap a bus in operation with no open VSR. Multipart form: busId, reason, note (up to 1000), attachments. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each). Every supervisor is notified.",
+        "description": "Roles: serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ScrapRequest"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "busId",
+                  "reason"
+                ],
+                "properties": {
+                  "busId": {
+                    "type": "string",
+                    "example": "64b7f0c2e1d2a9b1c8a4f123"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "totalLoss",
+                      "highRunningCost",
+                      "endOfLife"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrap-requests/{id}": {
+      "get": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "One scrap request",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ScrapRequest"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrap-requests/{id}/approve": {
+      "put": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Approve: checks again for open VSRs, scraps the bus today and writes Scrapping on the daily sheet. The creator is notified.",
+        "description": "Roles: supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ScrapRequest"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrap-requests/{id}/reject": {
+      "put": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Turn down, with the reason. The bus is back in operation and the creator is notified.",
+        "description": "Roles: supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "note"
+                ],
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ScrapRequest"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrap-requests/{id}/cancel": {
+      "put": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Cancel a waiting request; only the creator who raised it. The bus is back in operation.",
+        "description": "Roles: serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ScrapRequest"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrap-requests/{id}/attachments/{attachmentId}": {
+      "get": {
+        "tags": [
+          "Scrapping"
+        ],
+        "summary": "Download a scrap request document",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          },
+          {
+            "name": "attachmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2974,6 +4348,7 @@
                       "transmission",
                       "tyre",
                       "battery",
+                      "brakePads",
                       "repair",
                       "other"
                     ]
@@ -6224,7 +7599,7 @@
         "tags": [
           "Purchasing"
         ],
-        "summary": "Create an LPO",
+        "summary": "Create an LPO. Repairs, brake pads, oil and transmission come off one repairMaintenance line for one make; tyre, battery and other LPOs name no make and cover every bus.",
         "description": "Roles: purchaseManager",
         "security": [
           {
@@ -6253,6 +7628,10 @@
                     "type": "string",
                     "example": "64b7f0c2e1d2a9b1c8a4f123"
                   },
+                  "make": {
+                    "type": "string",
+                    "description": "Required with a repairMaintenance line and refused without one. Must be a make on the fleet, in any letter case; stored as the fleet spells it."
+                  },
                   "validFrom": {
                     "type": "string",
                     "format": "date"
@@ -6275,9 +7654,9 @@
                         "kind": {
                           "type": "string",
                           "enum": [
+                            "repairMaintenance",
                             "tyre",
                             "battery",
-                            "repair",
                             "other"
                           ]
                         },
@@ -6367,6 +7746,139 @@
           },
           "409": {
             "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lpos/for-vsr": {
+      "get": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "Which LPO a job would come off, for the new VSR form and the VSR page. Reads only; accepting the invoice uses the same choice.",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "busId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          },
+          {
+            "name": "vendorId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            },
+            "description": "Defaults to the bus's vendor"
+          },
+          {
+            "name": "serviceType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "oil",
+                "transmission",
+                "tyre",
+                "battery",
+                "brakePads",
+                "repair",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "description": "AED. Given, the answer says whether it fits"
+          },
+          {
+            "name": "quantity",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Tyres or batteries fitted, matched as the charge matches them"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/LpoPreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {

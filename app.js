@@ -19,6 +19,7 @@ import ticketRoutes from './routes/ticketRoutes.js';
 import sheetRoutes from './routes/sheetRoutes.js';
 import { grnRoutes, lpoRoutes, purchaseInvoiceRoutes } from './routes/purchaseRoutes.js';
 import { notificationRoutes, reportRoutes } from './routes/reportRoutes.js';
+import scrapRoutes from './routes/scrapRoutes.js';
 import { errorHandler, notFound } from './middleware/errorMiddleware.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -110,6 +111,7 @@ app.use('/api/sheets', sheetRoutes);
 app.use('/api/grns', grnRoutes);
 app.use('/api/purchase-invoices', purchaseInvoiceRoutes);
 app.use('/api/lpos', lpoRoutes);
+app.use('/api/scrap-requests', scrapRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 

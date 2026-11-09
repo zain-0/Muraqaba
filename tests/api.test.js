@@ -370,7 +370,7 @@ describe('Muraqaba API', () => {
       assert.equal((await row()).readings[today], 7800, 'a VSR must not overwrite what the creator typed');
     });
 
-    test('daily status sheet: VSRs pick it, it carries forward and scrapping stays locked', async () => {
+    test('daily status sheet: VSRs pick it, it carries forward and scrapping is not set by hand', async () => {
       const bus = await newBus('STAT', users.vendor1.id);
       const sheet = async () => (await api('GET', '/sheets/status', { token: users.supervisor.token })).body.data;
       const row = async () => (await sheet()).buses.find((b) => b._id === bus._id);
@@ -402,16 +402,19 @@ describe('Muraqaba API', () => {
         assert.equal(cell.source, 'vsr');
       }
 
-      assert.equal((await put(users.creator.token, { busId: bus._id, date: days[0], status: 'removed' })).status, 200);
+      assert.equal((await put(users.creator.token, { busId: bus._id, date: days[0], status: 'accident' })).status, 200);
       const carried = await row();
-      assert.equal(carried.cells[0].status, 'removed');
+      assert.equal(carried.cells[0].status, 'accident');
       assert.equal(carried.cells[0].source, 'manual');
-      if (todayIndex > 1) assert.equal(carried.cells[1].status, 'removed', 'a status holds until the next change');
+      if (todayIndex > 1) assert.equal(carried.cells[1].status, 'accident', 'a status holds until the next change');
       if (todayIndex + 1 < days.length) assert.equal(carried.cells[todayIndex + 1], null, 'future days stay empty');
 
-      assert.equal((await put(users.creator.token, { busId: bus._id, date: today, status: 'scrapping' })).status, 200);
-      await raise({ serviceType: 'repair', repairCategory: 'ENGINE' });
-      assert.equal((await row()).cells[todayIndex].status, 'scrapping', 'a VSR must not override scrapping');
+      // Scrapping and Removed come only from a scrap request and its sale (tests/fleet-lifecycle.test.js).
+      for (const status of ['scrapping', 'removed']) {
+        const refused = await put(users.creator.token, { busId: bus._id, date: today, status });
+        assert.equal(refused.status, 400, status);
+        assert.deepEqual(refused.body.errors[0], { field: 'status', message: 'Scrapping and selling go through a scrap request.' });
+      }
       assert.equal((await put(users.creator.token, { busId: bus._id, date: today, status: 'ready' })).status, 200);
       assert.equal((await row()).cells[todayIndex].status, 'ready');
 

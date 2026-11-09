@@ -14,7 +14,9 @@ const VALID = { validFrom: '2026-01-01', validTo: '2099-12-31' };
 let counter = 0;
 const lpo = (items, overrides = {}) => {
   counter += 1;
-  return api('POST', '/lpos', { token: users.purchasing.token, body: { number: `QA-${run}-${counter}`, vendorId: users.vendor1.id, ...VALID, items, ...overrides } });
+  // A repair and maintenance line is for one make: the QA bus's.
+  const make = items.some((item) => item.kind === 'repairMaintenance') ? { make: 'Hino' } : {};
+  return api('POST', '/lpos', { token: users.purchasing.token, body: { number: `QA-${run}-${counter}`, vendorId: users.vendor1.id, ...VALID, items, ...make, ...overrides } });
 };
 const firstError = (res) => res.body.errors?.[0];
 const raise = async (body = {}) => {
@@ -31,10 +33,10 @@ describe('browser testing findings', () => {
 
   describe('numbers', () => {
     test('a number too large says so, rather than asking for one above zero', async () => {
-      const res = await lpo([{ kind: 'repair', name: 'Repairs', quantity: 2e12, unitPrice: 1 }]);
+      const res = await lpo([{ kind: 'repairMaintenance', name: 'Repairs', quantity: 2e12, unitPrice: 1 }]);
       assert.equal(res.status, 400);
       assert.deepEqual(firstError(res), { field: 'items[0].quantity', message: 'That number is too large' });
-      const price = await lpo([{ kind: 'repair', name: 'Repairs', quantity: 1, unitPrice: 2e12 }]);
+      const price = await lpo([{ kind: 'repairMaintenance', name: 'Repairs', quantity: 1, unitPrice: 2e12 }]);
       assert.equal(firstError(price).message, 'That number is too large');
     });
 
@@ -44,7 +46,7 @@ describe('browser testing findings', () => {
         assert.equal(res.status, 400, kind);
         assert.deepEqual(firstError(res), { field: 'items[0].quantity', message: 'Enter a whole number' });
       }
-      assert.equal((await lpo([{ kind: 'repair', name: 'Repairs', quantity: 1.5, unitPrice: 100 }])).status, 201, 'a repair line can be part of a unit');
+      assert.equal((await lpo([{ kind: 'repairMaintenance', name: 'Repairs', quantity: 1.5, unitPrice: 100 }])).status, 201, 'a repair line can be part of a unit');
 
       const ticket = await raise({ serviceType: 'tyre', repairCategory: undefined });
       await estimate(ticket._id, users.vendor1.token, { amount: '1600' });
@@ -54,9 +56,9 @@ describe('browser testing findings', () => {
     });
 
     test('money has at most two decimals, wherever it is typed', async () => {
-      const priced = await lpo([{ kind: 'repair', name: 'Repairs', quantity: 1, unitPrice: 0.005 }]);
+      const priced = await lpo([{ kind: 'repairMaintenance', name: 'Repairs', quantity: 1, unitPrice: 0.005 }]);
       assert.deepEqual(firstError(priced), { field: 'items[0].unitPrice', message: 'Use at most 2 decimals' });
-      assert.equal((await lpo([{ kind: 'repair', name: 'Repairs', quantity: 1, unitPrice: 0.05 }])).status, 201);
+      assert.equal((await lpo([{ kind: 'repairMaintenance', name: 'Repairs', quantity: 1, unitPrice: 0.05 }])).status, 201);
 
       const ticket = await raise();
       const sent = await estimate(ticket._id, users.vendor1.token, { amount: '10.555' });
@@ -85,8 +87,8 @@ describe('browser testing findings', () => {
 
   describe('numbers that differ only in letter case are the same number', () => {
     test('LPO, GRN and purchase invoice numbers', async () => {
-      assert.equal((await lpo([{ kind: 'repair', name: 'R', quantity: 1, unitPrice: 1 }], { number: `QA-CASE-${run}` })).status, 201);
-      const lower = await lpo([{ kind: 'repair', name: 'R', quantity: 1, unitPrice: 1 }], { number: `qa-case-${run}` });
+      assert.equal((await lpo([{ kind: 'repairMaintenance', name: 'R', quantity: 1, unitPrice: 1 }], { number: `QA-CASE-${run}` })).status, 201);
+      const lower = await lpo([{ kind: 'repairMaintenance', name: 'R', quantity: 1, unitPrice: 1 }], { number: `qa-case-${run}` });
       assert.equal(lower.status, 409);
       assert.equal(firstError(lower).field, 'number');
 

@@ -1,6 +1,7 @@
 /**
  * Seeds a development database with one account per role, two vendors, a small fleet, LPOs,
- * and VSRs at every stage of the lifecycle so each dashboard and report has data.
+ * and VSRs at every stage of the lifecycle so each dashboard and report has data. One bus has
+ * been scrapped and sold, and one waits on a scrap request.
  *
  *   npm run seed          # adds demo data if the demo accounts do not exist yet
  *   npm run seed:reset    # wipes everything first
@@ -19,9 +20,11 @@ import Ticket from '../models/Ticket.js';
 import Invoice from '../models/Invoice.js';
 import Counter, { nextVsrNumber } from '../models/Counter.js';
 import Notification from '../models/Notification.js';
+import ScrapRequest from '../models/ScrapRequest.js';
 import { Grn, Lpo, PurchaseInvoice } from '../models/Purchase.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
+import { notifyRoles } from '../utils/notifications.js';
 import { usageWhenRaised } from '../utils/intervals.js';
 import { deductFromLpo } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
@@ -80,7 +83,7 @@ async function main() {
   await Bus.syncIndexes();
 
   if (reset) {
-    await Promise.all([User, SignatureImage, Bus, Ticket, Invoice, Counter, Notification, Grn, PurchaseInvoice, Lpo, BusDailyReading, BusStatusChange].map((M) => M.deleteMany({})));
+    await Promise.all([User, SignatureImage, Bus, Ticket, Invoice, Counter, Notification, Grn, PurchaseInvoice, Lpo, BusDailyReading, BusStatusChange, ScrapRequest].map((M) => M.deleteMany({})));
     console.log('Cleared existing data');
   } else if (await User.exists({ email: ACCOUNTS[0].email })) {
     console.log('Demo accounts already exist. Run with --reset to recreate everything.');
@@ -141,33 +144,33 @@ async function main() {
     makeBus('BUS-105', undefined, 'DXB-1055', 'Yutong', 'Coach', 2012, 90, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(235000, 200000, 210000, 2, 205000), vendor2),
     // A new bus that arrived three weeks ago and runs on a temporary plate until it is registered.
     makeBus('BUS-106', 'CH-106-FX', undefined, 'Yutong', 'City bus', 2026, undefined, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(0, 0, 0, 1, 0), vendor1, { createdAt: daysAgo(21) }),
+    // Past its service life; the creator has asked for it to be scrapped (below).
+    makeBus('BUS-107', 'CH-107-GX', 'DXB-1077', 'Isuzu', 'Mini bus', 2010, 150, 15, 60, { oil: 0.09, transmission: 0.04 }, intervals(404000, 380000, 395000, 10, 390000), vendor1),
   ]);
-  const [bus101, bus102, bus103, bus104, bus105, bus106] = buses;
+  const [bus101, bus102, bus103, bus104, bus105, bus106, bus107] = buses;
 
+  // Tyres and batteries for every make; repair and maintenance, one amount per make, as on the
+  // depot's e-LPO. Metro Fleet Services has none for Yutong, so a VSR there shows "No LPO".
+  const repairAndMaintenance = (number, vendor, make, amount) => ({
+    number, vendor: vendor._id, make, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: amount,
+    items: [{ kind: 'repairMaintenance', name: 'Repair and maintenance', description: `Repairs, brake pads, oil and transmission services for ${make} buses`, quantity: 1, unitPrice: amount, total: amount }],
+  });
   await Lpo.create([
     {
-      number: 'LPO-2026-001', vendor: vendor1._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 34000 + 12400 + 150000,
+      number: 'LPO-2026-001', vendor: vendor1._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 34000 + 12400,
       items: [
         { kind: 'tyre', name: 'Tyre 295/80 R22.5', description: 'Rear and front axle', quantity: 40, unitPrice: 850, total: 34000 },
         { kind: 'battery', name: 'Battery 12V 200Ah', quantity: 20, unitPrice: 620, total: 12400 },
-        { kind: 'repair', name: 'Repairs and labour', description: 'Deducted by price', quantity: 1, unitPrice: 150000, total: 150000 },
       ],
     },
     {
-      number: 'LPO-2026-002', vendor: vendor2._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 8800 + 60000,
-      items: [
-        { kind: 'tyre', name: 'Tyre 225/75 R17.5', quantity: 4, unitPrice: 2200, total: 8800 },
-        { kind: 'repair', name: 'Repairs and labour', quantity: 1, unitPrice: 60000, total: 60000 },
-      ],
+      number: 'LPO-2026-002', vendor: vendor2._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 8800,
+      items: [{ kind: 'tyre', name: 'Tyre 225/75 R17.5', quantity: 4, unitPrice: 2200, total: 8800 }],
     },
-    {
-      number: 'LPO-2026-003', vendor: vendor1._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 40000,
-      items: [{ kind: 'maintenance', name: 'Oil and transmission services', description: 'Deducted by price', quantity: 1, unitPrice: 40000, total: 40000 }],
-    },
-    {
-      number: 'LPO-2026-004', vendor: vendor2._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 25000,
-      items: [{ kind: 'maintenance', name: 'Oil and transmission services', description: 'Deducted by price', quantity: 1, unitPrice: 25000, total: 25000 }],
-    },
+    repairAndMaintenance('LPO-2026-003', vendor1, 'Hino', 150000),
+    repairAndMaintenance('LPO-2026-004', vendor1, 'Yutong', 40000),
+    repairAndMaintenance('LPO-2026-005', vendor2, 'Isuzu', 60000),
+    repairAndMaintenance('LPO-2026-006', vendor2, 'Hino', 25000),
     {
       number: 'LPO-2025-014', vendor: vendor1._id, validFrom: new Date('2025-01-01'), validTo: new Date('2025-12-31'), createdBy: purchasing._id, grandTotal: 25500,
       items: [{ kind: 'tyre', name: 'Tyre 295/80 R22.5', description: 'Last year', quantity: 30, unitPrice: 850, total: 25500 }],
@@ -175,8 +178,8 @@ async function main() {
   ]);
 
   // Odometers that climb by a steady amount each day, so VSRs and the daily sheet agree.
-  const TODAY_KM = new Map([[bus101, 86500], [bus102, 52400], [bus103, 98200], [bus104, 9100], [bus105, 241000], [bus106, 3150]]);
-  const DAILY_KM = new Map([[bus101, 240], [bus102, 210], [bus103, 260], [bus104, 120], [bus105, 90], [bus106, 150]]);
+  const TODAY_KM = new Map([[bus101, 86500], [bus102, 52400], [bus103, 98200], [bus104, 9100], [bus105, 241000], [bus106, 3150], [bus107, 412000]]);
+  const DAILY_KM = new Map([[bus101, 240], [bus102, 210], [bus103, 260], [bus104, 120], [bus105, 90], [bus106, 150], [bus107, 110]]);
   const readingAgo = (bus, n) => TODAY_KM.get(bus) - DAILY_KM.get(bus) * n;
 
   /** What the service creator types from the vendor's quotation, adding up a little above the estimate. */
@@ -417,7 +420,7 @@ async function main() {
   const history3 = await makeTicket({ bus: bus102, serviceType: 'other', description: 'Interior deep clean and seat repairs after charter.', stage: 'forwardedToPurchase', createdDaysAgo: 40, amount: 750 });
   const history4 = await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'ACCIDENT', description: 'Front panel damage after a depot collision.', stage: 'forwardedToPurchase', createdDaysAgo: 38, amount: 4200, accident: { severity: 'medium', fault: 'otherParty' } });
   const batch1 = await makeTicket({ bus: bus103, serviceType: 'tyre', description: 'Replace both rear tyres, tread below legal limit.', stage: 'forwardedToPurchase', createdDaysAgo: 22, amount: 4400, parts: [{ name: 'Tyre 225/75 R17.5', code: 'TYR-225', partNumber: 'BR-22575', quantity: 2, unitPrice: 2200 }] });
-  const batch2 = await makeTicket({ bus: bus105, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Rear suspension bushes worn on both sides.', stage: 'forwardedToPurchase', createdDaysAgo: 28, amount: 1850 });
+  const batch2 = await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Rear suspension bushes worn on both sides.', stage: 'forwardedToPurchase', createdDaysAgo: 28, amount: 1850 });
   const batch3 = await makeTicket({ bus: bus101, serviceType: 'tyre', description: 'Front tyres worn on the inner edge.', stage: 'forwardedToPurchase', createdDaysAgo: 18, amount: 1700, parts: tyres(2) });
   const batch4 = await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'ENGINE', description: 'Coolant leak at the water pump.', stage: 'forwardedToPurchase', createdDaysAgo: 16, amount: 1300, isBreakdown: true });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Steering play checked and tie rods replaced.', stage: 'invoiceReceived', createdDaysAgo: 15, amount: 2600 });
@@ -425,13 +428,13 @@ async function main() {
   await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Dashboard warning lights flickering intermittently.', stage: 'invoiceRejected', createdDaysAgo: 13, amount: 1200 });
   await makeTicket({ bus: bus101, serviceType: 'transmission', description: 'Transmission service at its interval.', stage: 'invoiceSubmitted', createdDaysAgo: 12 });
   await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'AC REPAIR', description: 'Roof AC compressor seized on the afternoon route.', stage: 'vehicleReturned', createdDaysAgo: 11, amount: 3100 });
-  await makeTicket({ bus: bus105, serviceType: 'repair', repairCategory: 'BODY', description: 'Side panel dents from the depot gate.', stage: 'vehicleReleased', createdDaysAgo: 10, amount: 900 });
+  await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'BODY', description: 'Side panel dents from the depot gate.', stage: 'vehicleReleased', createdDaysAgo: 10, amount: 900 });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'AC REPAIR', description: 'Rear AC unit blowing warm air on afternoon routes.', stage: 'readyForDelivery', createdDaysAgo: 9, amount: 1400 });
   const atWork = await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'ENGINE', description: 'Loss of power on hills, turbo hose suspected.', stage: 'workInProgress', createdDaysAgo: 8, amount: 2200, isBreakdown: true });
   await makeTicket({ bus: bus101, parent: atWork, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Found a cracked exhaust manifold while fixing the turbo hose.', stage: 'workInProgress', createdDaysAgo: 4, amount: 650 });
   await makeTicket({ bus: bus101, parent: atWork, serviceType: 'battery', description: 'Battery failed the load test while the bus was on the lift.', stage: 'pending', createdDaysAgo: 2, amount: 620, parts: battery });
   await atWork.save();
-  await makeTicket({ bus: bus105, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Brake pads worn past the limit.', stage: 'vehicleReceived', createdDaysAgo: 7, amount: 780 });
+  await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Brake pads worn past the limit.', stage: 'vehicleReceived', createdDaysAgo: 7, amount: 780 });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Passenger door sensor faulty.', stage: 'vehicleSent', createdDaysAgo: 6, amount: 480 });
   await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'BODY', description: 'Windscreen chip spreading.', stage: 'acknowledged', createdDaysAgo: 5, amount: 1250 });
   await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ENGINE', description: 'Oil leak under the engine after the long route.', stage: 'estimateCountered', createdDaysAgo: 4, amount: 480 });
@@ -458,16 +461,44 @@ async function main() {
   const manualStatuses = [
     [bus101, 40, 'accident'],
     [bus101, 36, 'ready'],
-    [bus104, 28, 'ready'],
-    [bus105, 25, 'scrapping'],
+    [bus104, 26, 'ready'],
     [bus102, 19, 'ready'],
     [bus104, 14, 'ready'],
     [bus103, 13, 'ready'],
-    [bus105, 6, 'removed'],
   ];
   for (const [bus, n, status] of manualStatuses) {
     await BusStatusChange.updateOne({ bus: bus._id, date: uaeDay(daysAgo(n)) }, { $set: { status, source: 'manual', by: creator._id } }, { upsert: true });
   }
+
+  // Leaving the fleet. BUS-105 cost too much to keep running: scrapped 25 days ago and sold 6 days
+  // ago, so it is archived. BUS-107 is past its service life and waits for the supervisor.
+  const scrappedOn = uaeDay(daysAgo(25));
+  const soldOn = uaeDay(daysAgo(6));
+  await ScrapRequest.create({
+    bus: bus105._id, reason: 'highRunningCost', status: 'approved', createdBy: creator._id, createdAt: daysAgo(26),
+    note: 'Fourteen years old. Repairs this year came to more than half of what the bus is worth.',
+    attachments: [await attach('Repair costs BUS-105.pdf', ['Repair costs, BUS-105', 'Suspension, body and brake work this year', 'Total: AED 9,450'])],
+    decidedBy: supervisor._id, decidedAt: daysAgo(25), decisionNote: 'Agreed. Sell it for scrap.',
+  });
+  await Bus.updateOne({ _id: bus105._id }, {
+    $set: {
+      lifecycle: 'sold', scrappedOn,
+      sale: {
+        date: soldOn, buyer: 'Desert Line Recyclers', price: 18500, note: 'Sold for scrap with its engine and gearbox. Plates handed back.',
+        attachments: [await attach('Sale agreement BUS-105.pdf', ['Sale agreement, BUS-105', 'Buyer: Desert Line Recyclers', 'Price: AED 18,500'])], recordedBy: supervisor._id, recordedAt: daysAgo(6),
+      },
+    },
+  });
+  for (const [day, status] of [[scrappedOn, 'scrapping'], [soldOn, 'removed']]) {
+    await BusStatusChange.updateOne({ bus: bus105._id, date: day }, { $set: { status, source: 'scrap', by: supervisor._id } }, { upsert: true });
+  }
+  const waiting = await ScrapRequest.create({
+    bus: bus107._id, reason: 'endOfLife', createdBy: creator._id, createdAt: daysAgo(1),
+    note: 'Sixteen years old against a 15-year life. Rust under the floor at the rear axle.',
+    attachments: [await attach('Inspection BUS-107.pdf', ['Inspection report, BUS-107', 'Model year 2010, expected life 15 years', 'Floor corrosion at the rear axle'])],
+  });
+  await Bus.updateOne({ _id: bus107._id }, { $set: { lifecycle: 'scrapRequested' } });
+  await notifyRoles(['supervisor'], { type: 'scrapRequested', params: { fleetNumber: bus107.fleetNumber, reason: 'endOfLife' }, link: `/buses/${bus107._id}`, dedupeKey: `scrap:${waiting._id}:requested` });
   for (const bus of buses) {
     for (let n = 1; n <= 80; n += 1) {
       if (bus === bus105 && n < 25) continue; // off the road since it went for scrapping

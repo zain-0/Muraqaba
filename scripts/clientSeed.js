@@ -21,6 +21,7 @@ import Counter from '../models/Counter.js';
 import { Grn, Lpo, PurchaseInvoice } from '../models/Purchase.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { COUNTED_BY_QUANTITY, LINE_FOR_SERVICE } from '../utils/lpoDeduction.js';
+import { applyBusLifecycleChanges, busLifecycleChanges, mergeRepairMaintenance, mostCommonMake } from '../utils/fleetLifecycle.js';
 import { UPLOAD_DIR, storedPath } from '../utils/uploads.js';
 import { demoPdf, signatureDataUrl } from './demoFiles.js';
 
@@ -93,22 +94,31 @@ export default async function seedClient(folder, { password, staff }) {
   const busOf = new Map(busDocs.map((b) => [b.fleetNumber, b]));
 
   // --- LPOs, used as the invoices are accepted below --------------------------------------------
+  // Repair and maintenance are one amount for one make (2026-11-09). The records name no make, so a
+  // repair and maintenance LPO takes the make most of its vendor's buses have, as the migration does.
+  const makesOf = (vendorId) => busDocs.filter((b) => b.vendor.equals(vendorId)).map((b) => b.make);
   const lpos = new Map(
-    data.lpos.map((l) => [
-      l.number,
-      {
-        _id: new ObjectId(),
-        number: l.number,
-        vendor: vendorOf(l.vendor)._id,
-        validFrom: new Date(`${l.validFrom}T00:00:00.000Z`),
-        validTo: new Date(`${l.validTo}T00:00:00.000Z`),
-        items: l.items.map((item) => ({ ...item, _id: new ObjectId(), usedAmount: 0, usedQuantity: 0 })),
-        grandTotal: money(l.items.reduce((sum, item) => sum + item.total, 0)),
-        usedAmount: 0,
-        createdBy: purchasing._id,
-        createdAt: new Date(`${l.validFrom}T06:00:00.000Z`),
-      },
-    ])
+    data.lpos.map((l) => {
+      const vendor = vendorOf(l.vendor)._id;
+      const { items } = mergeRepairMaintenance(l.items.map((item) => ({ ...item, _id: new ObjectId(), usedAmount: 0, usedQuantity: 0 })));
+      const make = items.some((item) => item.kind === 'repairMaintenance') ? mostCommonMake(makesOf(vendor)) : undefined;
+      return [
+        l.number,
+        {
+          _id: new ObjectId(),
+          number: l.number,
+          vendor,
+          ...(make ? { make } : {}),
+          validFrom: new Date(`${l.validFrom}T00:00:00.000Z`),
+          validTo: new Date(`${l.validTo}T00:00:00.000Z`),
+          items,
+          grandTotal: money(items.reduce((sum, item) => sum + item.total, 0)),
+          usedAmount: 0,
+          createdBy: purchasing._id,
+          createdAt: new Date(`${l.validFrom}T06:00:00.000Z`),
+        },
+      ];
+    })
   );
 
   /** What accepting this invoice takes off the vendor's LPO, worked out as the app does it. */
@@ -383,12 +393,17 @@ export default async function seedClient(folder, { password, staff }) {
       by: creator._id,
     }))
   );
+  // The records mark Scrapping and Removed on the status sheet, so each bus's lifecycle is read from it.
+  const lifecycles = await busLifecycleChanges();
+  await applyBusLifecycleChanges(lifecycles);
   // New VSRs carry on from the depot's own numbering.
   await Counter.findByIdAndUpdate('vsr', { seq: data.meta.lastVsrNumber }, { upsert: true });
 
   const byStage = tickets.reduce((counts, t) => ({ ...counts, [t.status]: (counts[t.status] ?? 0) + 1 }), {});
   console.log('\nClient data loaded from %s', folder);
   console.log(`  Vendors: ${data.vendors.length}, buses: ${busDocs.length}, km readings: ${readings.length}, status changes: ${data.statusChanges.length}`);
+  const leaving = (to) => lifecycles.filter((change) => change.to === to).length;
+  console.log(`  Buses scrapped: ${leaving('scrapped')}, sold: ${leaving('sold')}, in operation: ${busDocs.length - leaving('scrapped') - leaving('sold')}`);
   console.log(`  VSRs: ${tickets.length}, invoices: ${invoices.length}, GRNs: ${grns.length}, purchase invoices: ${purchaseInvoices.length}, LPOs: ${lpos.size}`);
   console.log(`  VSRs by status: ${Object.entries(byStage).map(([s, n]) => `${s} ${n}`).join(', ')}`);
   const overruns = tickets.filter((t) => t.lpoDeduction?.overrun || t.lpoDeduction?.status === 'noLpo').length;

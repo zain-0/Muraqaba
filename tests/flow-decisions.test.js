@@ -398,7 +398,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal((await api('GET', `/buses/${own._id}`, { token: users.creator.token })).body.data.intervals.brakePads.lastKm, 39500);
       ok(await submitInvoice(raised._id, users.vendor1));
       const accepted = ok(await put(raised._id, 'invoice/accept', users.supervisor.token));
-      assert.equal(accepted.lpoDeduction.kind, 'repair');
+      assert.equal(accepted.lpoDeduction.kind, 'repairMaintenance');
 
       const next = await raise({ serviceType: 'brakePads', repairCategory: undefined, currentReading: 39600 }, own);
       assert.equal(next.intervalUsage.actual, 100);

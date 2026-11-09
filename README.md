@@ -6,8 +6,8 @@ Backend for Muraqaba, a maintenance ticketing system for bus fleets. Express 5, 
 
 | Role | What they do |
 | --- | --- |
-| serviceCreator | Creates vendor accounts, adds and edits buses, raises tickets, fills in parts and labour, sends buses to vendors and confirms them back, receives accepted invoices and forwards them, fills the daily km and status sheets |
-| supervisor | Approves or returns tickets, declines additional jobs, accepts or rejects invoices, reads the month sheets and the weekly report, can also add buses and raise tickets |
+| serviceCreator | Creates vendor accounts, adds and edits buses, raises tickets, fills in parts and labour, sends buses to vendors and confirms them back, receives accepted invoices and forwards them, fills the daily km and status sheets, raises scrap requests |
+| supervisor | Approves or returns tickets, declines additional jobs, accepts or rejects invoices, approves or turns down scrap requests and records the sale of a scrapped bus, reads the month sheets and the weekly report, can also add buses and raise tickets |
 | vendor | Self-registers or is added by a service creator. Sends estimates with quotation number and days, acknowledges, receives the bus, works on it, raises additional jobs, releases it and submits invoices with a file |
 | purchaseManager | Makes GRNs in batches, downloads them as Excel, makes purchase invoices and LPOs, runs queries. Sees tickets from the invoice stage on |
 
@@ -35,7 +35,9 @@ estimateSubmitted ──same negotiation──▶ pending ──approve──▶
 Releasing or getting back the bus moves every linked ticket. Invoice, GRN and purchase invoice stay separate.
 ```
 
-The depot's dates default to now and can be overridden, never into the future. Accepting an invoice takes quantity and amount off the vendor's current LPO for tyres and batteries, and amount only for repairs, for oil and transmission services (a maintenance line, usually on their own LPO) and for other work. A short or missing LPO notifies purchasing and the supervisor and never blocks the invoice.
+The depot's dates default to now and can be overridden, never into the future. Accepting an invoice takes quantity and amount off the vendor's current LPO for tyres and batteries, and amount only for everything else. Repairs, brake pads, oil and transmission services all come off one repair and maintenance line, on an LPO that names one bus make; tyre, battery and other LPOs name no make and cover every bus. Of the vendor's LPOs valid today with a line of that kind for the bus's make (or no make), the one ending first with room is used; with no room anywhere, the first one, as an overrun. A short or missing LPO notifies purchasing and the supervisor and never blocks the invoice. `GET /api/lpos/for-vsr` shows the same choice before the VSR is raised.
+
+Bus lifecycle: `inOperation` ──scrap request (creator; no open VSR)──▶ `scrapRequested` ──approve (supervisor)──▶ `scrapped` ──sale (supervisor)──▶ `sold`. Turning a request down or the creator cancelling it puts the bus back in operation. Only a bus in operation can have a VSR raised on it. A sold bus is archived: kept with all its history and never changed again. Reasons: `totalLoss`, `highRunningCost`, `endOfLife`.
 
 Drawn signatures are saved once per person and stamped on escalate, approve, acknowledge, release, invoice accept, GRN and purchase invoice. A stamp keeps the drawing it was made with.
 
@@ -43,7 +45,13 @@ Documents are stored in `uploads/` (or `UPLOAD_DIR`), outside git, and served on
 
 Vendors never receive: `breakdown`, `isBreakdown`, `intervalUsage`, `returnReason`, `lpoDeduction`, `grn`, `purchaseInvoice`, bus rates and intervals.
 
-Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed; raising a ticket picks it unless the bus is in scrapping or removed.
+Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed; raising a ticket picks it. Scrapping and Removed are never set by hand: approving a scrap request writes Scrapping on the day (source `scrap`), and the sale writes Removed on the sale day. From a bus's `scrappedOn` the sheet refuses changes; days before can still be corrected. A bus already removed before a month (or year) and unchanged in it is left off that period's sheets and reports.
+
+Databases from before 2026-11-09 are brought over by `scripts/migrate-fleet-lifecycle.js`, which sets each bus's lifecycle from its latest status and merges each LPO's repair and maintenance lines, taking the make most of the vendor's buses have. It can run any number of times; `--dry-run` writes nothing, and `--uri` (or `MONGO_URI`) chooses the database:
+
+```bash
+node scripts/migrate-fleet-lifecycle.js --dry-run --uri mongodb://localhost:27017/muraqaba_next
+```
 
 Every transition is recorded in the ticket's `history`.
 
@@ -95,14 +103,23 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET | /api/auth/config | public | Whether self registration is open, and for which roles |
 | POST | /api/auth/login | public | Get a JWT |
 | GET | /api/auth/me | any | Current user |
-| GET | /api/users/dashboard | any | Role-specific counters and `actionRequired` |
+| GET | /api/users/dashboard | any | Role-specific counters and `actionRequired`; the supervisor's includes `scrapRequestsToDecide` |
 | GET, PUT | /api/users/signature | any | Your own signature, as a PNG data URL |
 | GET | /api/vendors | creator, supervisor | Vendor directory with bus counts |
 | POST | /api/vendors | creator | Create vendor account |
-| GET | /api/buses | creator, supervisor, purchasing | Fleet, with `intervalStatus` |
+| GET | /api/buses | creator, supervisor, purchasing | Fleet, with `intervalStatus`, `lifecycle`, `scrappedOn` and `sale`. Sold buses are included; screens hide them by default |
 | POST | /api/buses | creator, supervisor | Add a bus |
-| GET | /api/buses/:id | creator, supervisor, purchasing | Details with `openTickets` |
-| PUT | /api/buses/:id | creator | Edit a bus. New tickets use the changes; the vendor stays |
+| GET | /api/buses/:id | creator, supervisor, purchasing | Details with `openTickets` and `scrapRequests`, newest first |
+| PUT | /api/buses/:id | creator | Edit a bus. New tickets use the changes; the vendor stays. A sold bus cannot be edited |
+| PUT | /api/buses/:id/sale | supervisor | Multipart: `date` (on or after `scrappedOn`, not in the future), `buyer`, `price`, `note`, `attachments`. scrapped → sold |
+| GET | /api/buses/:id/sale/attachments/:attachmentId | creator, supervisor, purchasing | Download a sale document |
+| GET | /api/scrap-requests | creator, supervisor, purchasing | `?status=pending\|approved\|rejected\|cancelled&busId=`, paginated, with the bus and people populated |
+| GET | /api/scrap-requests/:id | creator, supervisor, purchasing | One scrap request |
+| POST | /api/scrap-requests | creator | Multipart: `busId`, `reason`, `note`, `attachments`. The bus must be in operation with no open VSR |
+| PUT | /api/scrap-requests/:id/approve | supervisor | Optional `note`. Checks again for open VSRs; the bus is scrapped today |
+| PUT | /api/scrap-requests/:id/reject | supervisor | `note` (the reason) required; the bus is back in operation |
+| PUT | /api/scrap-requests/:id/cancel | creator who raised it | The bus is back in operation |
+| GET | /api/scrap-requests/:id/attachments/:attachmentId | creator, supervisor, purchasing | Download a scrap request document |
 | GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&sort=oldest` |
 | POST | /api/tickets | creator, supervisor | Raise ticket, with optional `isBreakdown` |
 | GET | /api/tickets/:id | any | Detail with `history`, all `invoices`, `linkedTickets` and signature drawings |
@@ -134,8 +151,9 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET | /api/grns/export | purchasing | `?ticketIds=a,b` as an Excel file |
 | POST | /api/grns | purchasing | Multipart: `number`, `ticketIds`, `date`, `notes`, `attachments` |
 | POST | /api/purchase-invoices | purchasing | Multipart: `number`, `grnId`, `date`, `amount`, `notes`, `attachments`; closes the VSRs |
-| GET | /api/lpos, /api/lpos/:id | purchasing, supervisor, creator | LPOs; one LPO also lists the VSRs that used it |
-| POST | /api/lpos | purchasing | Create an LPO |
+| GET | /api/lpos, /api/lpos/:id | purchasing, supervisor, creator | LPOs with their `make`; one LPO also lists the VSRs that used it |
+| POST | /api/lpos | purchasing | Create an LPO. Line kinds `repairMaintenance`, `tyre`, `battery`, `other`; `make` is required with a repairMaintenance line, refused without one, and must be a make on the fleet |
+| GET | /api/lpos/for-vsr | purchasing, supervisor, creator | `?busId=&vendorId=&serviceType=&amount=&quantity=`: which LPO the job would come off (`found`, `noLpo` or `notNeeded`), what is left on its line and, given an amount, whether it `fits`. Reads only; the charge uses the same choice |
 | GET | /api/reports/query | purchasing | `?brand=&type=&year=&vendorId=&busId=&isBreakdown=&groupBy=` |
 | GET | /api/reports/fleet | creator, supervisor, purchasing | Month figures, `?year=&brand=` |
 | GET | /api/reports/weekly | supervisor | Last seven days and what is due |
@@ -147,10 +165,10 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 
 ## Adding email
 
-Alerts and the weekly report are in the app for now. Every notice passes through `notifyRoles` in `utils/notifications.js`, and every account has an email address, so email is one addition in one place:
+Alerts and the weekly report are in the app for now. Every notice passes through `notifyUser` in `utils/notifications.js`, and every account has an email address, so email is one addition in one place:
 
 1. Add a mail library and SMTP settings to `.env`.
-2. In `notifyRoles`, send when `updateOne` reports `upsertedCount: 1`, so each person gets each notice once. Keep sending outside the write, so a mail failure cannot lose the notice.
+2. In `notifyUser`, send when `updateOne` reports `upsertedCount: 1`, so each person gets each notice once. Keep sending outside the write, so a mail failure cannot lose the notice.
 3. Word the email from `type` and `params`. Screens do this in `lib/notifications.ts` in the frontend; the API has no wording of its own yet.
 4. Call `runChecks()` from a timer. Checks only run today when someone reads their notifications, which is enough for the app but not for email, where a person may not have opened it at all. The weekly report's figures come from the same code as `GET /api/reports/weekly`.
 

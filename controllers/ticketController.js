@@ -6,7 +6,7 @@ import { nextVsrNumber } from '../models/Counter.js';
 import { assertVendorExists } from './busController.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { TICKET_POPULATE, paginate } from '../utils/query.js';
-import { UPLOAD_DIR, storedPath, withStoredAttachments } from '../utils/uploads.js';
+import { sendStored, withStoredAttachments } from '../utils/uploads.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
 import { deductFromLpo } from '../utils/lpoDeduction.js';
@@ -132,10 +132,21 @@ export const assertBusTracks = (bus, serviceType) => {
 
 const isAccident = ({ serviceType, repairCategory }) => serviceType === 'repair' && repairCategory === 'ACCIDENT';
 
+// Work is raised only on a bus in operation; a bus on its way out of the fleet says where it is.
+const NO_VSR_WHILE = {
+  scrapRequested: 'A scrap request for this bus is waiting for the supervisor.',
+  scrapped: 'This bus is scrapped. No VSR can be raised on it.',
+  sold: 'This bus is sold and archived. No VSR can be raised on it.',
+};
+const assertInOperation = (bus) => {
+  if (NO_VSR_WHILE[bus.lifecycle]) throw new AppError(NO_VSR_WHILE[bus.lifecycle], 409, 'INVALID_STATE');
+};
+
 /** The fields the creator fills in, shared by raising a ticket and correcting a returned one. */
 const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown, location, accident }, user) => {
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+  assertInOperation(bus);
   assertBusTracks(bus, serviceType);
   const vendor = await assertVendorExists(vendorId || bus.vendor);
   const intervalUsage = usageWhenRaised(bus, serviceType, currentReading);
@@ -489,12 +500,7 @@ export const downloadAttachment = asyncHandler(async (req, res) => {
   // Purchasing's own documents stay with the depot.
   const purchasing = req.user.role === 'vendor' ? [] : [ticket.grn, ticket.purchaseInvoice].filter(Boolean);
   const attachment = [...ticket.negotiation, ...invoices, ...purchasing].flatMap((holder) => holder.attachments).find((a) => a._id.equals(req.params.attachmentId));
-  if (!attachment) throw new AppError('File not found', 404, 'NOT_FOUND');
-  res.attachment(attachment.name);
-  res.type(attachment.mimeType);
-  await new Promise((resolve, reject) => {
-    res.sendFile(storedPath(attachment).slice(UPLOAD_DIR.length + 1), { root: UPLOAD_DIR }, (err) => (err ? reject(new AppError('File not found', 404, 'NOT_FOUND')) : resolve()));
-  });
+  await sendStored(res, attachment);
 });
 
 // PUT /api/tickets/:id/acknowledge  (vendor who owns the ticket)

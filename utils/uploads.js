@@ -1,7 +1,8 @@
 /**
- * Documents attached to estimates. Files are kept in memory until the request has passed
- * every check, then written under a name built from the attachment id, so a stored file
- * never carries a name chosen by the sender. They are served only through the API.
+ * Documents attached to estimates, invoices, purchasing's papers, scrap requests and sales. Files
+ * are kept in memory until the request has passed every check, then written under a name built
+ * from the attachment id, so a stored file never carries a name chosen by the sender. They are
+ * served only through the API.
  */
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
@@ -62,6 +63,16 @@ export const parseAttachments = (req, res, next) => {
 };
 
 export const storedPath = (attachment) => join(UPLOAD_DIR, `${attachment._id}${extname(attachment.name).toLowerCase()}`);
+
+/** Sends one stored file as a download under its own name; a file missing on disk is a 404. */
+export const sendStored = async (res, attachment) => {
+  if (!attachment) throw new AppError('File not found', 404, 'NOT_FOUND');
+  res.attachment(attachment.name);
+  res.type(attachment.mimeType);
+  await new Promise((resolve, reject) => {
+    res.sendFile(storedPath(attachment).slice(UPLOAD_DIR.length + 1), { root: UPLOAD_DIR }, (err) => (err ? reject(new AppError('File not found', 404, 'NOT_FOUND')) : resolve()));
+  });
+};
 
 /**
  * Writes the request's files and returns their attachment records. `commit` saves the

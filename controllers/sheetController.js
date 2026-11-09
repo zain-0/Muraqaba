@@ -7,7 +7,8 @@ import { fleetBuses, fleetDays, statusSummary } from '../utils/fleetDays.js';
 import { USER_FIELDS } from '../utils/query.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
-const busSummary = ({ _id, fleetNumber, registrationNumber, make, model }) => ({ _id, fleetNumber, registrationNumber, make, model });
+// scrappedOn tells the sheet which days are locked: from it on, only the scrap request and the sale change a bus's status.
+const busSummary = ({ _id, fleetNumber, registrationNumber, make, model, scrappedOn, sale }) => ({ _id, fleetNumber, registrationNumber, make, model, scrappedOn: scrappedOn ?? sale?.date });
 
 const assertDayCanChange = async (busId, date) => {
   if (date > uaeDay()) throw new AppError('A day in the future cannot be changed', 400, 'VALIDATION_ERROR', [{ field: 'date', message: 'A day in the future cannot be changed' }]);
@@ -40,7 +41,7 @@ export const getReadingSheet = asyncHandler(async (req, res) => {
   const month = req.query.month || uaeMonth();
   const days = daysInMonth(month);
   const [buses, readings] = await Promise.all([
-    fleetBuses(days.at(-1)),
+    fleetBuses(days.at(-1), days[0]),
     BusDailyReading.find({ date: mongoose.trusted({ $gte: days[0], $lte: days.at(-1) }) }),
   ]);
   const byBus = new Map();
@@ -80,10 +81,19 @@ export const getStatusSheet = asyncHandler(async (req, res) => {
   });
 });
 
+/** From the day a bus is scrapped its days belong to the scrap request and the sale. Days before can still be corrected. */
+const assertNotScrapped = async (busId, date) => {
+  const bus = await Bus.findById(busId).select('lifecycle scrappedOn sale.date');
+  if (!['scrapped', 'sold'].includes(bus?.lifecycle)) return;
+  const from = bus.scrappedOn ?? bus.sale?.date;
+  if (from && date >= from) throw new AppError(`This bus is scrapped from ${from}.`, 409, 'INVALID_STATE');
+};
+
 // PUT /api/sheets/status
 export const setBusStatus = asyncHandler(async (req, res) => {
   const { busId, date, status } = req.body;
   await assertDayCanChange(busId, date);
+  await assertNotScrapped(busId, date);
   await BusStatusChange.updateOne(
     { bus: busId, date },
     { $set: { status, source: 'manual', by: req.user._id }, $unset: { ticket: 1 } },

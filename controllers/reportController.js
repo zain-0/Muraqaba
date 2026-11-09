@@ -272,7 +272,7 @@ const kmRows = async (year, today) => {
   const first = `${year}-01-01`;
   const last = `${year}-12-31`;
   const [buses, inYear, before] = await Promise.all([
-    fleetBuses(last),
+    fleetBuses(last, first),
     BusDailyReading.find({ date: mongoose.trusted({ $gte: first, $lte: last }) }).select('bus date km'),
     // A bus's last reading before the year starts its January.
     BusDailyReading.aggregate([{ $match: { date: { $lt: first } } }, { $sort: { date: -1 } }, { $group: { _id: '$bus', date: { $first: '$date' }, km: { $first: '$km' } } }]),

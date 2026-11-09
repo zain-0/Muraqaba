@@ -1,6 +1,7 @@
 /**
  * Item 8: purchasing writes LPOs for a vendor. Tyre and battery VSRs take quantity and amount
- * off the vendor's current LPO when the supervisor accepts the invoice; repairs take amount only.
+ * off the vendor's current LPO when the supervisor accepts the invoice; repairs, brake pads, oil
+ * and transmission take the amount only, off one repair and maintenance line for the bus's make.
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -118,8 +119,8 @@ describe('LPO', () => {
       await makeLpo(context.vendor.id, [
         ...TYRES,
         { kind: 'battery', name: 'Battery', quantity: 10, unitPrice: 800 },
-        { kind: 'repair', name: 'Repairs', quantity: 1, unitPrice: 50000 },
-      ])
+        { kind: 'repairMaintenance', name: 'Repairs', quantity: 1, unitPrice: 50000 },
+      ], { make: 'Hino' })
     );
     const battery = await acceptedChange(context, 'battery', 1, 800);
     assert.equal(battery.lpoDeduction.kind, 'battery');
@@ -129,7 +130,7 @@ describe('LPO', () => {
     ok(await api('PUT', `/tickets/${repair._id}/breakdown`, { token: users.creator.token, body: { parts: [{ name: 'Seal', quantity: 3, unitPrice: 400 }] } }));
     ok(await api('PUT', `/tickets/${repair._id}/escalate`, { token: users.creator.token }));
     const done = await toInvoiceAccepted(users, { ...repair, status: 'pending' }, context.vendor, { invoice: { amount: '1200' } });
-    assert.equal(done.lpoDeduction.kind, 'repair');
+    assert.equal(done.lpoDeduction.kind, 'repairMaintenance');
     assert.equal(done.lpoDeduction.quantity, 0);
 
     const after = await getLpo(lpo._id);
@@ -137,9 +138,9 @@ describe('LPO', () => {
     assert.equal(line('tyre').usedAmount, 0);
     assert.equal(line('battery').usedQuantity, 1);
     assert.equal(line('battery').usedAmount, 800);
-    assert.equal(line('repair').usedQuantity, 0);
-    assert.equal(line('repair').usedAmount, 1200);
-    assert.equal(line('repair').remainingAmount, 48800);
+    assert.equal(line('repairMaintenance').usedQuantity, 0);
+    assert.equal(line('repairMaintenance').usedAmount, 1200);
+    assert.equal(line('repairMaintenance').remainingAmount, 48800);
     assert.equal(after.usedAmount, 2000);
   });
 
@@ -203,15 +204,15 @@ describe('LPO', () => {
       return toInvoiceAccepted(users, raised, vendor, { invoice: { amount: String(amount) } });
     };
 
-    test('both take the price off their own maintenance LPO, and never a quantity', async () => {
+    test('both take the price off the repair and maintenance LPO for the bus make, and never a quantity', async () => {
       const context = await pricedBus('MNT');
       const tyres = ok(await makeLpo(context.vendor.id, TYRES));
-      const maintenance = ok(await makeLpo(context.vendor.id, [{ kind: 'maintenance', name: 'Oil and transmission services', quantity: 1, unitPrice: 50000 }]));
+      const maintenance = ok(await makeLpo(context.vendor.id, [{ kind: 'repairMaintenance', name: 'Repair and maintenance', quantity: 1, unitPrice: 50000 }], { make: 'Hino' }));
 
       const oil = await service(context, 'oil', 900);
       assert.equal(oil.lpoDeduction.status, 'deducted');
       assert.equal(oil.lpoDeduction.lpoNumber, maintenance.number);
-      assert.equal(oil.lpoDeduction.kind, 'maintenance');
+      assert.equal(oil.lpoDeduction.kind, 'repairMaintenance');
       assert.equal(oil.lpoDeduction.quantity, 0);
       assert.equal(oil.lpoDeduction.amount, 900);
 
@@ -226,18 +227,18 @@ describe('LPO', () => {
       assert.equal((await getLpo(tyres._id)).usedAmount, 0, 'a tyre LPO is not touched');
     });
 
-    test('a vendor with no maintenance LPO is flagged, and a tyre LPO does not stand in for one', async () => {
+    test('a vendor with no repair and maintenance LPO is flagged, and a tyre LPO does not stand in for one', async () => {
       const context = await pricedBus('MNO');
       ok(await makeLpo(context.vendor.id, TYRES));
       const done = await service(context, 'oil', 900);
       assert.equal(done.status, 'invoiceAccepted');
       assert.equal(done.lpoDeduction.status, 'noLpo');
-      assert.equal(done.lpoDeduction.kind, 'maintenance');
+      assert.equal(done.lpoDeduction.kind, 'repairMaintenance');
     });
 
-    test('a short maintenance LPO warns on the amount and the invoice still goes through', async () => {
+    test('a short repair and maintenance LPO warns on the amount and the invoice still goes through', async () => {
       const context = await pricedBus('MNS');
-      ok(await makeLpo(context.vendor.id, [{ kind: 'maintenance', name: 'Services', quantity: 1, unitPrice: 500 }]));
+      ok(await makeLpo(context.vendor.id, [{ kind: 'repairMaintenance', name: 'Services', quantity: 1, unitPrice: 500 }], { make: 'Hino' }));
       const done = await service(context, 'oil', 900);
       assert.equal(done.status, 'invoiceAccepted');
       assert.equal(done.lpoDeduction.overrun, true);

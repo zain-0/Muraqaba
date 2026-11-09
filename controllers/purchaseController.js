@@ -2,13 +2,15 @@ import ExcelJS from 'exceljs';
 import mongoose from 'mongoose';
 import Ticket, { PURCHASE_VISIBLE_STATUSES } from '../models/Ticket.js';
 import Invoice from '../models/Invoice.js';
+import Bus from '../models/Bus.js';
 import { Grn, Lpo, PurchaseInvoice } from '../models/Purchase.js';
 import { assertVendorExists } from './busController.js';
-import { toIdList } from '../middleware/validationMiddleware.js';
+import { hasText, toIdList } from '../middleware/validationMiddleware.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
+import { chooseLpo, COUNTED_BY_QUANTITY } from '../utils/lpoDeduction.js';
 import { USER_FIELDS, paginate } from '../utils/query.js';
 import { uaeDay } from '../utils/uaeTime.js';
-import { assertNoClash } from '../utils/unique.js';
+import { assertNoClash, CASE_BLIND } from '../utils/unique.js';
 import { REPAIR_CATEGORY_LABELS } from '../models/Ticket.js';
 import { assertCanSign, stamp } from '../utils/signatures.js';
 import { withStoredAttachments } from '../utils/uploads.js';
@@ -148,7 +150,7 @@ export const createGrn = asyncHandler(async (req, res) => {
 const GRN_POPULATE = [
   { path: 'vendor', select: USER_FIELDS },
   { path: 'createdBy', select: USER_FIELDS },
-  { path: 'tickets', select: 'vsrNumber serviceType status' },
+  { path: 'tickets', select: 'vsrNumber serviceType status busId', populate: { path: 'busId', select: 'fleetNumber' } },
   { path: 'purchaseInvoice', select: 'number date amount' },
 ];
 
@@ -215,15 +217,28 @@ export const listLpos = asyncHandler(async (req, res) => {
   res.json(await paginate(Lpo, {}, { page: req.query.page, limit: req.query.limit, sort: req.query.sort, populate: LPO_POPULATE }));
 });
 
+/** The make as the fleet spells it, so "hino" typed by hand still lists as "Hino". */
+const fleetMake = async (make) => {
+  if (!hasText(make)) return undefined;
+  const bus = await Bus.findOne({ make: make.trim() }).collation(CASE_BLIND).select('make');
+  if (!bus) {
+    const message = 'No bus on the fleet has this make';
+    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'make', message }]);
+  }
+  return bus.make;
+};
+
 // POST /api/lpos  (purchasing)
 export const createLpo = asyncHandler(async (req, res) => {
   const { number, vendorId, validFrom, validTo, items } = req.body;
   const vendor = await assertVendorExists(vendorId);
+  const make = await fleetMake(req.body.make);
   await assertNoClash(Lpo, { number });
   const lines = items.map(({ kind, name, description, quantity, unitPrice }) => ({ kind, name, description, quantity, unitPrice, total: money(quantity * unitPrice) }));
   const lpo = await Lpo.create({
     number,
     vendor: vendor._id,
+    make,
     validFrom,
     validTo,
     items: lines,
@@ -249,4 +264,39 @@ export const getLpo = asyncHandler(async (req, res) => {
     at: lpoDeduction.at,
   }));
   res.json({ success: true, data: { ...lpo.toJSON(), usage } });
+});
+
+/** What the creator is shown: the LPO and how much is left on the line the job would come off. */
+const previewOf = ({ kind, make, status, lpo, item, overrun }, amountGiven) => ({
+  kind,
+  make,
+  status,
+  lpo:
+    status === 'found'
+      ? {
+          _id: lpo._id,
+          number: lpo.number,
+          make: lpo.make || null,
+          validFrom: lpo.validFrom,
+          validTo: lpo.validTo,
+          lineTotal: item.total,
+          lineRemaining: money(item.total - item.usedAmount),
+          remainingQuantity: COUNTED_BY_QUANTITY.includes(kind) ? item.quantity - item.usedQuantity : null,
+        }
+      : null,
+  // Whether this amount fits says nothing without an amount, or without an LPO to fit on.
+  ...(amountGiven && status === 'found' ? { fits: !overrun } : {}),
+});
+
+// GET /api/lpos/for-vsr?busId=&vendorId=&serviceType=&amount=&quantity=  (depot; reads only)
+export const lpoForVsr = asyncHandler(async (req, res) => {
+  // Express 5 parses req.query afresh on every read, so the checked strings are turned into numbers here.
+  const { busId, vendorId, serviceType, amount, quantity } = req.query;
+  const bus = await Bus.findById(busId).select('make vendor');
+  if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+  // Left out, the vendor is the bus's own, as when raising the VSR.
+  const vendor = await assertVendorExists(hasText(vendorId) ? vendorId : bus.vendor);
+  const amountGiven = hasText(amount);
+  const choice = await chooseLpo({ vendorId: vendor._id, bus, serviceType, amount: amountGiven ? Number(amount) : 0, quantity: hasText(quantity) ? Number(quantity) : 0 });
+  res.json({ success: true, data: previewOf(choice, amountGiven) });
 });

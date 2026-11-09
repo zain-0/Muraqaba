@@ -3,6 +3,7 @@ import { ROLES } from '../models/User.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES, NO_CHARGE_REASONS, WORK_LOCATIONS, ACCIDENT_SEVERITIES, ACCIDENT_FAULTS } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
 import { LPO_KINDS } from '../models/Purchase.js';
+import { SCRAP_REASONS, SCRAP_REQUEST_STATUSES } from '../models/ScrapRequest.js';
 import { endOfUaeDay, uaeDay } from '../utils/uaeTime.js';
 
 export const handleValidationErrors = (req, res, next) => {
@@ -240,7 +241,14 @@ export const validateReadingUpdate = [
 
 export const validateBusStatusUpdate = [
   ...sheetDay(),
-  str('status', 'Status').isIn(BUS_DAY_STATUSES).withMessage('Choose a valid status'),
+  str('status', 'Status')
+    .isIn(BUS_DAY_STATUSES)
+    .withMessage('Choose a valid status')
+    .bail()
+    // Since 2026-11-09 the supervisor approves a scrap request and records the sale; the sheet follows them.
+    .not()
+    .isIn(['scrapping', 'removed'])
+    .withMessage('Scrapping and selling go through a scrap request.'),
   handleValidationErrors,
 ];
 
@@ -352,9 +360,23 @@ const countedInWholeUnits = (value, { req, path }) => {
 
 const isoDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true });
 
+// A repair and maintenance line is for one make; tyres, batteries and other work cover the whole fleet.
+const needsMake = (req) => Array.isArray(req.body.items) && req.body.items.some((item) => item?.kind === 'repairMaintenance');
+const MAKE_NEEDED = 'Choose the make this LPO is for';
+
 export const validateLpo = [
   documentNumber(),
   str('vendorId', 'Vendor').isMongoId().withMessage('Choose a vendor'),
+  body('make')
+    .optional({ values: 'falsy' })
+    .isString()
+    .withMessage(MAKE_NEEDED)
+    .bail()
+    .trim()
+    .isLength({ max: 60 })
+    .withMessage('Keep this to 60 characters or fewer'),
+  body('make', MAKE_NEEDED).custom((value, { req }) => !needsMake(req) || hasText(value)),
+  body('make', 'Tyre and battery LPOs cover every make. Leave the make empty.').custom((value, { req }) => needsMake(req) || !hasText(value)),
   isoDay('validFrom', 'Choose the first day of the LPO').toDate(),
   isoDay('validTo', 'Choose the last day of the LPO, after the first').custom((value, { req }) => new Date(value) >= new Date(req.body.validFrom)).toDate(),
   body('items', 'Add at least one item').isArray({ min: 1, max: 200 }),
@@ -466,5 +488,65 @@ export const validateTicketListQuery = [
   qstr('busId').isMongoId().withMessage('Invalid bus'),
   qstr('mine').isBoolean().withMessage('mine must be true or false').toBoolean(),
   ...pageQuery,
+  handleValidationErrors,
+];
+
+export const validateScrapRequestList = [
+  qstr('status').isIn(SCRAP_REQUEST_STATUSES).withMessage('Unknown status'),
+  qstr('busId').isMongoId().withMessage('Invalid bus'),
+  ...pageQuery,
+  handleValidationErrors,
+];
+
+export const validateScrapRequest = [
+  str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),
+  str('reason', 'Reason').isIn(SCRAP_REASONS).withMessage('Choose why the bus should be scrapped'),
+  roundNote(),
+  handleValidationErrors,
+];
+
+export const validateScrapApproval = [roundNote(), handleValidationErrors];
+
+/** Text that must be there: missing, empty or not text all ask for it the same way. */
+const needed = (field, message, max) =>
+  body(field, message).isString().bail().trim().notEmpty().bail().isLength({ max }).withMessage(`Keep this to ${max} characters or fewer`);
+
+export const validateScrapRejection = [needed('note', 'Enter why the scrap request is turned down', 1000), handleValidationErrors];
+
+// Kept as a plain UAE day, like the daily sheets, so the sale and the sheet's Removed day are one day.
+export const validateSale = [
+  body('date', 'Choose the day the bus was sold')
+    .isString()
+    .bail()
+    .matches(/^\d{4}-\d{2}-\d{2}$/)
+    .bail()
+    .isISO8601({ strict: true })
+    .bail()
+    .custom((value) => value <= uaeDay())
+    .withMessage('The sale date cannot be in the future'),
+  needed('buyer', 'Enter who bought the bus', 200),
+  number('price', 'Enter the price, 0 or more', { money: true }),
+  roundNote(),
+  handleValidationErrors,
+];
+
+const queryAmount = (field, message, { whole = false } = {}) =>
+  query(field)
+    .optional({ values: 'falsy' })
+    .isString()
+    .withMessage(`${field} must appear once`)
+    .bail()
+    .isFloat({ min: 0, max: MAX_NUMBER })
+    .withMessage(message)
+    .bail()
+    .custom((value) => (whole ? Number.isInteger(Number(value)) : twoDecimals(value)))
+    .withMessage(whole ? WHOLE : TWO_DECIMALS);
+
+export const validateLpoPreview = [
+  query('busId').isString().withMessage('Choose a bus').bail().isMongoId().withMessage('Choose a bus'),
+  query('vendorId').optional({ values: 'falsy' }).isString().isMongoId().withMessage('Choose a valid vendor'),
+  query('serviceType').isString().withMessage('Choose the service type').bail().isIn(SERVICE_TYPES).withMessage('Choose the service type'),
+  queryAmount('amount', 'Enter an amount, 0 or more'),
+  queryAmount('quantity', 'Enter a quantity, 0 or more', { whole: true }),
   handleValidationErrors,
 ];

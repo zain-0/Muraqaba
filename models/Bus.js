@@ -1,7 +1,26 @@
 import mongoose from 'mongoose';
+import { AttachmentSchema } from './shared.js';
 
 // Services charged per km from the rate on the bus.
 export const RATED_SERVICES = ['oil', 'transmission'];
+
+// In operation → scrap requested → scrapped → sold. A sold bus is the archived bus: kept with
+// all its history and hidden from current lists. Only a scrap request and a sale move it.
+export const BUS_LIFECYCLES = ['inOperation', 'scrapRequested', 'scrapped', 'sold'];
+
+// Buyer and price are required by the API; a bus migrated from the daily sheet has neither.
+const SaleSchema = new mongoose.Schema(
+  {
+    date: { type: String, required: true }, // YYYY-MM-DD, UAE time
+    buyer: { type: String, trim: true, maxlength: 200 },
+    price: { type: Number, min: 0 }, // AED
+    note: { type: String, trim: true, maxlength: 1000 },
+    attachments: { type: [AttachmentSchema], default: [] },
+    recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    recordedAt: Date,
+  },
+  { _id: false }
+);
 
 const KmIntervalSchema = new mongoose.Schema(
   {
@@ -49,6 +68,10 @@ const BusSchema = new mongoose.Schema(
 
     // The vendor (User with role vendor) responsible for servicing this bus.
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+
+    lifecycle: { type: String, enum: BUS_LIFECYCLES, default: 'inOperation' },
+    scrappedOn: String, // YYYY-MM-DD, UAE time: the supervisor approved the scrap request
+    sale: SaleSchema,
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

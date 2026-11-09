@@ -9,7 +9,12 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const ROLES = ['vendor', 'serviceCreator', 'supervisor', 'purchaseManager'];
-const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'repair', 'other'];
+const DEPOT = ['purchaseManager', 'supervisor', 'serviceCreator'];
+const BUS_LIFECYCLES = ['inOperation', 'scrapRequested', 'scrapped', 'sold'];
+const SCRAP_REASONS = ['totalLoss', 'highRunningCost', 'endOfLife'];
+const SCRAP_REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'];
+const LPO_KINDS = ['repairMaintenance', 'tyre', 'battery', 'other'];
+const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'brakePads', 'repair', 'other'];
 const REPAIR_CATEGORIES = ['ELECTRICAL', 'MECHANICAL', 'AC REPAIR', 'ENGINE', 'BODY', 'ACCIDENT'];
 const TICKET_STATUSES = ['sentToVendor', 'estimateSubmitted', 'estimateCountered', 'pending', 'returned', 'approved', 'acknowledged', 'vehicleSent', 'vehicleReceived', 'workInProgress', 'readyForDelivery', 'vehicleReleased', 'vehicleReturned', 'invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed', 'declined'];
 
@@ -88,17 +93,56 @@ const busInput = {
     vendorId: { ...objectId, description: 'User id of the vendor responsible for this bus. Set when adding; locked afterwards.' },
   },
 };
+const attachment = { type: 'object', properties: { _id: objectId, name: { type: 'string' }, size: { type: 'integer' }, mimeType: { type: 'string' } } };
+const day = { type: 'string', example: '2026-11-09', description: 'A UAE day, YYYY-MM-DD' };
 const bus = {
   type: 'object',
   properties: {
     ...busInput.properties,
     _id: objectId,
     vendor: user,
+    lifecycle: { type: 'string', enum: BUS_LIFECYCLES, description: 'Sold is archived: kept with its history, hidden from current lists, never changed again' },
+    scrappedOn: { ...day, description: 'The day the scrap request was approved' },
+    sale: {
+      type: 'object',
+      description: 'Recorded by the supervisor. A bus migrated from the daily sheet has a date only.',
+      properties: { date: day, buyer: { type: 'string' }, price: { type: 'number', description: 'AED' }, note: { type: 'string' }, attachments: { type: 'array', items: attachment }, recordedBy: user, recordedAt: { type: 'string', format: 'date-time' } },
+    },
     intervalStatus: { type: 'object', description: 'Where each interval stands, from the latest km reading', additionalProperties: true },
+    openTickets: { type: 'integer', description: 'Detail endpoint only' },
+    scrapRequests: { type: 'array', items: { $ref: '#/components/schemas/ScrapRequest' }, description: 'Detail endpoint only, newest first' },
     createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   },
 };
-const attachment = { type: 'object', properties: { _id: objectId, name: { type: 'string' }, size: { type: 'integer' }, mimeType: { type: 'string' } } };
+const scrapRequest = {
+  type: 'object',
+  properties: {
+    _id: objectId,
+    bus: { type: 'object', description: 'fleetNumber registrationNumber make model year lifecycle', additionalProperties: true },
+    reason: { type: 'string', enum: SCRAP_REASONS },
+    note: { type: 'string' },
+    attachments: { type: 'array', items: attachment },
+    status: { type: 'string', enum: SCRAP_REQUEST_STATUSES },
+    createdBy: user, decidedBy: user, decidedAt: { type: 'string', format: 'date-time' },
+    decisionNote: { type: 'string', description: 'The supervisor\'s note; the reason when turned down' },
+    cancelledAt: { type: 'string', format: 'date-time' },
+    createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+const lpoPreview = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: LPO_KINDS },
+    make: { type: 'string', description: 'The bus\'s make' },
+    status: { type: 'string', enum: ['found', 'noLpo', 'notNeeded'], description: 'notNeeded: other work with no Other line, as when charged' },
+    lpo: {
+      type: 'object', nullable: true,
+      properties: { _id: objectId, number: { type: 'string' }, make: { type: 'string', nullable: true, description: 'null: covers every make' }, validFrom: { type: 'string', format: 'date-time' }, validTo: { type: 'string', format: 'date-time' }, lineTotal: { type: 'number' }, lineRemaining: { type: 'number' }, remainingQuantity: { type: 'number', nullable: true, description: 'Tyres and batteries only' } },
+    },
+    fits: { type: 'boolean', description: 'Only when an amount is given and an LPO is found. false: this job would overrun it' },
+  },
+};
+const multipartNote = (fields) => `Multipart form: ${fields}. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each).`;
 const invoice = {
   type: 'object',
   properties: {
@@ -172,7 +216,7 @@ const spec = {
   },
   servers: [{ url: 'http://localhost:5000', description: 'Local development' }],
   tags: [
-    { name: 'Health' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Vendors' }, { name: 'Buses' }, { name: 'Tickets' }, { name: 'Workshop' }, { name: 'Purchasing' }, { name: 'Reports' }, { name: 'Notifications' }, { name: 'Sheets' },
+    { name: 'Health' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Vendors' }, { name: 'Buses' }, { name: 'Scrapping' }, { name: 'Tickets' }, { name: 'Workshop' }, { name: 'Purchasing' }, { name: 'Reports' }, { name: 'Notifications' }, { name: 'Sheets' },
   ],
   components: {
     securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
@@ -186,7 +230,7 @@ const spec = {
           errors: { type: 'array', items: { type: 'object', properties: { field: { type: 'string' }, message: { type: 'string' } } } },
         },
       },
-      User: user, Bus: bus, BusInput: busInput, Ticket: ticket, Invoice: invoice,
+      User: user, Bus: bus, BusInput: busInput, Ticket: ticket, Invoice: invoice, ScrapRequest: scrapRequest, LpoPreview: lpoPreview,
     },
   },
   paths: {
@@ -205,7 +249,7 @@ const spec = {
     '/api/auth/login': { post: op('Auth', 'Sign in and receive a JWT', null, { body: credentials, response: authResponse, more: pick(400, 401) }) },
     '/api/auth/me': { get: op('Auth', 'Current user', ROLES, { response: authResponse }) },
     '/api/users/profile': { get: op('Users', 'Current user profile', ROLES, { response: envelope(ref('User')) }) },
-    '/api/users/dashboard': { get: op('Users', 'Role specific counters, including actionRequired', ROLES, { response: envelope({ type: 'object', additionalProperties: true }) }) },
+    '/api/users/dashboard': { get: op('Users', 'Role specific counters, including actionRequired. The supervisor\'s has scrapRequestsToDecide, counted in actionRequired.', ROLES, { response: envelope({ type: 'object', additionalProperties: true }) }) },
     '/api/vendors': {
       get: op('Vendors', 'List vendors with bus counts', ['serviceCreator', 'supervisor'], { response: listEnvelope(ref('User')), more: pick(403) }),
       post: op('Vendors', 'Create a vendor account', ['serviceCreator'], {
@@ -219,7 +263,7 @@ const spec = {
     },
     '/api/sheets/status': {
       get: op('Sheets', 'Daily status of every bus in a month, with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
-      put: op('Sheets', 'Change a bus status from a day onward', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date', 'status'], properties: { busId: objectId, date: { type: 'string' }, status: { type: 'string' } } }, response: { type: 'object' }, more: pick(400, 403, 404) }),
+      put: op('Sheets', 'Change a bus status from a day onward. Scrapping and removed are refused (they come from scrap requests), and so is any day from a scrapped or sold bus\'s scrappedOn (409).', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date', 'status'], properties: { busId: objectId, date: { type: 'string' }, status: { type: 'string', enum: ['ready', 'repair', 'maintenance', 'tyreChange', 'batteryChange', 'accident'] } } }, response: { type: 'object' }, more: pick(400, 403, 404, 409) }),
     },
     '/api/sheets/repairs': { get: op('Sheets', 'Repair process list with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }) },
     '/api/vendors/tickets': { get: op('Vendors', 'Tickets assigned to the signed-in vendor', ['vendor'], { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
@@ -228,9 +272,28 @@ const spec = {
       post: op('Buses', 'Add a bus to the fleet', ['serviceCreator', 'supervisor'], { body: ref('BusInput'), response: envelope(ref('Bus')), status: 201, more: pick(400, 403, 404, 409) }),
     },
     '/api/buses/{id}': {
-      get: op('Buses', 'Bus details with open ticket count', ['serviceCreator', 'supervisor', 'purchaseManager'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }),
-      put: op('Buses', 'Edit a bus. New tickets use the changes; the vendor stays as it was.', ['serviceCreator'], { params: [idParam], body: ref('BusInput'), response: envelope(ref('Bus')), more: pick(400, 403, 404, 409) }),
+      get: op('Buses', 'Bus details with open ticket count and its scrap requests, newest first', ['serviceCreator', 'supervisor', 'purchaseManager'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }),
+      put: op('Buses', 'Edit a bus. New tickets use the changes; the vendor stays as it was. A sold bus cannot be edited (409).', ['serviceCreator'], { params: [idParam], body: ref('BusInput'), response: envelope(ref('Bus')), more: pick(400, 403, 404, 409) }),
     },
+    '/api/buses/{id}/sale': {
+      put: {
+        ...op('Scrapping', `Record the sale of a scrapped bus, which archives it. ${multipartNote('date (on or after scrappedOn, not in the future), buyer (up to 200 characters), price (AED, 0 or more, 2 decimals), note (up to 1000), attachments')} Writes Removed on the daily sheet from the sale day.`, ['supervisor'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 403, 404, 409) }),
+        requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['date', 'buyer', 'price'], properties: { date: day, buyer: { type: 'string' }, price: { type: 'number' }, note: { type: 'string' }, attachments: { type: 'array', items: { type: 'string', format: 'binary' } } } } } } },
+      },
+    },
+    '/api/buses/{id}/sale/attachments/{attachmentId}': { get: op('Scrapping', 'Download a sale document', DEPOT, { params: [idParam, { name: 'attachmentId', in: 'path', required: true, schema: objectId }], response: { type: 'string', format: 'binary' }, more: pick(403, 404) }) },
+    '/api/scrap-requests': {
+      get: op('Scrapping', 'Scrap requests, newest first', DEPOT, { query: [{ name: 'status', in: 'query', schema: { type: 'string', enum: SCRAP_REQUEST_STATUSES } }, { name: 'busId', in: 'query', schema: objectId }, ...pageQuery], response: listEnvelope(ref('ScrapRequest')), more: pick(400, 403) }),
+      post: {
+        ...op('Scrapping', `Ask the supervisor to scrap a bus in operation with no open VSR. ${multipartNote('busId, reason, note (up to 1000), attachments')} Every supervisor is notified.`, ['serviceCreator'], { response: envelope(ref('ScrapRequest')), status: 201, more: pick(400, 403, 404, 409) }),
+        requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['busId', 'reason'], properties: { busId: objectId, reason: { type: 'string', enum: SCRAP_REASONS }, note: { type: 'string' }, attachments: { type: 'array', items: { type: 'string', format: 'binary' } } } } } } },
+      },
+    },
+    '/api/scrap-requests/{id}': { get: op('Scrapping', 'One scrap request', DEPOT, { params: [idParam], response: envelope(ref('ScrapRequest')), more: pick(400, 403, 404) }) },
+    '/api/scrap-requests/{id}/approve': { put: op('Scrapping', 'Approve: checks again for open VSRs, scraps the bus today and writes Scrapping on the daily sheet. The creator is notified.', ['supervisor'], { params: [idParam], body: { type: 'object', properties: { note: { type: 'string', maxLength: 1000 } } }, response: envelope(ref('ScrapRequest')), more: pick(400, 403, 404, 409) }) },
+    '/api/scrap-requests/{id}/reject': { put: op('Scrapping', 'Turn down, with the reason. The bus is back in operation and the creator is notified.', ['supervisor'], { params: [idParam], body: { type: 'object', required: ['note'], properties: { note: { type: 'string', maxLength: 1000 } } }, response: envelope(ref('ScrapRequest')), more: pick(400, 403, 404, 409) }) },
+    '/api/scrap-requests/{id}/cancel': { put: op('Scrapping', 'Cancel a waiting request; only the creator who raised it. The bus is back in operation.', ['serviceCreator'], { params: [idParam], response: envelope(ref('ScrapRequest')), more: pick(403, 404, 409) }) },
+    '/api/scrap-requests/{id}/attachments/{attachmentId}': { get: op('Scrapping', 'Download a scrap request document', DEPOT, { params: [idParam, { name: 'attachmentId', in: 'path', required: true, schema: objectId }], response: { type: 'string', format: 'binary' }, more: pick(403, 404) }) },
     '/api/tickets': {
       get: op('Tickets', 'List tickets visible to the caller', ROLES, { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(400) }),
       post: op('Tickets', 'Raise a ticket (vendor defaults to the bus vendor)', ['serviceCreator', 'supervisor'], {
@@ -283,7 +346,19 @@ const spec = {
     '/api/purchase-invoices': { post: op('Purchasing', 'Make the purchase invoice of a GRN, which closes its VSRs (multipart: number, grnId, date, amount, notes, attachments)', ['purchaseManager'], { response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/lpos': {
       get: op('Purchasing', 'List LPOs', ['purchaseManager', 'supervisor', 'serviceCreator'], { query: pageQuery, response: listEnvelope({ type: 'object', additionalProperties: true }), more: pick(403) }),
-      post: op('Purchasing', 'Create an LPO', ['purchaseManager'], { body: { type: 'object', required: ['number', 'vendorId', 'validFrom', 'validTo', 'items'], properties: { number: { type: 'string' }, vendorId: objectId, validFrom: { type: 'string', format: 'date' }, validTo: { type: 'string', format: 'date' }, items: { type: 'array', items: { type: 'object', required: ['kind', 'name', 'quantity', 'unitPrice'], properties: { kind: { type: 'string', enum: ['tyre', 'battery', 'repair', 'other'] }, name: { type: 'string' }, description: { type: 'string' }, quantity: { type: 'number' }, unitPrice: { type: 'number' } } } } } }, response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }),
+      post: op('Purchasing', 'Create an LPO. Repairs, brake pads, oil and transmission come off one repairMaintenance line for one make; tyre, battery and other LPOs name no make and cover every bus.', ['purchaseManager'], { body: { type: 'object', required: ['number', 'vendorId', 'validFrom', 'validTo', 'items'], properties: { number: { type: 'string' }, vendorId: objectId, make: { type: 'string', description: 'Required with a repairMaintenance line and refused without one. Must be a make on the fleet, in any letter case; stored as the fleet spells it.' }, validFrom: { type: 'string', format: 'date' }, validTo: { type: 'string', format: 'date' }, items: { type: 'array', items: { type: 'object', required: ['kind', 'name', 'quantity', 'unitPrice'], properties: { kind: { type: 'string', enum: LPO_KINDS }, name: { type: 'string' }, description: { type: 'string' }, quantity: { type: 'number' }, unitPrice: { type: 'number' } } } } } }, response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }),
+    },
+    '/api/lpos/for-vsr': {
+      get: op('Purchasing', 'Which LPO a job would come off, for the new VSR form and the VSR page. Reads only; accepting the invoice uses the same choice.', DEPOT, {
+        query: [
+          { name: 'busId', in: 'query', required: true, schema: objectId },
+          { name: 'vendorId', in: 'query', schema: objectId, description: 'Defaults to the bus\'s vendor' },
+          { name: 'serviceType', in: 'query', required: true, schema: { type: 'string', enum: SERVICE_TYPES } },
+          { name: 'amount', in: 'query', schema: { type: 'number', minimum: 0 }, description: 'AED. Given, the answer says whether it fits' },
+          { name: 'quantity', in: 'query', schema: { type: 'integer', minimum: 0 }, description: 'Tyres or batteries fitted, matched as the charge matches them' },
+        ],
+        response: envelope(ref('LpoPreview')), more: pick(400, 403, 404),
+      }),
     },
     '/api/lpos/{id}': { get: op('Purchasing', 'One LPO with the VSRs that used it', ['purchaseManager', 'supervisor', 'serviceCreator'], { params: [idParam], response: envelope({ type: 'object', additionalProperties: true }), more: pick(403, 404) }) },
     '/api/reports/query': { get: op('Reports', 'How many of what, for which brand, vendor, bus or year', ['purchaseManager'], { query: ['brand', 'type', 'year', 'vendorId', 'busId', 'isBreakdown', 'groupBy'].map((name) => ({ name, in: 'query', schema: { type: 'string' } })), response: envelope({ type: 'object', additionalProperties: true }), more: pick(400, 403) }) },

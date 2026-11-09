@@ -4,7 +4,7 @@
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, busBody, createBus, signInEveryone } from './helpers.js';
+import { api, busBody, createBus, scrapBus, signInEveryone } from './helpers.js';
 import { uaeDay } from '../utils/uaeTime.js';
 
 let users;
@@ -50,13 +50,14 @@ describe('buses off the fleet', () => {
     assert.ok((await dueOil()).includes(bus._id), 'overdue while on the fleet');
     const before = await needing();
 
-    const scrapped = await api('PUT', '/sheets/status', { token: users.creator.token, body: { busId: bus._id, date: today, status: 'scrapping' } });
-    assert.equal(scrapped.status, 200, JSON.stringify(scrapped.body));
+    // Scrapped through a scrap request since 2026-11-09; approving it writes Scrapping on the sheet.
+    await scrapBus(users, bus._id);
     assert.ok(!(await dueOil()).includes(bus._id), 'nothing is due on a scrapped bus');
     assert.equal(await needing(), before - 1);
 
-    // Back on the fleet, it is due again.
-    assert.equal((await api('PUT', '/sheets/status', { token: users.creator.token, body: { busId: bus._id, date: today, status: 'ready' } })).status, 200);
-    assert.ok((await dueOil()).includes(bus._id));
+    // And the sheet cannot put it back on the road.
+    const back = await api('PUT', '/sheets/status', { token: users.creator.token, body: { busId: bus._id, date: today, status: 'ready' } });
+    assert.equal(back.status, 409);
+    assert.ok(!(await dueOil()).includes(bus._id));
   });
 });

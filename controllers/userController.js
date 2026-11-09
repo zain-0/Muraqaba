@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Ticket, { PURCHASE_VISIBLE_STATUSES, TICKET_STATUSES } from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
+import ScrapRequest from '../models/ScrapRequest.js';
 import { SignatureImage } from '../models/User.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
@@ -75,16 +76,18 @@ const serviceCreatorDashboard = async (user) => {
 };
 
 const supervisorDashboard = async (user) => {
-  const [tickets, buses, busesDue] = await Promise.all([
+  const [tickets, buses, busesDue, scrapRequestsToDecide] = await Promise.all([
     countByStatus({}),
     Bus.countDocuments(),
     busesNeedingService({}),
+    ScrapRequest.countDocuments({ status: 'pending' }),
   ]);
   return {
     role: user.role,
     tickets,
     fleet: { buses, busesNeedingService: busesDue },
-    actionRequired: tickets.pending + tickets.invoiceSubmitted,
+    scrapRequestsToDecide,
+    actionRequired: tickets.pending + tickets.invoiceSubmitted + scrapRequestsToDecide,
   };
 };
 

@@ -45,9 +45,49 @@ describe('demo data', () => {
       const used = await lpos.findOne({ number: deducted.lpoDeduction.lpoNumber });
       assert.ok(used.usedAmount > 0);
 
-      const maintenance = await tickets.findOne({ 'lpoDeduction.kind': 'maintenance', 'lpoDeduction.status': 'deducted' });
-      assert.ok(maintenance, 'an oil service came off a maintenance LPO');
+      const maintenance = await tickets.findOne({ serviceType: 'oil', 'lpoDeduction.kind': 'repairMaintenance', 'lpoDeduction.status': 'deducted' });
+      assert.ok(maintenance, 'an oil service came off a repair and maintenance LPO');
       assert.equal(maintenance.lpoDeduction.quantity, 0);
+
+      // LPOs by make (2026-11-09): repair and maintenance for one make, tyres and batteries for every make.
+      const buses = connection.collection('buses');
+      const fleet = await buses.find().toArray();
+      const allLpos = await lpos.find().toArray();
+      assert.ok(allLpos.every((lpo) => lpo.items.every((item) => ['repairMaintenance', 'tyre', 'battery', 'other'].includes(item.kind))), 'only the new line kinds');
+      for (const lpo of allLpos) {
+        const forMake = lpo.items.some((item) => item.kind === 'repairMaintenance');
+        assert.equal(Boolean(lpo.make), forMake, `${lpo.number} names a make only for repair and maintenance`);
+        if (forMake) assert.ok(fleet.some((bus) => bus.make === lpo.make && String(bus.vendor) === String(lpo.vendor)), `${lpo.number} is for a make its vendor looks after`);
+      }
+      const offDeducted = await tickets.find({ 'lpoDeduction.status': 'deducted', 'lpoDeduction.kind': 'repairMaintenance' }).toArray();
+      for (const ticket of offDeducted) {
+        const lpo = allLpos.find((l) => String(l._id) === String(ticket.lpoDeduction.lpo));
+        const bus = fleet.find((b) => String(b._id) === String(ticket.busId));
+        assert.equal(lpo.make, bus.make, `${ticket.vsrNumber} came off the LPO for its bus's make`);
+      }
+
+      // One bus scrapped and sold, one waiting on a scrap request; neither has work open.
+      const requests = await connection.collection('scraprequests').find().toArray();
+      const open = async (busId) => tickets.countDocuments({ busId, status: { $nin: ['completed', 'declined'] } });
+      const pending = requests.filter((r) => r.status === 'pending');
+      assert.equal(pending.length, 1, 'one scrap request for the supervisor');
+      const waitingBus = fleet.find((bus) => String(bus._id) === String(pending[0].bus));
+      assert.equal(waitingBus.lifecycle, 'scrapRequested');
+      assert.equal(await open(waitingBus._id), 0);
+      assert.ok(pending[0].attachments.length && pending[0].reason);
+      const sold = fleet.filter((bus) => bus.lifecycle === 'sold');
+      assert.equal(sold.length, 1, 'one sold bus');
+      const [archived] = sold;
+      assert.ok(archived.sale.buyer && archived.sale.price > 0 && archived.sale.attachments.length, 'the sale has its details and a document');
+      assert.ok(archived.scrappedOn < archived.sale.date, 'scrapped before it was sold');
+      assert.equal(await open(archived._id), 0);
+      assert.equal(requests.find((r) => String(r.bus) === String(archived._id))?.status, 'approved');
+      const changes = await connection.collection('busstatuschanges').find({ bus: archived._id }).sort({ date: 1 }).toArray();
+      assert.deepEqual(changes.map(({ date, status, source }) => [date, status, source]), [[archived.scrappedOn, 'scrapping', 'scrap'], [archived.sale.date, 'removed', 'scrap']]);
+      assert.equal(await connection.collection('busstatuschanges').countDocuments({ status: { $in: ['scrapping', 'removed'] }, source: { $ne: 'scrap' } }), 0, 'never set by hand');
+      assert.ok(fleet.filter((bus) => !['sold', 'scrapRequested'].includes(bus.lifecycle)).every((bus) => bus.lifecycle === 'inOperation'));
+      const supervisor = await connection.collection('users').findOne({ role: 'supervisor' });
+      assert.ok(await connection.collection('notifications').findOne({ user: supervisor._id, type: 'scrapRequested' }), 'the supervisor has been told');
 
       const completed = await tickets.findOne({ status: 'completed' });
       assert.ok(completed.grn && completed.purchaseInvoice && completed.signatures.some((s) => s.step === 'purchaseInvoice'));
@@ -70,8 +110,6 @@ describe('demo data', () => {
       assert.equal(signed, 5, 'everyone can sign straight away');
 
       // The owner's answers of 2026-11-06.
-      const buses = connection.collection('buses');
-      const fleet = await buses.find().toArray();
       assert.ok(fleet.every((bus) => bus.intervals.brakePads?.everyKm === 40000), 'every bus has the 40,000 km brake-pad interval');
       assert.ok(fleet.some((bus) => !('chassisNumber' in bus)), 'a bus without a chassis number');
       assert.ok(fleet.some((bus) => !('registrationNumber' in bus) && !('registrationExpiry' in bus)), 'a bus not registered yet');

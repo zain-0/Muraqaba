@@ -8,6 +8,7 @@ import { BUS_POPULATE } from '../utils/query.js';
 import { latestKmByBus, withIntervalStatus } from '../utils/intervals.js';
 import { assertNoClash } from '../utils/unique.js';
 import { hasText } from '../middleware/validationMiddleware.js';
+import { scrapRequestsOf } from './scrapController.js';
 
 const identityOf = ({ fleetNumber, registrationNumber, chassisNumber }) => ({ fleetNumber, registrationNumber, chassisNumber });
 
@@ -33,11 +34,12 @@ export const getBusById = asyncHandler(async (req, res) => {
   const bus = await Bus.findById(req.params.id).populate(BUS_POPULATE);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
 
-  const [openTickets, km] = await Promise.all([
+  const [openTickets, km, scrapRequests] = await Promise.all([
     Ticket.countDocuments({ busId: bus._id, status: mongoose.trusted({ $nin: CLOSED_STATUSES }) }),
     latestKmOf(bus._id),
+    scrapRequestsOf(bus._id),
   ]);
-  res.json({ success: true, data: { ...withIntervalStatus(bus, km), openTickets } });
+  res.json({ success: true, data: { ...withIntervalStatus(bus, km), openTickets, scrapRequests } });
 });
 
 /** An empty chassis or registration number is left out, so an edit clears it and the sparse indexes never see "" or null. */
@@ -77,6 +79,8 @@ export const createBus = asyncHandler(async (req, res) => {
 export const updateBus = asyncHandler(async (req, res) => {
   const bus = await Bus.findById(req.params.id);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
+  // Kept as it was on the day it was sold, with all its history.
+  if (bus.lifecycle === 'sold') throw new AppError('A sold bus is archived and cannot be changed.', 409, 'INVALID_STATE');
   await assertNoClash(Bus, identityOf(req.body), bus._id);
   bus.set(busFields(req.body));
   await bus.save();

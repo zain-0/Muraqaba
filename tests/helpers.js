@@ -106,11 +106,11 @@ export const createBus = async (users, suffix, vendorId, overrides) => {
 };
 
 /** Sends a multipart request, the way the browser sends forms with files. */
-export const multipart = async (path, token, fields, files = []) => {
+export const multipart = async (path, token, fields, files = [], method = 'POST') => {
   const form = new FormData();
   Object.entries(fields).forEach(([key, value]) => form.set(key, value));
   files.forEach((file) => form.append('attachments', file));
-  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+  const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${token}` }, body: form });
   return { status: res.status, body: await res.json() };
 };
 
@@ -168,6 +168,16 @@ export const toInvoiceAccepted = async (users, ticket, vendor, options = {}) => 
   await toVehicleReturned(users, ticket, vendor, options);
   ok(await submitInvoice(ticket._id, vendor, options.invoice));
   return ok(await api('PUT', `/tickets/${ticket._id}/invoice/accept`, { token: users.supervisor.token }));
+};
+
+/** A scrap request for a bus, sent the way the bus page sends it. */
+export const requestScrap = (users, busId, fields = {}, files = []) => multipart('/scrap-requests', users.creator.token, { busId, reason: 'endOfLife', ...fields }, files);
+
+/** A bus in operation taken through an approved scrap request; returns the approved request. */
+export const scrapBus = async (users, busId) => {
+  const sent = await requestScrap(users, busId);
+  assert.equal(sent.status, 201, JSON.stringify(sent.body));
+  return ok(await api('PUT', `/scrap-requests/${sent.body.data._id}/approve`, { token: users.supervisor.token }));
 };
 
 export const toForwarded = async (users, ticket, vendor, options) => {

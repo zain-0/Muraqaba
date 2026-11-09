@@ -13,14 +13,34 @@ export const NOT_COUNTED = ['scrapping', 'removed'];
 export const COUNTED = BUS_DAY_STATUSES.filter((status) => !NOT_COUNTED.includes(status));
 
 /**
+ * Buses already removed (sold) before `firstDay` that do not change between it and `lastDay`:
+ * gone before the period, so the sheets and the reports leave them off. A bus sold during the
+ * period stays, so its last days show.
+ */
+const goneBefore = async (firstDay, lastDay) => {
+  const [before, changing] = await Promise.all([
+    BusStatusChange.aggregate([
+      { $match: { date: mongoose.trusted({ $lt: firstDay }) } },
+      { $sort: { date: -1 } },
+      { $group: { _id: '$bus', status: { $first: '$status' } } },
+    ]),
+    BusStatusChange.distinct('bus', { date: mongoose.trusted({ $gte: firstDay, $lte: lastDay }) }),
+  ]);
+  const changed = new Set(changing.map(String));
+  return new Set(before.filter((row) => row.status === 'removed' && !changed.has(String(row._id))).map((row) => String(row._id)));
+};
+
+/**
  * The buses on the fleet by `lastDay`, each with the first day it was on the fleet: the day it
  * was added, or an earlier day the sheets already hold for it (history entered for a bus added later).
+ * Given the period's `firstDay`, a bus removed before the period and unchanged in it is left off.
  */
-export const fleetBuses = async (lastDay) => {
-  const [buses, firstReading, firstStatus] = await Promise.all([
-    Bus.find().sort({ fleetNumber: 1 }).select('fleetNumber registrationNumber make model createdAt'),
+export const fleetBuses = async (lastDay, firstDay) => {
+  const [buses, firstReading, firstStatus, gone] = await Promise.all([
+    Bus.find().sort({ fleetNumber: 1 }).select('fleetNumber registrationNumber make model createdAt scrappedOn sale.date'),
     BusDailyReading.aggregate([{ $group: { _id: '$bus', first: { $min: '$date' } } }]),
     BusStatusChange.aggregate([{ $group: { _id: '$bus', first: { $min: '$date' } } }]),
+    firstDay ? goneBefore(firstDay, lastDay) : new Set(),
   ]);
   const earliest = new Map();
   [...firstReading, ...firstStatus].forEach(({ _id, first }) => {
@@ -33,7 +53,7 @@ export const fleetBuses = async (lastDay) => {
       const sheet = earliest.get(String(bus._id));
       return Object.assign(bus, { firstDay: sheet && sheet < added ? sheet : added });
     })
-    .filter((bus) => bus.firstDay <= lastDay);
+    .filter((bus) => bus.firstDay <= lastDay && !gone.has(String(bus._id)));
 };
 
 /**
@@ -44,7 +64,7 @@ export const fleetBuses = async (lastDay) => {
  */
 export const fleetDays = async (days, today = uaeDay()) => {
   const [buses, changes] = await Promise.all([
-    fleetBuses(days.at(-1)),
+    fleetBuses(days.at(-1), days[0]),
     BusStatusChange.find({ date: mongoose.trusted({ $lte: days.at(-1) }) }).sort({ date: 1 }),
   ]);
   const byBus = new Map();

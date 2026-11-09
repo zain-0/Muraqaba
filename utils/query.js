@@ -19,7 +19,16 @@ export const TICKET_POPULATE = [
   { path: 'negotiation.by', select: USER_FIELDS },
 ];
 
-export const BUS_POPULATE = [{ path: 'vendor', select: USER_FIELDS }];
+export const BUS_POPULATE = [
+  { path: 'vendor', select: USER_FIELDS },
+  { path: 'sale.recordedBy', select: USER_FIELDS },
+];
+
+export const SCRAP_REQUEST_POPULATE = [
+  { path: 'bus', select: 'fleetNumber registrationNumber make model year lifecycle' },
+  { path: 'createdBy', select: USER_FIELDS },
+  { path: 'decidedBy', select: USER_FIELDS },
+];
 
 /**
  * Runs a Mongoose query with page/limit from the request and returns the
