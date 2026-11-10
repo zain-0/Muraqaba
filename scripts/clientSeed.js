@@ -15,12 +15,14 @@ import mongoose from 'mongoose';
 import config from '../config/config.js';
 import User, { SignatureImage } from '../models/User.js';
 import Bus from '../models/Bus.js';
-import Ticket from '../models/Ticket.js';
+import Ticket, { CLOSED_STATUSES } from '../models/Ticket.js';
 import Invoice from '../models/Invoice.js';
 import Counter from '../models/Counter.js';
-import { Grn, Lpo, PurchaseInvoice } from '../models/Purchase.js';
+import { Grn, Lpo, PurchaseInvoice, lineName } from '../models/Purchase.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
-import { COUNTED_BY_QUANTITY, LINE_FOR_SERVICE } from '../utils/lpoDeduction.js';
+import { COUNTED_BY_QUANTITY, LINE_FOR_SERVICE, isInDate, linesForOpen, lpoLineOf, roomOn } from '../utils/lpoDeduction.js';
+import { unitsOf } from '../utils/lpoBalance.js';
+import { uaeDay } from '../utils/uaeTime.js';
 import { applyBusLifecycleChanges, busLifecycleChanges, mergeRepairMaintenance, mostCommonMake } from '../utils/fleetLifecycle.js';
 import { UPLOAD_DIR, storedPath } from '../utils/uploads.js';
 import { demoPdf, signatureDataUrl } from './demoFiles.js';
@@ -93,22 +95,30 @@ export default async function seedClient(folder, { password, staff }) {
   await Bus.insertMany(busDocs);
   const busOf = new Map(busDocs.map((b) => [b.fleetNumber, b]));
 
-  // --- LPOs, used as the invoices are accepted below --------------------------------------------
-  // Repair and maintenance are one amount for one make (2026-11-09). The records name no make, so a
-  // repair and maintenance LPO takes the make most of its vendor's buses have, as the migration does.
+  // --- LPOs: each VSR is raised against a line of one, and its GRN takes it off -----------------
+  // Repair and maintenance are one amount for one make (2026-11-09), held on the line (2026-11-10).
+  // The records name no make, so it is the make most of the LPO's vendor's buses have, as the
+  // migration does. Tyre and battery lines may give a size and a life in km; older ones have neither.
   const makesOf = (vendorId) => busDocs.filter((b) => b.vendor.equals(vendorId)).map((b) => b.make);
+  const given = (fields) => Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== null && value !== ''));
   const lpos = new Map(
     data.lpos.map((l) => {
       const vendor = vendorOf(l.vendor)._id;
-      const { items } = mergeRepairMaintenance(l.items.map((item) => ({ ...item, _id: new ObjectId(), usedAmount: 0, usedQuantity: 0 })));
-      const make = items.some((item) => item.kind === 'repairMaintenance') ? mostCommonMake(makesOf(vendor)) : undefined;
+      const { items: merged } = mergeRepairMaintenance(
+        l.items.map(({ size, lifeKm, ...item }) => ({ ...item, ...given({ size, lifeKm }), _id: new ObjectId(), usedAmount: 0, usedQuantity: 0 }))
+      );
+      const make = merged.some((item) => item.kind === 'repairMaintenance') ? mostCommonMake(makesOf(vendor)) : undefined;
+      const items = merged.map((item) => {
+        const line = item.kind === 'repairMaintenance' && make ? { ...item, make } : item;
+        return { ...line, name: lineName(line) };
+      });
       return [
         l.number,
         {
           _id: new ObjectId(),
           number: l.number,
+          date: new Date(`${l.validFrom}T00:00:00.000Z`),
           vendor,
-          ...(make ? { make } : {}),
           validFrom: new Date(`${l.validFrom}T00:00:00.000Z`),
           validTo: new Date(`${l.validTo}T00:00:00.000Z`),
           items,
@@ -121,18 +131,26 @@ export default async function seedClient(folder, { password, staff }) {
     })
   );
 
-  /** What accepting this invoice takes off the vendor's LPO, worked out as the app does it. */
-  const deduct = (vsr, ticket, amount, at) => {
-    const kind = LINE_FOR_SERVICE[vsr.serviceType];
-    const quantity = COUNTED_BY_QUANTITY.includes(vsr.serviceType) ? ticket.breakdown?.unitsFitted ?? 0 : 0;
+  /** The line of the LPO the records charged this VSR to: of its kind, for tyres the one at the job's unit price, else the first. */
+  const lineFor = (vsr) => {
     const lpo = vsr.lpo && lpos.get(vsr.lpo);
-    const lines = lpo ? lpo.items.filter((item) => item.kind === kind) : [];
-    if (!lines.length) return kind === 'other' ? undefined : { status: 'noLpo', kind, quantity, amount, at };
-    const item = lines.find((line) => line.unitPrice === vsr.parts?.unitPrice) ?? lines[0];
-    const overrun = item.total - item.usedAmount < amount || (COUNTED_BY_QUANTITY.includes(kind) && item.quantity - item.usedQuantity < quantity);
+    const lines = lpo ? lpo.items.filter((item) => item.kind === LINE_FOR_SERVICE[vsr.serviceType]) : [];
+    if (!lines.length) return undefined;
+    return { lpo, item: lines.find((line) => line.unitPrice === vsr.parts?.unitPrice) ?? lines[0] };
+  };
+  const lineAt = new Map([...lpos.values()].flatMap((lpo) => lpo.items.map((item) => [String(item._id), { lpo, item }])));
+
+  /** What the GRN takes off for this VSR, worked out as the app does it: off its line, or with none, noLpo. */
+  const deduct = (ticket, amount, at) => {
+    const kind = LINE_FOR_SERVICE[ticket.serviceType];
+    const quantity = COUNTED_BY_QUANTITY.includes(kind) ? unitsOf(ticket) : 0;
+    const line = ticket.lpoLine && lineAt.get(String(ticket.lpoLine.item));
+    if (!line) return kind === 'other' ? undefined : { status: 'noLpo', kind, quantity, amount, at };
+    const { lpo, item } = line;
     item.usedAmount = money(item.usedAmount + amount);
     item.usedQuantity += quantity;
     lpo.usedAmount = money(lpo.usedAmount + amount);
+    const overrun = item.usedAmount > item.total || (COUNTED_BY_QUANTITY.includes(kind) && item.usedQuantity > item.quantity);
     return { status: 'deducted', lpo: lpo._id, lpoNumber: lpo.number, item: item._id, kind, quantity, amount, overrun, at };
   };
 
@@ -190,6 +208,10 @@ export default async function seedClient(folder, { password, staff }) {
       createdAt: raised,
     };
     if (vsr.agreedPrice) ticket.agreedPrice = vsr.agreedPrice;
+    // The LPO it comes off, chosen as the creator does now; open VSRs are booked against it.
+    const line = lineFor(vsr);
+    if (line) ticket.lpoLine = lpoLineOf(line);
+    if (COUNTED_BY_QUANTITY.includes(vsr.serviceType) && vsr.parts?.quantity) ticket.quantity = vsr.parts.quantity;
 
     // Each step with the time it is wanted; later the times are pulled back so none is in the future.
     const plan = [];
@@ -288,7 +310,6 @@ export default async function seedClient(folder, { password, staff }) {
       if (entry.invoice === 'accept') {
         Object.assign(invoice, { status: 'approved', approvedAt: at, approvedBy: supervisor._id });
         ticket.invoiceApprovedBy = supervisor._id;
-        ticket.lpoDeduction = deduct(vsr, ticket, invoice.amount, at);
       }
       if (status === 'invoiceRejected') ticket.invoiceRejectedBy = supervisor._id;
       if (entry.sign) stamp(ticket, by, entry.sign, at);
@@ -349,6 +370,7 @@ export default async function seedClient(folder, { password, staff }) {
     grns.push(grn);
     for (const ticket of batch.members) {
       ticket.grn = grn._id;
+      ticket.lpoDeduction = deduct(ticket, invoiceOf.get(String(ticket.invoice)).amount, batch.grnAt);
       stamp(ticket, purchasing, 'grn', batch.grnAt);
       ticket.history.push({ status: 'grnCreated', at: batch.grnAt, effectiveAt: batch.grnAt, by: purchasing._id, note: `GRN ${grnNumber}` });
       Object.assign(ticket, { status: 'grnCreated', statusUpdated: batch.grnAt });
@@ -367,6 +389,18 @@ export default async function seedClient(folder, { password, staff }) {
       ticket.history.push({ status: 'completed', at: batch.piAt, effectiveAt: batch.piAt, by: purchasing._id, note: `Purchase invoice ${piNumber}` });
       Object.assign(ticket, { status: 'completed', statusUpdated: batch.piAt, completedAt: batch.piAt });
     }
+  }
+
+  // --- Open VSRs the records charge to no LPO yet ------------------------------------------------
+  // They are booked on the line their GRN would take them off now, as the migration books them: their
+  // vendor's line valid today for the bus's make and the kind, with room, oldest VSR first.
+  const inDate = [...lpos.values()].filter((lpo) => isInDate(lpo, uaeDay()));
+  const unbooked = tickets
+    .filter((t) => !t.lpoLine && !t.lpoDeduction && !t.grn && !CLOSED_STATUSES.includes(t.status))
+    .sort((a, b) => a.createdAt - b.createdAt || a.vsrNumber.localeCompare(b.vsrNumber));
+  const busById = new Map(busDocs.map((b) => [String(b._id), b]));
+  for (const { ticket, ...line } of linesForOpen(unbooked, { lpos: inDate, makeOf: (t) => busById.get(String(t.busId)).make, room: roomOn(inDate, tickets) })) {
+    ticket.lpoLine = lpoLineOf(line);
   }
 
   // --- Save -----------------------------------------------------------------------------------------
@@ -407,7 +441,9 @@ export default async function seedClient(folder, { password, staff }) {
   console.log(`  VSRs: ${tickets.length}, invoices: ${invoices.length}, GRNs: ${grns.length}, purchase invoices: ${purchaseInvoices.length}, LPOs: ${lpos.size}`);
   console.log(`  VSRs by status: ${Object.entries(byStage).map(([s, n]) => `${s} ${n}`).join(', ')}`);
   const overruns = tickets.filter((t) => t.lpoDeduction?.overrun || t.lpoDeduction?.status === 'noLpo').length;
-  if (overruns) console.log(`  Invoices over or without an LPO: ${overruns}`);
+  if (overruns) console.log(`  GRN deductions over or without an LPO: ${overruns}`);
+  const booked = tickets.filter((t) => t.lpoLine && !t.lpoDeduction && !['completed', 'declined'].includes(t.status)).length;
+  console.log(`  Open VSRs booked on an LPO line: ${booked}`);
   console.log('\nLogins (password: %s):', password);
   accounts.forEach((a) => console.log(`  ${a.role.padEnd(16)} ${a.email}${a.role === 'vendor' ? `  (${a.name})` : ''}`));
 }

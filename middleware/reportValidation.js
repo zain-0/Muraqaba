@@ -4,6 +4,7 @@
  */
 import { query } from 'express-validator';
 import { handleValidationErrors } from './validationMiddleware.js';
+import { LPO_KINDS } from '../models/Purchase.js';
 
 export const REPORT_TYPES = ['accident', 'repair', 'maintenance', 'oil', 'transmission', 'tyre', 'battery', 'brakePads', 'other'];
 
@@ -15,6 +16,8 @@ const brand = () => optional('brand').isLength({ max: 120 }).withMessage('Choose
 const type = () => optional('type').isIn(REPORT_TYPES).withMessage('Choose a valid kind of work');
 const vendorId = () => optional('vendorId').isMongoId().withMessage('Choose a valid vendor');
 const all = () => optional('all').isIn(['true', 'false']).withMessage('all must be true or false');
+const lpoKind = () => optional('kind').isIn(LPO_KINDS).withMessage('Choose a valid kind of item');
+const inDate = () => optional('inDate').isIn(['true', 'false']).withMessage('inDate must be true or false');
 
 const checks = (...list) => [...list.map((make) => make()), handleValidationErrors];
 
@@ -24,3 +27,4 @@ export const validateYearMonthBrand = checks(year, month, brand);
 export const validateYearBrand = checks(year, brand);
 export const validateCosts = checks(year, brand, type, vendorId);
 export const validateInvoiceCheck = checks(year, all);
+export const validateLpoBalances = checks(vendorId, lpoKind, inDate);

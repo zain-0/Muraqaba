@@ -87,6 +87,7 @@ router.put('/:id/return', roleMiddleware(['supervisor']), validateObjectId, vali
 router.put('/:id/decline', roleMiddleware(['supervisor']), validateObjectId, validateTicketDecline, declineTicket);
 router.post('/:id/additional', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateAdditionalJob, createAdditionalJob);
 router.put('/:id/details', roleMiddleware(CREATORS), validateObjectId, validateTicketCreate, correctTicketDetails);
+router.put('/:id', roleMiddleware(CREATORS), validateObjectId, validateTicketCreate, correctTicketDetails); // the same correction, as the 2026-11-10 plan names it
 router.put('/:id/accident', roleMiddleware(CREATORS), validateObjectId, validateAccident, updateAccident); // any stage; never shown to vendors
 router.post('/:id/estimate', roleMiddleware(['vendor']), validateObjectId, parseAttachments, validateEstimate, submitEstimate);
 router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, parseAttachments, validateEstimateReply, replyToEstimate);

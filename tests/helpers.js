@@ -3,6 +3,7 @@
  * MongoDB; tests/run.mjs starts one and seeds the staff accounts signed in with here.
  */
 import assert from 'node:assert/strict';
+import mongoose from 'mongoose';
 
 export const BASE = (process.env.API_URL || 'http://localhost:5000').replace(/\/$/, '') + '/api';
 export const run = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -185,3 +186,22 @@ export const toForwarded = async (users, ticket, vendor, options) => {
   ok(await api('PUT', `/tickets/${ticket._id}/invoice/received`, { token: users.creator.token }));
   return ok(await api('PUT', `/tickets/${ticket._id}/forward`, { token: users.creator.token }));
 };
+
+/** The test database itself, for what the API cannot do: writing older records, or taking LPOs away. */
+export const testDb = () => mongoose.createConnection(process.env.MONGO_URI).asPromise();
+
+/**
+ * Takes every LPO out of the test database. Any vendor's line can carry a VSR (2026-11-10), so one
+ * file's LPOs would otherwise make every later file's VSRs choose one.
+ */
+export const clearLpos = async () => {
+  const connection = await testDb();
+  try {
+    await connection.collection('lpos').deleteMany({});
+  } finally {
+    await connection.close();
+  }
+};
+
+/** A GRN for these VSRs, sent the way purchasing's page sends it. */
+export const grnFor = (users, ticketIds, label) => multipart('/grns', users.purchasing.token, { number: `GRN-${run}-${label}`, ticketIds: [ticketIds].flat().join(',') });

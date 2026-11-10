@@ -21,12 +21,12 @@ import Invoice from '../models/Invoice.js';
 import Counter, { nextVsrNumber } from '../models/Counter.js';
 import Notification from '../models/Notification.js';
 import ScrapRequest from '../models/ScrapRequest.js';
-import { Grn, Lpo, PurchaseInvoice } from '../models/Purchase.js';
+import { Grn, Lpo, PurchaseInvoice, lineName } from '../models/Purchase.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { notifyRoles } from '../utils/notifications.js';
 import { usageWhenRaised } from '../utils/intervals.js';
-import { deductFromLpo } from '../utils/lpoDeduction.js';
+import { COUNTED_BY_QUANTITY, LINE_FOR_SERVICE, candidateLines, deductAtGrn, lpoLineOf } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
 import { uaeDay } from '../utils/uaeTime.js';
 import { UPLOAD_DIR, storedPath } from '../utils/uploads.js';
@@ -149,32 +149,24 @@ async function main() {
   ]);
   const [bus101, bus102, bus103, bus104, bus105, bus106, bus107] = buses;
 
-  // Tyres and batteries for every make; repair and maintenance, one amount per make, as on the
-  // depot's e-LPO. Metro Fleet Services has none for Yutong, so a VSR there shows "No LPO".
-  const repairAndMaintenance = (number, vendor, make, amount) => ({
-    number, vendor: vendor._id, make, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: amount,
-    items: [{ kind: 'repairMaintenance', name: 'Repair and maintenance', description: `Repairs, brake pads, oil and transmission services for ${make} buses`, quantity: 1, unitPrice: amount, total: amount }],
-  });
+  // Repair and maintenance, one amount per make on its own line, as on the depot's e-LPO; tyres by
+  // size with their life in km, and batteries by type, for every make (2026-11-10). Each VSR below
+  // is raised against a line and booked on it until its GRN. LPO-2026-002 has one tyre left once
+  // the open depot tyre job is counted, so a VSR for two tyres off it is refused.
+  const day = (text) => new Date(`${text}T00:00:00.000Z`);
+  const THIS_YEAR = { date: day('2026-01-01'), validFrom: day('2026-01-01'), validTo: day('2026-12-31') };
+  const repairLine = (make, amount) => ({ kind: 'repairMaintenance', make, name: lineName({ kind: 'repairMaintenance', make }), description: `Repairs, brake pads, oil and transmission services for ${make} buses`, quantity: 1, unitPrice: amount, total: amount });
+  const tyreLine = (size, quantity, unitPrice, lifeKm, description) => ({ kind: 'tyre', size, lifeKm, name: lineName({ kind: 'tyre', size }), description, quantity, unitPrice, total: money(quantity * unitPrice) });
+  const batteryLine = (size, quantity, unitPrice) => ({ kind: 'battery', size, name: lineName({ kind: 'battery', size }), quantity, unitPrice, total: money(quantity * unitPrice) });
+  const lpoOf = (number, vendor, items, dates = THIS_YEAR) => ({ number, vendor: vendor._id, ...dates, items, grandTotal: money(items.reduce((sum, item) => sum + item.total, 0)), createdBy: purchasing._id });
   await Lpo.create([
-    {
-      number: 'LPO-2026-001', vendor: vendor1._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 34000 + 12400,
-      items: [
-        { kind: 'tyre', name: 'Tyre 295/80 R22.5', description: 'Rear and front axle', quantity: 40, unitPrice: 850, total: 34000 },
-        { kind: 'battery', name: 'Battery 12V 200Ah', quantity: 20, unitPrice: 620, total: 12400 },
-      ],
-    },
-    {
-      number: 'LPO-2026-002', vendor: vendor2._id, validFrom: new Date('2026-01-01'), validTo: new Date('2026-12-31'), createdBy: purchasing._id, grandTotal: 8800,
-      items: [{ kind: 'tyre', name: 'Tyre 225/75 R17.5', quantity: 4, unitPrice: 2200, total: 8800 }],
-    },
-    repairAndMaintenance('LPO-2026-003', vendor1, 'Hino', 150000),
-    repairAndMaintenance('LPO-2026-004', vendor1, 'Yutong', 40000),
-    repairAndMaintenance('LPO-2026-005', vendor2, 'Isuzu', 60000),
-    repairAndMaintenance('LPO-2026-006', vendor2, 'Hino', 25000),
-    {
-      number: 'LPO-2025-014', vendor: vendor1._id, validFrom: new Date('2025-01-01'), validTo: new Date('2025-12-31'), createdBy: purchasing._id, grandTotal: 25500,
-      items: [{ kind: 'tyre', name: 'Tyre 295/80 R22.5', description: 'Last year', quantity: 30, unitPrice: 850, total: 25500 }],
-    },
+    lpoOf('LPO-2026-001', vendor1, [tyreLine('295/80 R22.5', 40, 850, 100000, 'Rear and front axle'), batteryLine('12V 200Ah', 20, 620)]),
+    lpoOf('LPO-2026-002', vendor2, [tyreLine('225/75 R17.5', 4, 2200, 80000)]),
+    lpoOf('LPO-2026-003', vendor1, [repairLine('Hino', 150000)]),
+    lpoOf('LPO-2026-004', vendor1, [repairLine('Yutong', 40000)]),
+    lpoOf('LPO-2026-005', vendor2, [repairLine('Isuzu', 60000)]),
+    lpoOf('LPO-2026-006', vendor2, [repairLine('Hino', 25000)]),
+    lpoOf('LPO-2025-014', vendor1, [tyreLine('295/80 R22.5', 30, 850, 100000, 'Last year')], { date: day('2025-01-01'), validFrom: day('2025-01-01'), validTo: day('2025-12-31') }),
   ]);
 
   // Odometers that climb by a steady amount each day, so VSRs and the daily sheet agree.
@@ -201,7 +193,13 @@ async function main() {
   /** Create a VSR and replay its lifecycle up to `stage`, with dates spread back from today. */
   // A depot job skips the trip; a job at no charge is quoted at AED 0 and closes when the bus is back.
   const makeTicket = async ({ bus, serviceType, repairCategory, description, stage, createdDaysAgo, amount = 1500, parts, isBreakdown = false, parent, location = 'vendorWorkshop', noChargeReason, accident }) => {
-    const vendor = vendorOf(bus);
+    // The LPO line it comes off, as the creator would choose: the bus's own vendor's first. An
+    // additional job takes its parent's line when that is for the same kind of work.
+    const line = parent ? undefined : (await candidateLines({ bus, serviceType }))[0];
+    const inherited = parent?.lpoLine?.kind === LINE_FOR_SERVICE[serviceType] ? parent.lpoLine.toObject() : undefined;
+    const lpoLine = line ? lpoLineOf(line) : inherited;
+    const quantity = COUNTED_BY_QUANTITY.includes(serviceType) && parts ? parts.reduce((sum, part) => sum + part.quantity, 0) : undefined;
+    const vendor = line ? [vendor1, vendor2].find((v) => v._id.equals(line.lpo.vendor._id)) : vendorOf(bus);
     const created = daysAgo(createdDaysAgo);
     const currentReading = readingAgo(bus, createdDaysAgo);
     const rate = !parent && bus.rates?.[serviceType];
@@ -218,7 +216,9 @@ async function main() {
       currentReading,
       isBreakdown,
       intervalUsage: usageWhenRaised(bus, serviceType, currentReading, created),
-      vendorId: bus.vendor,
+      vendorId: vendor._id,
+      lpoLine,
+      quantity,
       createdBy: parent ? vendor._id : creator._id,
       createdAt: created,
     });
@@ -239,7 +239,13 @@ async function main() {
     if (rate) {
       const km = bus.intervals[serviceType].everyKm;
       estimate = money(rate * km);
-      ticket.agreedPrice = { rate, km, amount: estimate };
+      ticket.agreedPrice = { basis: 'rate', rate, km, amount: estimate };
+    } else if (line && quantity) {
+      // Tyres and batteries off a line: so many at the LPO's price, straight to the supervisor.
+      estimate = money(quantity * line.item.unitPrice);
+      ticket.agreedPrice = { basis: 'lpo', unitPrice: line.item.unitPrice, quantity, amount: estimate };
+    } else if (line) {
+      ticket.estimatedAmount = amount; // what the creator expects it to cost, booked until approval
     }
     const priced = Boolean(ticket.agreedPrice);
     const first = priced ? 'pending' : parent ? 'estimateSubmitted' : 'sentToVendor';
@@ -364,7 +370,6 @@ async function main() {
         await current.save();
         sign(supervisor, 'invoiceAccepted');
         step('invoiceAccepted', supervisor);
-        ticket.lpoDeduction = await deductFromLpo(ticket, current);
       }
       if (reached('invoiceReceived')) {
         ticket.invoiceReceivedAt = when();
@@ -393,6 +398,9 @@ async function main() {
       stamp(ticket, purchasing, 'grn', daysAgo(2));
       ticket.transition('grnCreated', purchasing._id, `GRN ${grnNumber}`, { effectiveAt: daysAgo(2) });
       ticket.history[ticket.history.length - 1].at = daysAgo(2);
+      // The GRN takes the accepted invoice off the VSR's LPO line, in place of its booking.
+      const deduction = await deductAtGrn(ticket, invoices.find((invoice) => invoice._id.equals(ticket.invoice)).amount);
+      if (deduction) ticket.lpoDeduction = { ...deduction, at: daysAgo(2) };
     }
     if (piNumber) {
       const invoice = await PurchaseInvoice.create({

@@ -4,13 +4,15 @@
  */
 import Bus from '../models/Bus.js';
 import Ticket from '../models/Ticket.js';
+import { Lpo } from '../models/Purchase.js';
 import { BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { usageWhenRaised } from '../utils/intervals.js';
+import { LINE_FOR_SERVICE } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
 import { uaeDay } from '../utils/uaeTime.js';
 import { withStoredAttachments } from '../utils/uploads.js';
-import { assertBusTracks, assertStatus, assertVendorOwns, loadTicket, respond } from './ticketController.js';
+import { assertBusTracks, assertStatus, assertVendorOwns, flagIfOverbooked, loadTicket, respond } from './ticketController.js';
 
 /** Moves the ticket one step; `fields` go on ticket.vehicle. */
 const step = (ticket, to, user, { date, km, fields = {} }) => {
@@ -147,12 +149,23 @@ export const releaseVehicle = asyncHandler(async (req, res) => {
   await respond(res, self, 'Bus released. The service creator confirms when it is back.');
 });
 
-/** The service this VSR did has just been done, so the bus's interval counts from here. */
-const moveLastService = async ({ busId, serviceType }, km, when) => {
+/** The life in km of the LPO line tyres were fitted from, if it gives one. */
+const tyreLifeOf = async (lpoLine) => {
+  if (!lpoLine?.item || lpoLine.kind !== 'tyre') return undefined;
+  const lpo = await Lpo.findOne({ _id: lpoLine.lpo, 'items._id': lpoLine.item }).select('items._id items.lifeKm');
+  return lpo?.items.id(lpoLine.item)?.lifeKm;
+};
+
+/**
+ * The service this VSR did has just been done, so the bus's interval counts from here. Tyres off
+ * an LPO line with a life in km last that long, so the bus's tyre interval becomes it (2026-11-10).
+ */
+const moveLastService = async ({ busId, serviceType, lpoLine }, km, when) => {
   if (serviceType === 'battery') {
     await Bus.updateOne({ _id: busId }, { $set: { 'intervals.battery.lastDate': when } });
   } else if (['oil', 'transmission', 'tyre', 'brakePads'].includes(serviceType)) {
-    await Bus.updateOne({ _id: busId }, { $set: { [`intervals.${serviceType}.lastKm`]: km } });
+    const lifeKm = serviceType === 'tyre' ? await tyreLifeOf(lpoLine) : undefined;
+    await Bus.updateOne({ _id: busId }, { $set: { [`intervals.${serviceType}.lastKm`]: km, ...(lifeKm ? { 'intervals.tyre.everyKm': lifeKm } : {}) } });
   }
 };
 
@@ -227,6 +240,8 @@ export const createAdditionalJob = asyncHandler(async (req, res) => {
   const bus = await Bus.findById(parent.busId);
   assertBusTracks(bus, serviceType);
   const { additionalCount } = await Ticket.findByIdAndUpdate(parent._id, { $inc: { additionalCount: 1 } }, { new: true }).select('additionalCount');
+  // It comes off its parent's LPO line when that line is for this kind of work; it is never refused for room.
+  const lpoLine = parent.lpoLine?.item && parent.lpoLine.kind === LINE_FOR_SERVICE[serviceType] ? parent.lpoLine.toObject() : undefined;
   // Accident details are staff's to add; whatever a vendor sends for them is not read.
   const job = new Ticket({
     vsrNumber: `${parent.vsrNumber}${String.fromCharCode(97 + additionalCount)}`, // the first job is b
@@ -241,6 +256,7 @@ export const createAdditionalJob = asyncHandler(async (req, res) => {
     currentReading: parent.vehicle.receivedKm,
     intervalUsage: usageWhenRaised(bus, serviceType, parent.vehicle.receivedKm),
     daysToComplete,
+    lpoLine,
     status: 'estimateSubmitted',
   });
   await withStoredAttachments(req.files, async (attachments) => {
@@ -248,5 +264,6 @@ export const createAdditionalJob = asyncHandler(async (req, res) => {
     job.history.push({ status: 'estimateSubmitted', by: req.user._id, note: 'Additional job raised by the vendor' });
     await job.save();
   });
+  await flagIfOverbooked(job);
   await respond(res, job, 'Additional job sent to the service creator', 201);
 });

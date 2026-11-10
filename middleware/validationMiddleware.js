@@ -2,7 +2,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import { ROLES } from '../models/User.js';
 import { SERVICE_TYPES, REPAIR_CATEGORIES, TICKET_STATUSES, NO_CHARGE_REASONS, WORK_LOCATIONS, ACCIDENT_SEVERITIES, ACCIDENT_FAULTS } from '../models/Ticket.js';
 import { BUS_DAY_STATUSES } from '../models/BusDaily.js';
-import { LPO_KINDS } from '../models/Purchase.js';
+import { LPO_ITEM_CATEGORIES } from '../models/Purchase.js';
 import { SCRAP_REASONS, SCRAP_REQUEST_STATUSES } from '../models/ScrapRequest.js';
 import { endOfUaeDay, uaeDay } from '../utils/uaeTime.js';
 
@@ -44,8 +44,8 @@ const twoDecimals = (value) => atMostDecimals(value, 2);
  * a number that is too large, has decimals where only whole ones fit, or has more decimals
  * than money does, each gets its own message, so the screen says what is actually wrong.
  */
-const number = (field, message, { above, min = 0, max = MAX_NUMBER, whole = false, money = false, rate = false } = {}) =>
-  body(field)
+const number = (field, message, { above, min = 0, max = MAX_NUMBER, whole = false, money = false, rate = false, when } = {}) =>
+  (when ? body(field).if(when) : body(field))
     .not()
     .isArray()
     .withMessage(message)
@@ -212,6 +212,10 @@ export const validateTicketCreate = [
     .trim()
     .isLength({ max: 1000 })
     .withMessage('Description must be 1000 characters or fewer'),
+  // The LPO line and what it books (2026-11-10). Whether each is needed depends on the lines there are, so the controller asks for them.
+  body('lpoItemId', 'This LPO cannot be used for this job').optional({ values: 'falsy' }).isString().isMongoId(),
+  number('quantity', 'Enter how many', { above: 0, whole: true }).optional({ values: 'falsy' }),
+  number('estimatedAmount', 'Enter the estimated amount', { above: 0, money: true }).optional({ values: 'falsy' }),
   handleValidationErrors,
 ];
 
@@ -352,39 +356,46 @@ export const validatePurchaseInvoice = [
   handleValidationErrors,
 ];
 
-// Tyres and batteries come off an LPO by the unit, so a line of them is a whole number.
-const countedInWholeUnits = (value, { req, path }) => {
-  const kind = req.body.items?.[Number(/\[(\d+)\]/.exec(path)?.[1])]?.kind;
-  return !['tyre', 'battery'].includes(kind) || Number.isInteger(Number(value));
-};
-
 const isoDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true });
 
-// A repair and maintenance line is for one make; tyres, batteries and other work cover the whole fleet.
-const needsMake = (req) => Array.isArray(req.body.items) && req.body.items.some((item) => item?.kind === 'repairMaintenance');
-const MAKE_NEEDED = 'Choose the make this LPO is for';
+/** The LPO line a wildcard path such as items[2].make is about. */
+const lineAt = (req, path) => req.body.items?.[Number(/\[(\d+)\]/.exec(path)?.[1])];
+const lineIs = (...kinds) => (value, { req, path }) => kinds.includes(lineAt(req, path)?.kind);
+const COUNTED = lineIs('tyre', 'battery');
+const REPAIR_MAINTENANCE = lineIs('repairMaintenance');
 
+/** A repair and maintenance line is one amount; it is read from unitPrice, or from total or amount if that is what came. */
+const repairAmount = (items) =>
+  Array.isArray(items)
+    ? items.map((item) => (item?.kind === 'repairMaintenance' && [undefined, null, ''].includes(item.unitPrice) ? { ...item, unitPrice: item.total ?? item.amount } : item))
+    : items;
+
+/** Text a line needs, such as its make or tyre size, for the kinds of line that need it. */
+const lineText = (field, when, message) =>
+  body(field).if(when).isString().withMessage(message).bail().trim().notEmpty().withMessage(message).bail().isLength({ max: 60 }).withMessage('Keep this to 60 characters or fewer');
+
+/**
+ * An LPO as purchasing enters it (2026-11-10): its date, number, vendor and days, and lines of
+ * Repair & Maintenance (a make and an amount), Tyre (a size, quantity, unit price and optional life
+ * in km) or Battery (a type, quantity and unit price). The API names each line; a name sent is not read.
+ */
 export const validateLpo = [
+  body('items').customSanitizer(repairAmount),
   documentNumber(),
   str('vendorId', 'Vendor').isMongoId().withMessage('Choose a vendor'),
-  body('make')
-    .optional({ values: 'falsy' })
-    .isString()
-    .withMessage(MAKE_NEEDED)
-    .bail()
-    .trim()
-    .isLength({ max: 60 })
-    .withMessage('Keep this to 60 characters or fewer'),
-  body('make', MAKE_NEEDED).custom((value, { req }) => !needsMake(req) || hasText(value)),
-  body('make', 'Tyre and battery LPOs cover every make. Leave the make empty.').custom((value, { req }) => needsMake(req) || !hasText(value)),
+  isoDay('date', 'Choose the LPO date').toDate(),
   isoDay('validFrom', 'Choose the first day of the LPO').toDate(),
   isoDay('validTo', 'Choose the last day of the LPO, after the first').custom((value, { req }) => new Date(value) >= new Date(req.body.validFrom)).toDate(),
   body('items', 'Add at least one item').isArray({ min: 1, max: 200 }),
-  body('items.*.kind', 'Choose what this item is for').isString().isIn(LPO_KINDS),
-  body('items.*.name', 'Enter the item name').isString().trim().isLength({ min: 1, max: 120 }),
+  body('items.*.kind', 'Choose what this item is for').isString().isIn(LPO_ITEM_CATEGORIES),
+  lineText('items.*.make', REPAIR_MAINTENANCE, 'Choose the make this item is for'),
+  lineText('items.*.size', lineIs('tyre'), 'Enter the tyre size'),
+  lineText('items.*.size', lineIs('battery'), 'Enter the battery type'),
+  number('items.*.lifeKm', 'Enter the life in km as a whole number above 0', { above: 0, whole: true, when: lineIs('tyre') }).optional({ values: 'falsy' }),
   optionalText('items.*.description', 300),
-  number('items.*.quantity', 'Enter a quantity above 0', { above: 0 }).custom(countedInWholeUnits).withMessage(WHOLE),
-  number('items.*.unitPrice', 'Enter a unit price, 0 or more', { money: true }),
+  number('items.*.quantity', 'Enter a quantity above 0', { above: 0, whole: true, when: COUNTED }),
+  number('items.*.unitPrice', 'Enter a unit price above 0', { above: 0, money: true, when: COUNTED }),
+  number('items.*.unitPrice', 'Enter the amount, above 0', { above: 0, money: true, when: REPAIR_MAINTENANCE }),
   handleValidationErrors,
 ];
 
@@ -530,23 +541,10 @@ export const validateSale = [
   handleValidationErrors,
 ];
 
-const queryAmount = (field, message, { whole = false } = {}) =>
-  query(field)
-    .optional({ values: 'falsy' })
-    .isString()
-    .withMessage(`${field} must appear once`)
-    .bail()
-    .isFloat({ min: 0, max: MAX_NUMBER })
-    .withMessage(message)
-    .bail()
-    .custom((value) => (whole ? Number.isInteger(Number(value)) : twoDecimals(value)))
-    .withMessage(whole ? WHOLE : TWO_DECIMALS);
-
 export const validateLpoPreview = [
   query('busId').isString().withMessage('Choose a bus').bail().isMongoId().withMessage('Choose a bus'),
-  query('vendorId').optional({ values: 'falsy' }).isString().isMongoId().withMessage('Choose a valid vendor'),
   query('serviceType').isString().withMessage('Choose the service type').bail().isIn(SERVICE_TYPES).withMessage('Choose the service type'),
-  queryAmount('amount', 'Enter an amount, 0 or more'),
-  queryAmount('quantity', 'Enter a quantity, 0 or more', { whole: true }),
+  // A VSR being corrected, whose own booking is left out of what is left.
+  query('ticketId').optional({ values: 'falsy' }).isString().isMongoId().withMessage('Choose a valid VSR'),
   handleValidationErrors,
 ];

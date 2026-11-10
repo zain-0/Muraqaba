@@ -1,11 +1,12 @@
 /**
- * Item 8: purchasing writes LPOs for a vendor. Tyre and battery VSRs take quantity and amount
- * off the vendor's current LPO when the supervisor accepts the invoice; repairs, brake pads, oil
- * and transmission take the amount only, off one repair and maintenance line for the bus's make.
+ * Item 8: purchasing writes LPOs for a vendor. Since 2026-11-10 the GRN takes each VSR off its
+ * LPO line: tyres and batteries by quantity and amount, everything else by amount, off one repair
+ * and maintenance line for the bus's make. A VSR raised with no line gets the automatic choice at
+ * the GRN: its vendor's LPOs valid today, earliest ending first, the first with room.
  */
-import { test, before, describe } from 'node:test';
+import { test, before, beforeEach, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, createBus, estimate, newVendor, run, signInEveryone, submitInvoice, toInvoiceAccepted, toVehicleReturned } from './helpers.js';
+import { api, clearLpos, createBus, estimate, grnFor, newVendor, run, signInEveryone, submitInvoice, toForwarded, toVehicleReturned } from './helpers.js';
 
 let users;
 let counter = 0;
@@ -14,37 +15,56 @@ const ok = (res) => {
   assert.ok(res.status < 300, JSON.stringify(res.body));
   return res.body.data;
 };
-const YEAR = { validFrom: '2026-01-01', validTo: '2099-12-31' };
-const makeLpo = (vendorId, items, overrides = {}, token = users.purchasing.token) => {
+const MAKE = `Lbus ${run}`;
+const YEAR = { date: '2026-01-01', validFrom: '2026-01-01', validTo: '2099-12-31' };
+const postLpo = (vendorId, items, overrides = {}, token = users.purchasing.token) => {
   counter += 1;
   return api('POST', '/lpos', { token, body: { number: `LPO-${run}-${counter}`, vendorId, ...YEAR, items, ...overrides } });
 };
-const TYRES = [{ kind: 'tyre', name: 'Tyre 295/80', description: 'Rear axle', quantity: 20, unitPrice: 800 }];
+const makeLpo = async (...args) => ok(await postLpo(...args));
+const TYRES = [{ kind: 'tyre', size: '295/80 R22.5', description: 'Rear axle', quantity: 20, unitPrice: 800 }];
+const RM = (amount) => [{ kind: 'repairMaintenance', make: MAKE, unitPrice: amount }];
 const getLpo = async (id) => ok(await api('GET', `/lpos/${id}`, { token: users.purchasing.token }));
+const put = (id, path, token, body) => api('PUT', `/tickets/${id}/${path}`, { token, body });
+let reading = 0;
+const raise = (bus, serviceType, extra = {}) => {
+  reading += 1000; // each job further on, as an odometer only goes up
+  return api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType, currentReading: reading, ...(serviceType === 'repair' ? { repairCategory: 'BODY' } : {}), ...extra } });
+};
 
-/** A vendor of its own, so each test starts with no LPOs for that vendor. */
-const setup = async (label) => {
+/** A vendor of its own and a bus of this file's make. */
+const setup = async (label, overrides = {}) => {
   const vendor = await newVendor(`lpo-${label}`);
-  const bus = await createBus(users, `L${label}`, vendor.id, { rates: undefined });
+  const bus = await createBus(users, `L${label}`, vendor.id, { make: MAKE, rates: undefined, ...overrides });
   return { vendor, bus };
 };
 
-/** A tyre or battery VSR whose breakdown lists this many at AED 800, walked up to invoice acceptance. */
-const acceptedChange = async ({ vendor, bus }, serviceType, quantity, invoiceAmount) => {
-  const raised = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType, currentReading: 1000 } }));
+/** A job raised while there is no LPO for it, priced by the vendor at AED 800 a unit, walked to purchasing. */
+const forwardedWithoutLine = async ({ vendor, bus }, serviceType, quantity, invoiceAmount) => {
+  const raised = ok(await raise(bus, serviceType));
+  assert.equal(raised.lpoLine, undefined);
   ok(await estimate(raised._id, vendor.token, { amount: String(quantity * 800) }));
-  ok(await api('PUT', `/tickets/${raised._id}/breakdown`, { token: users.creator.token, body: { parts: [{ name: serviceType, quantity, unitPrice: 800 }] } }));
-  ok(await api('PUT', `/tickets/${raised._id}/escalate`, { token: users.creator.token }));
-  return toInvoiceAccepted(users, { ...raised, status: 'pending' }, vendor, { invoice: { amount: String(invoiceAmount) } });
+  ok(await put(raised._id, 'breakdown', users.creator.token, { parts: [{ name: serviceType, quantity, unitPrice: 800 }] }));
+  ok(await put(raised._id, 'escalate', users.creator.token));
+  return toForwarded(users, { ...raised, status: 'pending' }, vendor, { invoice: { amount: String(invoiceAmount) } });
+};
+
+/** Purchasing's GRN for one VSR, and the VSR as it then is. */
+const onGrn = async (ticket, label) => {
+  ok(await grnFor(users, ticket._id, label));
+  return ok(await api('GET', `/tickets/${ticket._id}`, { token: users.supervisor.token }));
 };
 
 describe('LPO', () => {
   before(async () => {
     users = await signInEveryone();
+    await createBus(users, 'LMAKE', users.vendor1.id, { make: MAKE });
   });
+  beforeEach(clearLpos);
+  after(clearLpos);
 
   test('purchasing creates it, it adds up, and only the depot can read it', async () => {
-    const res = await makeLpo(users.vendor1.id, [...TYRES, { kind: 'battery', name: 'Battery 12V', quantity: 10, unitPrice: 500 }]);
+    const res = await postLpo(users.vendor1.id, [...TYRES, { kind: 'battery', size: '12V', quantity: 10, unitPrice: 500 }]);
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const lpo = res.body.data;
     assert.equal(lpo.items[0].total, 16000);
@@ -54,194 +74,157 @@ describe('LPO', () => {
     assert.equal(lpo.items[0].remainingQuantity, 20);
     assert.equal(lpo.items[0].remainingAmount, 16000);
 
-    assert.equal((await makeLpo(users.vendor1.id, TYRES, {}, users.creator.token)).status, 403);
+    assert.equal((await postLpo(users.vendor1.id, TYRES, {}, users.creator.token)).status, 403);
     assert.equal((await api('GET', '/lpos', { token: users.creator.token })).status, 200);
     assert.equal((await api('GET', '/lpos', { token: users.supervisor.token })).status, 200);
     assert.equal((await api('GET', '/lpos', { token: users.vendor1.token })).status, 403);
     assert.equal((await api('GET', `/lpos/${lpo._id}`, { token: users.vendor1.token })).status, 403);
 
-    const same = await makeLpo(users.vendor1.id, TYRES, { number: lpo.number });
-    assert.equal(same.status, 409);
+    assert.equal((await postLpo(users.vendor1.id, TYRES, { number: lpo.number })).status, 409);
   });
 
   test('bad forms are refused', async () => {
-    const field = async (body, overrides) => (await makeLpo(body, overrides?.items ?? TYRES, overrides)).body.errors?.[0]?.field;
+    const field = async (vendorId, overrides) => (await postLpo(vendorId, overrides?.items ?? TYRES, overrides)).body.errors?.[0]?.field;
     assert.equal(await field(users.vendor1.id, { items: [] }), 'items');
     assert.equal(await field(users.vendor1.id, { items: [{ ...TYRES[0], kind: 'wheel' }] }), 'items[0].kind');
     assert.equal(await field(users.vendor1.id, { items: [{ ...TYRES[0], quantity: 0 }] }), 'items[0].quantity');
-    assert.equal(await field(users.vendor1.id, { items: [{ ...TYRES[0], name: '' }] }), 'items[0].name');
     assert.equal(await field(users.vendor1.id, { number: '' }), 'number');
     assert.equal(await field(users.vendor1.id, { validTo: '2020-01-01' }), 'validTo');
-    assert.equal((await makeLpo(users.supervisor.id, TYRES)).status, 400, 'not a vendor');
+    assert.equal((await postLpo(users.supervisor.id, TYRES)).status, 400, 'not a vendor');
   });
 
-  test('a tyre change takes quantity and amount, and only when the invoice is accepted', async () => {
+  test('a tyre change takes quantity and amount off its line, at the GRN only', async () => {
     const context = await setup('TYRE');
-    const lpo = ok(await makeLpo(context.vendor.id, TYRES));
-
-    const raised = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: context.bus._id, serviceType: 'tyre', currentReading: 1000 } }));
-    ok(await estimate(raised._id, context.vendor.token, { amount: '1600' }));
-    ok(await api('PUT', `/tickets/${raised._id}/breakdown`, { token: users.creator.token, body: { parts: [{ name: 'Tyre', quantity: 2, unitPrice: 800 }] } }));
-    ok(await api('PUT', `/tickets/${raised._id}/escalate`, { token: users.creator.token }));
-    await toVehicleReturned(users, { ...raised, status: 'pending' }, context.vendor);
+    const lpo = await makeLpo(context.vendor.id, TYRES);
+    const raised = ok(await raise(context.bus, 'tyre', { lpoItemId: lpo.items[0]._id, quantity: 2 }));
+    await toVehicleReturned(users, raised, context.vendor);
     ok(await submitInvoice(raised._id, context.vendor, { amount: '1600' }));
-    assert.equal((await getLpo(lpo._id)).usedAmount, 0, 'nothing is taken before acceptance');
-
-    ok(await api('PUT', `/tickets/${raised._id}/invoice/reject`, { token: users.supervisor.token, body: { reason: 'Wrong amount' } }));
-    assert.equal((await getLpo(lpo._id)).usedAmount, 0, 'nor on a rejection');
-
+    ok(await put(raised._id, 'invoice/reject', users.supervisor.token, { reason: 'Wrong amount' }));
     ok(await submitInvoice(raised._id, context.vendor, { amount: '1550', invoiceNumber: `INV-${run}-T2` }));
-    const accepted = ok(await api('PUT', `/tickets/${raised._id}/invoice/accept`, { token: users.supervisor.token }));
-    assert.equal(accepted.lpoDeduction.status, 'deducted');
-    assert.equal(accepted.lpoDeduction.lpoNumber, lpo.number);
-    assert.equal(accepted.lpoDeduction.kind, 'tyre');
-    assert.equal(accepted.lpoDeduction.quantity, 2);
-    assert.equal(accepted.lpoDeduction.amount, 1550, 'the real invoice figure');
-    assert.equal(accepted.lpoDeduction.overrun, false);
+    const accepted = ok(await put(raised._id, 'invoice/accept', users.supervisor.token));
+    assert.equal(accepted.lpoDeduction, undefined, 'accepting the invoice takes nothing');
+    assert.equal((await getLpo(lpo._id)).usedAmount, 0);
+    ok(await put(raised._id, 'invoice/received', users.creator.token));
+    ok(await put(raised._id, 'forward', users.creator.token));
 
+    const charged = await onGrn(raised, 'TYRE');
+    assert.deepEqual(
+      [charged.lpoDeduction.status, charged.lpoDeduction.lpoNumber, charged.lpoDeduction.kind, charged.lpoDeduction.quantity, charged.lpoDeduction.amount, charged.lpoDeduction.overrun],
+      ['deducted', lpo.number, 'tyre', 2, 1550, false],
+      'the real invoice figure'
+    );
     const after = await getLpo(lpo._id);
-    assert.equal(after.items[0].usedQuantity, 2);
-    assert.equal(after.items[0].usedAmount, 1550);
-    assert.equal(after.items[0].remainingQuantity, 18);
-    assert.equal(after.items[0].remainingAmount, 14450);
-    assert.equal(after.usedAmount, 1550);
+    assert.deepEqual([after.items[0].usedQuantity, after.items[0].usedAmount, after.items[0].remainingQuantity, after.items[0].remainingAmount, after.usedAmount], [2, 1550, 18, 14450, 1550]);
     assert.equal(after.usage.length, 1, 'the LPO lists what used it');
-    assert.equal(after.usage[0].vsrNumber, raised.vsrNumber);
-    assert.equal(after.usage[0].quantity, 2);
+    assert.deepEqual([after.usage[0].vsrNumber, after.usage[0].quantity], [raised.vsrNumber, 2]);
 
     const vendorView = await api('GET', `/tickets/${raised._id}`, { token: context.vendor.token });
-    assert.ok(!('lpoDeduction' in vendorView.body.data));
+    assert.ok(!('lpoDeduction' in vendorView.body.data) && !('lpoLine' in vendorView.body.data));
   });
 
   test('batteries use their own line, and repairs take the amount only', async () => {
     const context = await setup('MIX');
-    const lpo = ok(
-      await makeLpo(context.vendor.id, [
-        ...TYRES,
-        { kind: 'battery', name: 'Battery', quantity: 10, unitPrice: 800 },
-        { kind: 'repairMaintenance', name: 'Repairs', quantity: 1, unitPrice: 50000 },
-      ], { make: 'Hino' })
-    );
-    const battery = await acceptedChange(context, 'battery', 1, 800);
-    assert.equal(battery.lpoDeduction.kind, 'battery');
-
-    const repair = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: context.bus._id, serviceType: 'repair', repairCategory: 'BODY', currentReading: 1000 } }));
-    ok(await estimate(repair._id, context.vendor.token, { amount: '1200' }));
-    ok(await api('PUT', `/tickets/${repair._id}/breakdown`, { token: users.creator.token, body: { parts: [{ name: 'Seal', quantity: 3, unitPrice: 400 }] } }));
-    ok(await api('PUT', `/tickets/${repair._id}/escalate`, { token: users.creator.token }));
-    const done = await toInvoiceAccepted(users, { ...repair, status: 'pending' }, context.vendor, { invoice: { amount: '1200' } });
-    assert.equal(done.lpoDeduction.kind, 'repairMaintenance');
-    assert.equal(done.lpoDeduction.quantity, 0);
+    const lpo = await makeLpo(context.vendor.id, [...TYRES, { kind: 'battery', size: '12V', quantity: 10, unitPrice: 800 }, ...RM(50000)]);
+    const line = (kind) => lpo.items.find((item) => item.kind === kind)._id;
+    const battery = ok(await raise(context.bus, 'battery', { lpoItemId: line('battery'), quantity: 1 }));
+    const repair = ok(await raise(context.bus, 'repair', { lpoItemId: line('repairMaintenance'), estimatedAmount: 1000 }));
+    await toForwarded(users, battery, context.vendor, { invoice: { amount: '800' } });
+    await toForwarded(users, repair, context.vendor, { invoice: { amount: '1200' } });
+    ok(await grnFor(users, [battery._id, repair._id], 'MIX'));
+    const read = async (id) => ok(await api('GET', `/tickets/${id}`, { token: users.supervisor.token })).lpoDeduction;
+    assert.deepEqual([(await read(battery._id)).kind, (await read(battery._id)).quantity], ['battery', 1]);
+    assert.deepEqual([(await read(repair._id)).kind, (await read(repair._id)).quantity, (await read(repair._id)).amount], ['repairMaintenance', 0, 1200]);
 
     const after = await getLpo(lpo._id);
-    const line = (kind) => after.items.find((i) => i.kind === kind);
-    assert.equal(line('tyre').usedAmount, 0);
-    assert.equal(line('battery').usedQuantity, 1);
-    assert.equal(line('battery').usedAmount, 800);
-    assert.equal(line('repairMaintenance').usedQuantity, 0);
-    assert.equal(line('repairMaintenance').usedAmount, 1200);
-    assert.equal(line('repairMaintenance').remainingAmount, 48800);
+    const of = (kind) => after.items.find((i) => i.kind === kind);
+    assert.equal(of('tyre').usedAmount, 0);
+    assert.deepEqual([of('battery').usedQuantity, of('battery').usedAmount], [1, 800]);
+    assert.deepEqual([of('repairMaintenance').usedQuantity, of('repairMaintenance').usedAmount, of('repairMaintenance').remainingAmount], [0, 1200, 48800]);
     assert.equal(after.usedAmount, 2000);
   });
 
-  test('only that vendor, only LPOs in date, earliest ending first, and next year uses the new one', async () => {
-    const context = await setup('DATE');
-    const other = await setup('OTHERV');
-    const rival = ok(await makeLpo(other.vendor.id, TYRES));
-    const expired = ok(await makeLpo(context.vendor.id, TYRES, { validFrom: '2024-01-01', validTo: '2024-12-31' }));
-    const later = ok(await makeLpo(context.vendor.id, TYRES, { validTo: '2099-12-31' }));
-    const sooner = ok(await makeLpo(context.vendor.id, TYRES, { validTo: '2098-12-31' }));
+  describe('a VSR raised with no line gets the automatic choice at the GRN', () => {
+    test('only its vendor\'s LPOs, only in date, the earliest ending first', async () => {
+      const context = await setup('DATE');
+      const other = await setup('OTHERV');
+      const forwarded = await forwardedWithoutLine(context, 'tyre', 1, 800);
+      const rival = await makeLpo(other.vendor.id, TYRES);
+      const expired = await makeLpo(context.vendor.id, TYRES, { validFrom: '2024-01-01', validTo: '2024-12-31' });
+      const later = await makeLpo(context.vendor.id, TYRES, { validTo: '2099-12-31' });
+      const sooner = await makeLpo(context.vendor.id, TYRES, { validTo: '2098-12-31' });
+      const done = await onGrn(forwarded, 'DATE');
+      assert.equal(done.lpoDeduction.lpoNumber, sooner.number);
+      for (const untouched of [rival, expired, later]) assert.equal((await getLpo(untouched._id)).usedAmount, 0);
+    });
 
-    const done = await acceptedChange(context, 'tyre', 1, 800);
-    assert.equal(done.lpoDeduction.lpoNumber, sooner.number);
-    assert.equal((await getLpo(rival._id)).usedAmount, 0);
-    assert.equal((await getLpo(expired._id)).usedAmount, 0);
-    assert.equal((await getLpo(later._id)).usedAmount, 0);
-  });
+    test('an LPO with room, counting what is booked on it, is used before overrunning the first', async () => {
+      const context = await setup('NEXT');
+      const forwarded = await forwardedWithoutLine(context, 'tyre', 2, 1600);
+      const small = await makeLpo(context.vendor.id, [{ ...TYRES[0], quantity: 5 }], { validTo: '2098-12-31' });
+      const big = await makeLpo(context.vendor.id, TYRES, { validTo: '2099-12-31' });
+      ok(await raise(context.bus, 'tyre', { lpoItemId: small.items[0]._id, quantity: 4 })); // books 4 of its 5
+      const done = await onGrn(forwarded, 'NEXT');
+      assert.deepEqual([done.lpoDeduction.lpoNumber, done.lpoDeduction.overrun], [big.number, false]);
+      assert.equal((await getLpo(small._id)).usedAmount, 0);
+    });
 
-  test('a short LPO warns and shows the overrun, and the invoice still goes through', async () => {
-    const context = await setup('SHORT');
-    const lpo = ok(await makeLpo(context.vendor.id, [{ kind: 'tyre', name: 'Tyre', quantity: 1, unitPrice: 800 }]));
-    const done = await acceptedChange(context, 'tyre', 2, 1600);
-    assert.equal(done.status, 'invoiceAccepted');
-    assert.equal(done.lpoDeduction.status, 'deducted');
-    assert.equal(done.lpoDeduction.overrun, true);
-    const after = await getLpo(lpo._id);
-    assert.equal(after.items[0].remainingQuantity, -1);
-    assert.equal(after.items[0].remainingAmount, -800);
-  });
+    test('a short LPO is charged and flagged, and the GRN still goes through', async () => {
+      const context = await setup('SHORT');
+      const forwarded = await forwardedWithoutLine(context, 'tyre', 2, 1600);
+      const lpo = await makeLpo(context.vendor.id, [{ ...TYRES[0], quantity: 1 }]);
+      const done = await onGrn(forwarded, 'SHORT');
+      assert.deepEqual([done.status, done.lpoDeduction.status, done.lpoDeduction.overrun], ['grnCreated', 'deducted', true]);
+      const after = await getLpo(lpo._id);
+      assert.deepEqual([after.items[0].remainingQuantity, after.items[0].remainingAmount], [-1, -800]);
+      const notice = ok(await api('GET', '/notifications', { token: users.purchasing.token })).find((n) => n.type === 'lpoProblem' && n.params.vsrNumber === forwarded.vsrNumber);
+      assert.deepEqual(notice.params, { vsrNumber: forwarded.vsrNumber, problem: 'short', lpoNumber: lpo.number, kind: 'tyre' });
+    });
 
-  test('a second LPO with room is used before overrunning the first', async () => {
-    const context = await setup('NEXT');
-    const small = ok(await makeLpo(context.vendor.id, [{ kind: 'tyre', name: 'Tyre', quantity: 1, unitPrice: 800 }], { validTo: '2098-12-31' }));
-    const big = ok(await makeLpo(context.vendor.id, TYRES, { validTo: '2099-12-31' }));
-    const done = await acceptedChange(context, 'tyre', 2, 1600);
-    assert.equal(done.lpoDeduction.lpoNumber, big.number);
-    assert.equal(done.lpoDeduction.overrun, false);
-    assert.equal((await getLpo(small._id)).usedAmount, 0);
-  });
-
-  test('no LPO is recorded, so someone can look', async () => {
-    const context = await setup('NONE');
-    const none = await acceptedChange(context, 'tyre', 1, 800);
-    assert.equal(none.status, 'invoiceAccepted');
-    assert.equal(none.lpoDeduction.status, 'noLpo');
+    test('with no LPO at all it is recorded, so someone can look', async () => {
+      const context = await setup('NONE');
+      const forwarded = await forwardedWithoutLine(context, 'tyre', 1, 800);
+      const done = await onGrn(forwarded, 'NONE');
+      assert.deepEqual([done.status, done.lpoDeduction.status, done.lpoDeduction.kind], ['grnCreated', 'noLpo', 'tyre']);
+    });
   });
 
   describe('oil and transmission', () => {
     /** A bus with rates, so these VSRs are priced from the bus and skip the estimates. */
-    const pricedBus = async (label) => {
-      const vendor = await newVendor(`lpo-${label}`);
-      const bus = await createBus(users, `L${label}`, vendor.id, { rates: { oil: 0.1, transmission: 0.05 } });
-      return { vendor, bus };
-    };
-    // Each service is raised further on, as an odometer only goes up.
-    let reading = 0;
-    const service = async ({ vendor, bus }, serviceType, amount) => {
-      reading += 1000;
-      const raised = ok(await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType, currentReading: reading } }));
+    const pricedBus = (label) => setup(label, { rates: { oil: 0.1, transmission: 0.05 } });
+    const service = async ({ vendor, bus }, serviceType, amount, extra = {}) => {
+      const raised = ok(await raise(bus, serviceType, extra));
       assert.equal(raised.status, 'pending', 'priced from the rate on the bus');
-      return toInvoiceAccepted(users, raised, vendor, { invoice: { amount: String(amount) } });
+      return toForwarded(users, raised, vendor, { invoice: { amount: String(amount) } });
     };
 
-    test('both take the price off the repair and maintenance LPO for the bus make, and never a quantity', async () => {
+    test('both take the price off the repair and maintenance line for the bus make, and never a quantity', async () => {
       const context = await pricedBus('MNT');
-      const tyres = ok(await makeLpo(context.vendor.id, TYRES));
-      const maintenance = ok(await makeLpo(context.vendor.id, [{ kind: 'repairMaintenance', name: 'Repair and maintenance', quantity: 1, unitPrice: 50000 }], { make: 'Hino' }));
-
-      const oil = await service(context, 'oil', 900);
-      assert.equal(oil.lpoDeduction.status, 'deducted');
-      assert.equal(oil.lpoDeduction.lpoNumber, maintenance.number);
-      assert.equal(oil.lpoDeduction.kind, 'repairMaintenance');
-      assert.equal(oil.lpoDeduction.quantity, 0);
-      assert.equal(oil.lpoDeduction.amount, 900);
-
-      const transmission = await service(context, 'transmission', 3000);
+      const tyres = await makeLpo(context.vendor.id, TYRES);
+      const maintenance = await makeLpo(context.vendor.id, RM(50000));
+      const lpoItemId = maintenance.items[0]._id;
+      const oil = await onGrn(await service(context, 'oil', 900, { lpoItemId }), 'MNT1');
+      assert.deepEqual([oil.lpoDeduction.status, oil.lpoDeduction.lpoNumber, oil.lpoDeduction.kind, oil.lpoDeduction.quantity, oil.lpoDeduction.amount], ['deducted', maintenance.number, 'repairMaintenance', 0, 900]);
+      const transmission = await onGrn(await service(context, 'transmission', 3000, { lpoItemId }), 'MNT2');
       assert.equal(transmission.lpoDeduction.lpoNumber, maintenance.number);
 
       const after = await getLpo(maintenance._id);
-      assert.equal(after.items[0].usedAmount, 3900);
-      assert.equal(after.items[0].usedQuantity, 0);
-      assert.equal(after.items[0].remainingAmount, 46100);
-      assert.equal(after.usage.length, 2, 'the LPO lists both');
+      assert.deepEqual([after.items[0].usedAmount, after.items[0].usedQuantity, after.items[0].remainingAmount, after.usage.length], [3900, 0, 46100, 2]);
       assert.equal((await getLpo(tyres._id)).usedAmount, 0, 'a tyre LPO is not touched');
     });
 
-    test('a vendor with no repair and maintenance LPO is flagged, and a tyre LPO does not stand in for one', async () => {
+    test('with only a tyre LPO there is no line for it, and the GRN flags it', async () => {
       const context = await pricedBus('MNO');
-      ok(await makeLpo(context.vendor.id, TYRES));
-      const done = await service(context, 'oil', 900);
-      assert.equal(done.status, 'invoiceAccepted');
-      assert.equal(done.lpoDeduction.status, 'noLpo');
-      assert.equal(done.lpoDeduction.kind, 'repairMaintenance');
+      await makeLpo(context.vendor.id, TYRES);
+      const done = await onGrn(await service(context, 'oil', 900), 'MNO');
+      assert.deepEqual([done.lpoDeduction.status, done.lpoDeduction.kind], ['noLpo', 'repairMaintenance']);
     });
 
-    test('a short repair and maintenance LPO warns on the amount and the invoice still goes through', async () => {
+    test('a repair and maintenance LPO written too small is charged and flagged at the GRN', async () => {
       const context = await pricedBus('MNS');
-      ok(await makeLpo(context.vendor.id, [{ kind: 'repairMaintenance', name: 'Services', quantity: 1, unitPrice: 500 }], { make: 'Hino' }));
-      const done = await service(context, 'oil', 900);
-      assert.equal(done.status, 'invoiceAccepted');
-      assert.equal(done.lpoDeduction.overrun, true);
+      const forwarded = await service(context, 'oil', 900);
+      await makeLpo(context.vendor.id, RM(500));
+      const done = await onGrn(forwarded, 'MNS');
+      assert.deepEqual([done.status, done.lpoDeduction.overrun], ['grnCreated', true]);
     });
   });
 });

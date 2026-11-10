@@ -14,6 +14,7 @@ const BUS_LIFECYCLES = ['inOperation', 'scrapRequested', 'scrapped', 'sold'];
 const SCRAP_REASONS = ['totalLoss', 'highRunningCost', 'endOfLife'];
 const SCRAP_REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'];
 const LPO_KINDS = ['repairMaintenance', 'tyre', 'battery', 'other'];
+const LPO_ITEM_CATEGORIES = ['repairMaintenance', 'tyre', 'battery'];
 const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'brakePads', 'repair', 'other'];
 const REPAIR_CATEGORIES = ['ELECTRICAL', 'MECHANICAL', 'AC REPAIR', 'ENGINE', 'BODY', 'ACCIDENT'];
 const TICKET_STATUSES = ['sentToVendor', 'estimateSubmitted', 'estimateCountered', 'pending', 'returned', 'approved', 'acknowledged', 'vehicleSent', 'vehicleReceived', 'workInProgress', 'readyForDelivery', 'vehicleReleased', 'vehicleReturned', 'invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed', 'declined'];
@@ -129,17 +130,46 @@ const scrapRequest = {
     createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   },
 };
-const lpoPreview = {
+// One LPO line's figures, as on the client's sheet (2026-11-10). Quantities are null for repair and maintenance.
+const figure = { type: 'object', properties: { amount: { type: 'number' }, quantity: { type: 'number', nullable: true } } };
+const lpoBalance = {
+  type: 'object',
+  properties: {
+    value: figure, booked: { ...figure, description: 'Open VSRs on the line not yet on a GRN' }, grn: { ...figure, description: 'What GRNs took off' },
+    available: { ...figure, description: 'value - booked - grn: the limit for the next VSR' }, afterGrn: { ...figure, description: 'value - grn' },
+    vsrs: { type: 'integer', description: 'VSRs on the line, every status but declined' },
+  },
+};
+const lpoLines = {
   type: 'object',
   properties: {
     kind: { type: 'string', enum: LPO_KINDS },
     make: { type: 'string', description: 'The bus\'s make' },
-    status: { type: 'string', enum: ['found', 'noLpo', 'notNeeded'], description: 'notNeeded: other work with no Other line, as when charged' },
-    lpo: {
-      type: 'object', nullable: true,
-      properties: { _id: objectId, number: { type: 'string' }, make: { type: 'string', nullable: true, description: 'null: covers every make' }, validFrom: { type: 'string', format: 'date-time' }, validTo: { type: 'string', format: 'date-time' }, lineTotal: { type: 'number' }, lineRemaining: { type: 'number' }, remainingQuantity: { type: 'number', nullable: true, description: 'Tyres and batteries only' } },
+    status: { type: 'string', enum: ['found', 'noLpo', 'notNeeded'], description: 'notNeeded: other work, which comes off no line' },
+    lines: {
+      type: 'array',
+      description: 'The bus\'s own vendor\'s lines first, then the soonest ending, then by LPO number',
+      items: {
+        type: 'object',
+        properties: {
+          lpo: { type: 'object', properties: { _id: objectId, number: { type: 'string' }, date: { type: 'string', format: 'date-time' }, validTo: { type: 'string', format: 'date-time' }, vendor: { type: 'object', properties: { _id: objectId, name: { type: 'string' } } } } },
+          item: { type: 'object', properties: { _id: objectId, name: { type: 'string' }, kind: { type: 'string', enum: LPO_KINDS }, make: { type: 'string', nullable: true }, size: { type: 'string', nullable: true }, lifeKm: { type: 'integer', nullable: true }, unitPrice: { type: 'number' } } },
+          balance: ref('LpoBalance'),
+        },
+      },
     },
-    fits: { type: 'boolean', description: 'Only when an amount is given and an LPO is found. false: this job would overrun it' },
+  },
+};
+const lpoItem = {
+  type: 'object', required: ['kind'],
+  properties: {
+    kind: { type: 'string', enum: LPO_ITEM_CATEGORIES },
+    make: { type: 'string', description: 'repairMaintenance only, required: a make on the fleet in any letter case, stored as the fleet spells it' },
+    size: { type: 'string', description: 'The tyre size or battery type; required for those' },
+    lifeKm: { type: 'integer', minimum: 1, description: 'Tyres only, optional. Fitting them sets the bus\'s tyre interval to it' },
+    description: { type: 'string', maxLength: 300 },
+    quantity: { type: 'integer', minimum: 1, description: 'Tyres and batteries; repair and maintenance is always 1' },
+    unitPrice: { type: 'number', description: 'Above 0. For repair and maintenance, the amount' },
   },
 };
 const multipartNote = (fields) => `Multipart form: ${fields}. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each).`;
@@ -165,14 +195,17 @@ const ticket = {
     currentReading: { type: 'integer', minimum: 0, description: 'Odometer in km when the ticket was raised' },
     isBreakdown: { type: 'boolean', description: 'Broke down on the road. Never sent to vendors.' },
     daysToComplete: { type: 'integer', description: 'The vendor\'s latest promise' },
-    agreedPrice: { type: 'object', description: 'Oil and transmission: rate on the bus times its interval, frozen at raising', properties: { rate: { type: 'number' }, km: { type: 'number' }, amount: { type: 'number' } } },
+    agreedPrice: { type: 'object', description: 'Fixed at raising, so the VSR goes straight to the supervisor. rate: oil and transmission, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line\'s unit price', properties: { basis: { type: 'string', enum: ['rate', 'lpo'] }, rate: { type: 'number' }, km: { type: 'number' }, unitPrice: { type: 'number' }, quantity: { type: 'integer' }, amount: { type: 'number' } } },
+    lpoLine: { type: 'object', description: 'The LPO line chosen at raising or correction; its amount is booked on it until the GRN. Never sent to vendors.', properties: { lpo: objectId, lpoNumber: { type: 'string' }, item: objectId, name: { type: 'string' }, kind: { type: 'string', enum: LPO_KINDS }, unitPrice: { type: 'number' } } },
+    quantity: { type: 'integer', description: 'Tyres or batteries the job is for. Vendors see it on tyre and battery jobs only.' },
+    estimatedAmount: { type: 'number', description: 'The creator\'s estimate, booked on the LPO line until approval. Never sent to vendors.' },
     intervalUsage: { type: 'object', description: 'How much of the interval was left or delayed. Never sent to vendors.', additionalProperties: true },
     breakdown: { type: 'object', description: 'Parts, labour and consumables checked against the estimate. Never sent to vendors.', additionalProperties: true },
     vehicle: { type: 'object', description: 'Dates and km of the bus going out and coming back', additionalProperties: true },
     signatures: { type: 'array', description: 'Who signed which step. The drawing is populated on the detail endpoint only.', items: { type: 'object', additionalProperties: true } },
     grn: { type: 'object', description: 'Never sent to vendors', additionalProperties: true },
     purchaseInvoice: { type: 'object', description: 'Never sent to vendors', additionalProperties: true },
-    lpoDeduction: { type: 'object', description: 'What accepting the invoice took off the LPO. Never sent to vendors.', additionalProperties: true },
+    lpoDeduction: { type: 'object', description: 'What the GRN took off the LPO (before 2026-11-10, accepting the invoice). Never sent to vendors.', additionalProperties: true },
     approvedEstimate: { type: 'number' },
     vendorId: user, createdBy: user, status: { type: 'string', enum: TICKET_STATUSES },
     history: {
@@ -190,6 +223,12 @@ const ticket = {
 const authResponse = { type: 'object', properties: { success: { type: 'boolean' }, token: { type: 'string' }, user } };
 const credentials = { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string', minLength: 8 } } };
 
+// What raising or correcting a VSR takes for its LPO line (2026-11-10).
+const vsrLpoFields = {
+  lpoItemId: { ...objectId, description: 'The LPO line the job comes off; required when GET /api/lpos/for-vsr lists any. Its vendor does the work.' },
+  quantity: { type: 'integer', minimum: 1, description: 'Tyres and batteries off a line: priced at its unit price, straight to the supervisor' },
+  estimatedAmount: { type: 'number', description: 'Repairs and brake pads off a line, and oil and transmission off one without a rate on the bus' },
+};
 const stepBody = { type: 'object', properties: { date: { type: 'string', format: 'date', description: 'Defaults to now, cannot be in the future' } } };
 
 const ticketListQuery = [
@@ -230,7 +269,7 @@ const spec = {
           errors: { type: 'array', items: { type: 'object', properties: { field: { type: 'string' }, message: { type: 'string' } } } },
         },
       },
-      User: user, Bus: bus, BusInput: busInput, Ticket: ticket, Invoice: invoice, ScrapRequest: scrapRequest, LpoPreview: lpoPreview,
+      User: user, Bus: bus, BusInput: busInput, Ticket: ticket, Invoice: invoice, ScrapRequest: scrapRequest, LpoLines: lpoLines, LpoBalance: lpoBalance,
     },
   },
   paths: {
@@ -306,6 +345,7 @@ const spec = {
             vendorId: { ...objectId, description: 'Defaults to the vendor assigned to the bus' },
             description: { type: 'string', maxLength: 1000 },
             isBreakdown: { type: 'boolean', description: 'Broke down on the road. Never sent to vendors.' },
+            ...vsrLpoFields,
           },
         },
         response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409),
@@ -314,10 +354,13 @@ const spec = {
     '/api/tickets/pending': { get: op('Tickets', 'Tickets awaiting supervisor approval', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
     '/api/tickets/my-tickets': { get: op('Tickets', 'Tickets created by the caller', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
     '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: pageQuery, response: listEnvelope(ref('Ticket')) }) },
-    '/api/tickets/{id}': { get: op('Tickets', 'Ticket detail with full invoice history', ROLES, { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 404) }) },
+    '/api/tickets/{id}': {
+      get: op('Tickets', 'Ticket detail with full invoice history', ROLES, { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 404) }),
+      put: op('Tickets', 'Correct the details of a returned ticket; the same as PUT /api/tickets/{id}/details', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }),
+    },
     '/api/tickets/{id}/approve': { put: op('Tickets', 'Approve a pending ticket', ['supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
     '/api/tickets/{id}/return': { put: op('Tickets', 'Return a pending ticket to the creator', ['supervisor'], { params: [idParam], body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', maxLength: 500 } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/details': { put: op('Tickets', 'Correct the details of a returned ticket', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/details': { put: op('Tickets', 'Correct the details of a returned ticket, with the same fields as raising it. Checked against what its LPO line has left without its own booking.', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/estimate': { post: op('Tickets', 'Vendor sends an estimate (multipart: amount, quotationNumber, daysToComplete, note, attachments)', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/estimate/reply': { post: op('Tickets', 'Creator replies to an estimate (multipart: amount, note, attachments)', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/escalate': { put: op('Tickets', 'Send the latest estimate to the supervisor', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
@@ -340,27 +383,37 @@ const spec = {
     },
     '/api/grns': {
       get: op('Purchasing', 'List GRNs', ['purchaseManager', 'supervisor', 'serviceCreator'], { query: pageQuery, response: listEnvelope({ type: 'object', additionalProperties: true }), more: pick(403) }),
-      post: op('Purchasing', 'Make one GRN for a batch of forwarded VSRs from one vendor (multipart: number, ticketIds, date, notes, attachments)', ['purchaseManager'], { response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }),
+      post: op('Purchasing', 'Make one GRN for a batch of forwarded VSRs from one vendor (multipart: number, ticketIds, date, notes, attachments). Takes each VSR\'s accepted invoice off its LPO line.', ['purchaseManager'], { response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }),
     },
     '/api/grns/export': { get: op('Purchasing', 'The batch as an Excel file', ['purchaseManager'], { query: [{ name: 'ticketIds', in: 'query', required: true, schema: { type: 'string' }, description: 'Comma separated' }], response: { type: 'string', format: 'binary' }, more: pick(400, 403, 404) }) },
     '/api/purchase-invoices': { post: op('Purchasing', 'Make the purchase invoice of a GRN, which closes its VSRs (multipart: number, grnId, date, amount, notes, attachments)', ['purchaseManager'], { response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/lpos': {
-      get: op('Purchasing', 'List LPOs', ['purchaseManager', 'supervisor', 'serviceCreator'], { query: pageQuery, response: listEnvelope({ type: 'object', additionalProperties: true }), more: pick(403) }),
-      post: op('Purchasing', 'Create an LPO. Repairs, brake pads, oil and transmission come off one repairMaintenance line for one make; tyre, battery and other LPOs name no make and cover every bus.', ['purchaseManager'], { body: { type: 'object', required: ['number', 'vendorId', 'validFrom', 'validTo', 'items'], properties: { number: { type: 'string' }, vendorId: objectId, make: { type: 'string', description: 'Required with a repairMaintenance line and refused without one. Must be a make on the fleet, in any letter case; stored as the fleet spells it.' }, validFrom: { type: 'string', format: 'date' }, validTo: { type: 'string', format: 'date' }, items: { type: 'array', items: { type: 'object', required: ['kind', 'name', 'quantity', 'unitPrice'], properties: { kind: { type: 'string', enum: LPO_KINDS }, name: { type: 'string' }, description: { type: 'string' }, quantity: { type: 'number' }, unitPrice: { type: 'number' } } } } } }, response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }),
+      get: op('Purchasing', 'List LPOs, each with amount totals value, booked, grn, available, afterGrn, vsrs and inDate', ['purchaseManager', 'supervisor', 'serviceCreator'], { query: pageQuery, response: listEnvelope({ type: 'object', additionalProperties: true }), more: pick(403) }),
+      post: op('Purchasing', 'Create an LPO. The API names each line: Repair & Maintenance of {make} Buses, Tyre size {size}, Battery {type}.', ['purchaseManager'], { body: { type: 'object', required: ['number', 'vendorId', 'date', 'validFrom', 'validTo', 'items'], properties: { number: { type: 'string' }, vendorId: objectId, date: { type: 'string', format: 'date' }, validFrom: { type: 'string', format: 'date' }, validTo: { type: 'string', format: 'date' }, items: { type: 'array', items: lpoItem } } }, response: envelope({ type: 'object', additionalProperties: true }), status: 201, more: pick(400, 403, 404, 409) }),
     },
+    '/api/lpos/items': { get: op('Purchasing', 'The LPO form\'s lists: the fleet\'s makes, and the tyre sizes and battery types already on LPOs', DEPOT, { response: envelope({ type: 'object', properties: { makes: { type: 'array', items: { type: 'string' } }, tyreSizes: { type: 'array', items: { type: 'string' } }, batteryTypes: { type: 'array', items: { type: 'string' } } } }), more: pick(403) }) },
     '/api/lpos/for-vsr': {
-      get: op('Purchasing', 'Which LPO a job would come off, for the new VSR form and the VSR page. Reads only; accepting the invoice uses the same choice.', DEPOT, {
+      get: op('Purchasing', 'The LPO lines a job can be raised against, with what is left on each, for the new VSR and correction forms. Reads only.', DEPOT, {
         query: [
           { name: 'busId', in: 'query', required: true, schema: objectId },
-          { name: 'vendorId', in: 'query', schema: objectId, description: 'Defaults to the bus\'s vendor' },
           { name: 'serviceType', in: 'query', required: true, schema: { type: 'string', enum: SERVICE_TYPES } },
-          { name: 'amount', in: 'query', schema: { type: 'number', minimum: 0 }, description: 'AED. Given, the answer says whether it fits' },
-          { name: 'quantity', in: 'query', schema: { type: 'integer', minimum: 0 }, description: 'Tyres or batteries fitted, matched as the charge matches them' },
+          { name: 'ticketId', in: 'query', schema: objectId, description: 'A VSR being corrected: its own booking is left out of what is left' },
         ],
-        response: envelope(ref('LpoPreview')), more: pick(400, 403, 404),
+        response: envelope(ref('LpoLines')), more: pick(400, 403, 404),
       }),
     },
-    '/api/lpos/{id}': { get: op('Purchasing', 'One LPO with the VSRs that used it', ['purchaseManager', 'supervisor', 'serviceCreator'], { params: [idParam], response: envelope({ type: 'object', additionalProperties: true }), more: pick(403, 404) }) },
+    '/api/lpos/{id}': { get: op('Purchasing', 'One LPO; each line with its balance and its VSRs (vsrs: _id, vsrNumber, fleetNumber, status, reserved, deducted, quantity, grnNumber)', ['purchaseManager', 'supervisor', 'serviceCreator'], { params: [idParam], response: envelope({ type: 'object', additionalProperties: true }), more: pick(403, 404) }) },
+    '/api/reports/lpo-balances': {
+      get: op('Reports', 'Each LPO line\'s value, booked, GRN, available and after-GRN figures and VSRs issued, with per-LPO subtotals (amounts) and a total', DEPOT, {
+        query: [
+          { name: 'vendorId', in: 'query', schema: objectId },
+          { name: 'kind', in: 'query', schema: { type: 'string', enum: LPO_KINDS } },
+          { name: 'inDate', in: 'query', schema: { type: 'string', enum: ['true', 'false'] }, description: 'Valid today or not; left out, every LPO' },
+        ],
+        response: envelope({ type: 'object', properties: { today: { type: 'string', format: 'date' }, rows: { type: 'array', items: { type: 'object', additionalProperties: true } }, lpos: { type: 'array', items: { type: 'object', additionalProperties: true } }, total: { type: 'object', additionalProperties: true }, filters: { type: 'object', properties: { vendors: { type: 'array', items: { type: 'object', additionalProperties: true } }, kinds: { type: 'array', items: { type: 'string' } } } } } }),
+        more: pick(400, 403),
+      }),
+    },
     '/api/reports/query': { get: op('Reports', 'How many of what, for which brand, vendor, bus or year', ['purchaseManager'], { query: ['brand', 'type', 'year', 'vendorId', 'busId', 'isBreakdown', 'groupBy'].map((name) => ({ name, in: 'query', schema: { type: 'string' } })), response: envelope({ type: 'object', additionalProperties: true }), more: pick(400, 403) }) },
     '/api/reports/fleet': { get: op('Reports', 'Month figures for repairs, tyres, batteries and maintenance, by brand or for the fleet', ['serviceCreator', 'supervisor', 'purchaseManager'], { query: ['year', 'brand'].map((name) => ({ name, in: 'query', schema: { type: 'string' } })), response: envelope({ type: 'object', additionalProperties: true }), more: pick(400, 403) }) },
     '/api/reports/weekly': { get: op('Reports', 'The last seven days of tyres, batteries and oil, and what is due', ['supervisor'], { response: envelope({ type: 'object', additionalProperties: true }), more: pick(403) }) },

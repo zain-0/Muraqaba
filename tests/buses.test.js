@@ -63,15 +63,15 @@ describe('buses', () => {
     const early = await raise(bus._id, { serviceType: 'oil', currentReading: 9700 });
     assert.equal(early.status, 201, JSON.stringify(early.body));
     assert.equal(early.body.data.status, 'pending');
-    assert.deepEqual(early.body.data.agreedPrice, { rate: 0.5, km: 10000, amount: 5000 });
+    assert.deepEqual(early.body.data.agreedPrice, { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 });
     assert.deepEqual(early.body.data.intervalUsage, { unit: 'km', interval: 10000, actual: 9700, left: 300, delayed: 0 });
 
     const late = await raise(bus._id, { serviceType: 'oil', currentReading: 10400 });
-    assert.deepEqual(late.body.data.agreedPrice, { rate: 0.5, km: 10000, amount: 5000 });
+    assert.deepEqual(late.body.data.agreedPrice, { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 });
     assert.deepEqual(late.body.data.intervalUsage, { unit: 'km', interval: 10000, actual: 10400, left: 0, delayed: 400 });
 
     const transmission = await raise(bus._id, { serviceType: 'transmission', currentReading: 61000 });
-    assert.deepEqual(transmission.body.data.agreedPrice, { rate: 1, km: 60000, amount: 60000 });
+    assert.deepEqual(transmission.body.data.agreedPrice, { basis: 'rate', rate: 1, km: 60000, amount: 60000 });
     assert.equal(transmission.body.data.intervalUsage.delayed, 1000);
 
     const repair = await raise(bus._id, { serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 61000 });

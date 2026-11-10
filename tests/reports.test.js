@@ -4,7 +4,7 @@
  */
 import { test, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, busBody, createBus, newVendor, run, signInEveryone, submitInvoice, toForwarded, toInvoiceAccepted, toVehicleReturned } from './helpers.js';
+import { api, busBody, createBus, grnFor, newVendor, run, signInEveryone, submitInvoice, toForwarded, toInvoiceAccepted, toVehicleReturned } from './helpers.js';
 
 let users;
 const raise = async (busId, body) => {
@@ -240,8 +240,10 @@ describe('notifications', () => {
   test('a short or missing LPO tells purchasing and the supervisor', async () => {
     const vendor = await newVendor('short');
     const bus = await createBus(users, 'LPOS', vendor.id, { rates: undefined });
-    const ticket = await toInvoiceAccepted(users, await repair(bus._id), vendor);
-    assert.equal(ticket.lpoDeduction.status, 'noLpo');
+    const ticket = await toForwarded(users, await repair(bus._id), vendor);
+    assert.equal((await grnFor(users, ticket._id, 'NOLPO')).status, 201);
+    const charged = (await api('GET', `/tickets/${ticket._id}`, { token: users.supervisor.token })).body.data;
+    assert.equal(charged.lpoDeduction.status, 'noLpo');
     for (const token of [users.purchasing.token, users.supervisor.token]) {
       const box = await inbox(token);
       const notice = box.data.find((n) => n.type === 'lpoProblem' && n.params.vsrNumber === ticket.vsrNumber);

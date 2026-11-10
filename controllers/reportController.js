@@ -14,12 +14,15 @@ import mongoose from 'mongoose';
 import Bus from '../models/Bus.js';
 import Ticket, { ACCIDENT_FAULTS, ACCIDENT_SEVERITIES, NO_CHARGE_REASONS, REPAIR_CATEGORIES } from '../models/Ticket.js';
 import User from '../models/User.js';
+import { Lpo, LPO_KINDS } from '../models/Purchase.js';
 import { BUS_DAY_STATUSES, BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler } from '../middleware/errorMiddleware.js';
 import { COUNTED, fleetBuses, fleetDays, statusSummary } from '../utils/fleetDays.js';
 import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
 import { offFleetBusIds } from '../utils/busDay.js';
 import { USER_FIELDS } from '../utils/query.js';
+import { amountTotals, balancesFor } from '../utils/lpoBalance.js';
+import { isInDate } from '../utils/lpoDeduction.js';
 import { BANDS, averageDays, bandIndex, brandKey, committedFils, daysOfYear, isLate, kindOf, kmInMonth, ratio, spendFils, spendPerKm, toAed, toFils, workshopDays } from '../utils/reportMaths.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
@@ -53,7 +56,7 @@ const raisedIn = (year, month) => {
 const periodOf = (query) => ({ year: query.year ? Number(query.year) : Number(uaeDay().slice(0, 4)), month: query.month ? Number(query.month) : null });
 
 // Each brand once, spelt the way most buses spell it.
-const brandsFrom = (buses) => {
+export const brandsFrom = (buses) => {
   const spellings = new Map();
   buses.forEach(({ make }) => {
     const counts = spellings.get(brandKey(make)) ?? new Map();
@@ -522,4 +525,53 @@ export const weeklyReport = asyncHandler(async (req, res) => {
     });
   });
   res.json({ success: true, data: { from, to, raised, due: await dueServices() } });
+});
+
+/**
+ * GET /api/reports/lpo-balances?vendorId=&kind=&inDate=  (depot)
+ * The client's LPO sheet (2026-11-10): for each LPO line its value, booked by open VSRs not yet on
+ * a GRN, GRN, limit available for the next VSR (value - booked - GRN), remaining after GRN
+ * (value - GRN) and VSRs issued, with amount subtotals per LPO and for the whole report. inDate
+ * true or false keeps LPOs valid today or not; left out, every LPO.
+ */
+export const lpoBalancesReport = asyncHandler(async (req, res) => {
+  const { vendorId, kind } = req.query;
+  const inDate = req.query.inDate ? req.query.inDate === 'true' : null;
+  const lpos = await Lpo.find().populate('vendor', 'name');
+  const today = uaeDay();
+  const vendorOf = (lpo) => ({ _id: lpo.vendor?._id ?? lpo.vendor, name: lpo.vendor?.name ?? null });
+  const dateOf = (lpo) => lpo.date ?? lpo.validFrom;
+  const shown = lpos
+    .filter((lpo) => (!vendorId || String(lpo.vendor?._id ?? lpo.vendor) === vendorId) && (inDate === null || isInDate(lpo, today) === inDate))
+    .sort((a, b) => dateOf(a) - dateOf(b) || a.number.localeCompare(b.number, undefined, { numeric: true }));
+  const balances = await balancesFor(shown);
+
+  const rows = shown.flatMap((lpo) =>
+    lpo.items
+      .filter((item) => !kind || item.kind === kind)
+      .map((item) => ({
+        lpoId: lpo._id,
+        lpoNumber: lpo.number,
+        date: dateOf(lpo),
+        validFrom: lpo.validFrom,
+        validTo: lpo.validTo,
+        inDate: isInDate(lpo, today),
+        vendor: vendorOf(lpo),
+        itemId: item._id,
+        item: item.name,
+        kind: item.kind,
+        unitPrice: item.unitPrice,
+        lifeKm: item.lifeKm ?? null,
+        ...balances.get(String(item._id)),
+      }))
+  );
+  const subtotals = shown
+    .map((lpo) => ({ lpo, lines: rows.filter((row) => String(row.lpoId) === String(lpo._id)) }))
+    .filter(({ lines }) => lines.length)
+    .map(({ lpo, lines }) => ({ lpoId: lpo._id, lpoNumber: lpo.number, vendor: vendorOf(lpo), ...amountTotals(lines) }));
+
+  // What the filters choose from: every vendor with an LPO and every kind of line there is.
+  const vendors = [...new Map(lpos.map((lpo) => [String(lpo.vendor?._id ?? lpo.vendor), vendorOf(lpo)])).values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const kinds = LPO_KINDS.filter((line) => lpos.some((lpo) => lpo.items.some((item) => item.kind === line)));
+  res.json({ success: true, data: { today, rows, lpos: subtotals, total: amountTotals(rows), filters: { vendors, kinds } } });
 });

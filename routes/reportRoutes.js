@@ -9,6 +9,7 @@ import {
   freeWorkReport,
   invoiceCheckReport,
   kmReport,
+  lpoBalancesReport,
   runQuery,
   vendorsReport,
   weeklyReport,
@@ -17,9 +18,10 @@ import { listNotifications, markAllRead, markRead } from '../controllers/notific
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
 import { validateFleetFigures, validateObjectId, validateReportQuery } from '../middleware/validationMiddleware.js';
-import { validateCosts, validateInvoiceCheck, validateYear, validateYearBrand, validateYearMonth, validateYearMonthBrand } from '../middleware/reportValidation.js';
+import { validateCosts, validateInvoiceCheck, validateLpoBalances, validateYear, validateYearBrand, validateYearMonth, validateYearMonthBrand } from '../middleware/reportValidation.js';
 
 const PURCHASING = roleMiddleware(['purchaseManager']);
+const DEPOT = roleMiddleware(['purchaseManager', 'supervisor', 'serviceCreator']);
 
 export const reportRoutes = express.Router();
 reportRoutes.use(authMiddleware);
@@ -35,6 +37,7 @@ reportRoutes.get('/categories', PURCHASING, validateYearBrand, categoriesReport)
 reportRoutes.get('/accidents', PURCHASING, validateYear, accidentsReport);
 reportRoutes.get('/free-work', PURCHASING, validateYear, freeWorkReport);
 reportRoutes.get('/invoice-check', PURCHASING, validateInvoiceCheck, invoiceCheckReport);
+reportRoutes.get('/lpo-balances', DEPOT, validateLpoBalances, lpoBalancesReport);
 
 export const notificationRoutes = express.Router();
 notificationRoutes.use(authMiddleware);

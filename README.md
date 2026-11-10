@@ -35,7 +35,14 @@ estimateSubmitted ──same negotiation──▶ pending ──approve──▶
 Releasing or getting back the bus moves every linked ticket. Invoice, GRN and purchase invoice stay separate.
 ```
 
-The depot's dates default to now and can be overridden, never into the future. Accepting an invoice takes quantity and amount off the vendor's current LPO for tyres and batteries, and amount only for everything else. Repairs, brake pads, oil and transmission services all come off one repair and maintenance line, on an LPO that names one bus make; tyre, battery and other LPOs name no make and cover every bus. Of the vendor's LPOs valid today with a line of that kind for the bus's make (or no make), the one ending first with room is used; with no room anywhere, the first one, as an overrun. A short or missing LPO notifies purchasing and the supervisor and never blocks the invoice. `GET /api/lpos/for-vsr` shows the same choice before the VSR is raised.
+The depot's dates default to now and can be overridden, never into the future.
+
+LPOs (2026-11-10). Purchasing enters a dated LPO whose lines are Repair & Maintenance of one fleet make (one amount), a tyre size (quantity, unit price, optional life in km) or a battery type (quantity, unit price); the API names each line. Repairs, brake pads, oil and transmission come off the repair and maintenance line for the bus's make; tyres and batteries off a line of their kind, for any make.
+
+- Raising or correcting a VSR: when any vendor's lines valid today fit the job, the creator picks one (`lpoItemId`) and its vendor does the work. Tyres and batteries then take a `quantity` and are priced at the line (`agreedPrice.basis: 'lpo'`), straight to the supervisor; repairs and brake pads take an `estimatedAmount`; oil and transmission the rate on the bus, or without one an `estimatedAmount`. With no line the VSR is raised as before and purchasing is notified (`lpoMissing`).
+- What a VSR books on its line: the approved amount, else the agreed price, the creator's estimate or the vendor's latest estimate, and for tyres and batteries the units. Only open VSRs not yet on a GRN book anything. Raising or correcting past what is left (value − booked − GRN, the VSR's own booking left out) is refused; an approval or additional job that goes past it only notifies purchasing and the supervisor (`lpoProblem`).
+- The GRN takes each VSR's accepted invoice (and units) off its line, in place of the booking. A VSR with no line gets the automatic choice: its vendor's lines valid today for the make and kind, ending first, the first with room. A short or missing LPO is notified and never blocks the GRN. VSRs charged at invoice acceptance before 2026-11-10 are not charged again.
+- Tyres fitted off a line with a life in km set the bus's tyre interval to it.
 
 Bus lifecycle: `inOperation` ──scrap request (creator; no open VSR)──▶ `scrapRequested` ──approve (supervisor)──▶ `scrapped` ──sale (supervisor)──▶ `sold`. Turning a request down or the creator cancelling it puts the bus back in operation. Only a bus in operation can have a VSR raised on it. A sold bus is archived: kept with all its history and never changed again. Reasons: `totalLoss`, `highRunningCost`, `endOfLife`.
 
@@ -43,7 +50,7 @@ Drawn signatures are saved once per person and stamped on escalate, approve, ack
 
 Documents are stored in `uploads/` (or `UPLOAD_DIR`), outside git, and served only through the API to people who can see the ticket. GRN and purchase invoice files stay with the depot.
 
-Vendors never receive: `breakdown`, `isBreakdown`, `intervalUsage`, `returnReason`, `lpoDeduction`, `grn`, `purchaseInvoice`, bus rates and intervals.
+Vendors never receive: `breakdown`, `isBreakdown`, `intervalUsage`, `returnReason`, `lpoLine`, `estimatedAmount`, `lpoDeduction`, `grn`, `purchaseInvoice`, bus rates and intervals. They do see `quantity` and `agreedPrice` on tyre and battery jobs, which are the job itself.
 
 Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed; raising a ticket picks it. Scrapping and Removed are never set by hand: approving a scrap request writes Scrapping on the day (source `scrap`), and the sale writes Removed on the sale day. From a bus's `scrappedOn` the sheet refuses changes; days before can still be corrected. A bus already removed before a month (or year) and unchanged in it is left off that period's sheets and reports.
 
@@ -51,6 +58,12 @@ Databases from before 2026-11-09 are brought over by `scripts/migrate-fleet-life
 
 ```bash
 node scripts/migrate-fleet-lifecycle.js --dry-run --uri mongodb://localhost:27017/muraqaba_next
+```
+
+Then `scripts/migrate-lpo-items.js` brings LPOs and open VSRs into the 2026-11-10 shape: it dates each LPO by its first day, moves the LPO's make onto its repair and maintenance lines, names every line by the rule, and gives each open VSR with no line the one its GRN would take it off, so it is booked. Past deductions are left alone. The same `--dry-run` and `--uri`:
+
+```bash
+node scripts/migrate-lpo-items.js --dry-run --uri mongodb://localhost:27017/muraqaba_next
 ```
 
 Every transition is recorded in the ticket's `history`.
@@ -121,7 +134,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/scrap-requests/:id/cancel | creator who raised it | The bus is back in operation |
 | GET | /api/scrap-requests/:id/attachments/:attachmentId | creator, supervisor, purchasing | Download a scrap request document |
 | GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&sort=oldest` |
-| POST | /api/tickets | creator, supervisor | Raise ticket, with optional `isBreakdown` |
+| POST | /api/tickets | creator, supervisor | Raise ticket, with optional `isBreakdown`. `lpoItemId` is required when lines fit the job; `quantity` for tyres and batteries off a line; `estimatedAmount` for repairs and brake pads off a line, and oil and transmission without a rate |
 | GET | /api/tickets/:id | any | Detail with `history`, all `invoices`, `linkedTickets` and signature drawings |
 | POST | /api/tickets/:id/estimate | vendor (owner) | Multipart: `amount`, `quotationNumber`, `daysToComplete`, `note`, `attachments` |
 | POST | /api/tickets/:id/estimate/reply | creator, supervisor | Multipart: optional `amount`, `note`, `attachments` |
@@ -131,7 +144,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/tickets/:id/approve | supervisor | pending → approved |
 | PUT | /api/tickets/:id/return | supervisor | pending → returned (`reason`, hidden from vendors) |
 | PUT | /api/tickets/:id/decline | supervisor | Additional job only: pending → declined (`reason`) |
-| PUT | /api/tickets/:id/details | creator, supervisor | Correct a returned ticket |
+| PUT | /api/tickets/:id/details, /api/tickets/:id | creator, supervisor | Correct a returned ticket, with the same fields as raising it |
 | PUT | /api/tickets/:id/accident | creator, supervisor | Accident repairs only, any status: `severity` (minor, medium, major), `fault` (ourDriver, otherParty, unknown). Never shown to vendors |
 | GET | /api/tickets/:id/attachments/:attachmentId | anyone who can see the ticket | Download a document |
 | PUT | /api/tickets/:id/acknowledge | vendor (owner) | approved → acknowledged; `daysToComplete` when it has an agreed price |
@@ -143,20 +156,23 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/tickets/:id/vehicle/release | vendor (owner) | readyForDelivery → vehicleReleased, with linked tickets |
 | PUT | /api/tickets/:id/vehicle/returned | creator, supervisor | vehicleReleased → vehicleReturned (`km`, `replacedPartsReceived`), with linked tickets. At the depot it confirms the work is done: readyForDelivery → vehicleReturned. A no-charge VSR (approved at AED 0 with a reason) then closes with no invoice |
 | POST | /api/tickets/:id/invoice | vendor (owner) | Multipart with a file: vehicleReturned or invoiceRejected → invoiceSubmitted |
-| PUT | /api/tickets/:id/invoice/accept | supervisor | invoiceSubmitted → invoiceAccepted, takes it off the LPO |
+| PUT | /api/tickets/:id/invoice/accept | supervisor | invoiceSubmitted → invoiceAccepted |
 | PUT | /api/tickets/:id/invoice/reject | supervisor | invoiceSubmitted → invoiceRejected (`reason`) |
 | PUT | /api/tickets/:id/invoice/received | creator, supervisor | invoiceAccepted → invoiceReceived |
 | PUT | /api/tickets/:id/forward | creator, supervisor | invoiceReceived → forwardedToPurchase |
 | GET | /api/grns | purchasing, supervisor, creator | List GRNs |
 | GET | /api/grns/export | purchasing | `?ticketIds=a,b` as an Excel file |
-| POST | /api/grns | purchasing | Multipart: `number`, `ticketIds`, `date`, `notes`, `attachments` |
+| POST | /api/grns | purchasing | Multipart: `number`, `ticketIds`, `date`, `notes`, `attachments`. Takes each VSR off its LPO line |
 | POST | /api/purchase-invoices | purchasing | Multipart: `number`, `grnId`, `date`, `amount`, `notes`, `attachments`; closes the VSRs |
-| GET | /api/lpos, /api/lpos/:id | purchasing, supervisor, creator | LPOs with their `make`; one LPO also lists the VSRs that used it |
-| POST | /api/lpos | purchasing | Create an LPO. Line kinds `repairMaintenance`, `tyre`, `battery`, `other`; `make` is required with a repairMaintenance line, refused without one, and must be a make on the fleet |
-| GET | /api/lpos/for-vsr | purchasing, supervisor, creator | `?busId=&vendorId=&serviceType=&amount=&quantity=`: which LPO the job would come off (`found`, `noLpo` or `notNeeded`), what is left on its line and, given an amount, whether it `fits`. Reads only; the charge uses the same choice |
+| GET | /api/lpos | purchasing, supervisor, creator | LPOs with amount totals `value`, `booked`, `grn`, `available`, `afterGrn`, `vsrs` and `inDate` |
+| GET | /api/lpos/:id | purchasing, supervisor, creator | One LPO; each line has its `balance` and its VSRs (`vsrs`: `_id`, `vsrNumber`, `fleetNumber`, `status`, `reserved`, `deducted`, `quantity`, `grnNumber`) |
+| POST | /api/lpos | purchasing | Create an LPO: `number`, `vendorId`, `date`, `validFrom`, `validTo`, `items`. Each line: `kind` `repairMaintenance` (`make` on the fleet, the amount as `unitPrice`), `tyre` (`size`, `quantity`, `unitPrice`, optional `lifeKm`) or `battery` (`size`, `quantity`, `unitPrice`); optional `description` |
+| GET | /api/lpos/items | purchasing, supervisor, creator | The LPO form's lists: fleet `makes`, `tyreSizes` and `batteryTypes` on LPOs |
+| GET | /api/lpos/for-vsr | purchasing, supervisor, creator | `?busId=&serviceType=&ticketId=`: the lines the job can come off, each with its LPO, item and `balance` (`ticketId` leaves that VSR's own booking out); `status` `found`, `noLpo` or `notNeeded` |
 | GET | /api/reports/query | purchasing | `?brand=&type=&year=&vendorId=&busId=&isBreakdown=&groupBy=` |
 | GET | /api/reports/fleet | creator, supervisor, purchasing | Month figures, `?year=&brand=` |
 | GET | /api/reports/weekly | supervisor | Last seven days and what is due |
+| GET | /api/reports/lpo-balances | purchasing, supervisor, creator | `?vendorId=&kind=&inDate=true\|false`: each LPO line's value, booked, GRN, available and after-GRN figures with VSRs issued, per-LPO subtotals and a total |
 | GET | /api/notifications | any | Your own, with `unread`. Runs the alert checks at most every few minutes |
 | PUT | /api/notifications/:id/read, /api/notifications/read-all | any | Mark read |
 | GET, PUT | /api/sheets/readings | read: creator, supervisor; write: creator | Daily km (`?month=YYYY-MM`) |

@@ -88,11 +88,32 @@ export const runChecks = async () => {
   await Promise.all([checkRegistrations(), checkServicesDue(), checkWeeklyReport()]);
 };
 
-/** Accepting an invoice found the vendor's LPO short or missing. */
+/** The GRN found the LPO short or missing (before 2026-11-10, accepting the invoice did). */
 export const notifyLpoProblem = (ticket) =>
   notifyRoles(['purchaseManager', 'supervisor'], {
     type: 'lpoProblem',
     params: { vsrNumber: ticket.vsrNumber, problem: ticket.lpoDeduction.status === 'noLpo' ? 'noLpo' : 'short', lpoNumber: ticket.lpoDeduction.lpoNumber, kind: ticket.lpoDeduction.kind },
     link: `/tickets/${ticket._id}`,
     dedupeKey: `lpo:${ticket._id}`,
+  });
+
+/** An approval or an additional job took the VSR's LPO line past its value. Nothing is stopped; people are told. */
+export const notifyLpoOverbooked = (ticket) =>
+  notifyRoles(['purchaseManager', 'supervisor'], {
+    type: 'lpoProblem',
+    params: { vsrNumber: ticket.vsrNumber, problem: 'short', lpoNumber: ticket.lpoLine.lpoNumber, kind: ticket.lpoLine.kind },
+    link: `/tickets/${ticket._id}`,
+    dedupeKey: `lpo:${ticket._id}:booked`,
+  });
+
+/**
+ * A VSR was raised with no LPO line to come off, so purchasing should write one. Purchasing cannot
+ * open a VSR before its invoice, so the notice takes them to a new LPO.
+ */
+export const notifyLpoMissing = (ticket, bus, kind) =>
+  notifyRoles(['purchaseManager'], {
+    type: 'lpoMissing',
+    params: { vsrNumber: ticket.vsrNumber, fleetNumber: bus.fleetNumber, make: bus.make, kind },
+    link: '/lpos/new',
+    dedupeKey: `lpoMissing:${ticket._id}`,
   });

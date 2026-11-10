@@ -98,11 +98,17 @@ const NegotiationRoundSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// Oil and transmission services: the rate on the bus times its interval, frozen when the ticket is raised.
+// A price fixed when the ticket is raised, so the VSR goes straight to the supervisor. Oil and
+// transmission: the rate on the bus times its interval. Tyres and batteries off an LPO line
+// (2026-11-10): the quantity times the line's unit price.
+export const AGREED_PRICE_BASES = ['rate', 'lpo'];
 const AgreedPriceSchema = new mongoose.Schema(
   {
-    rate: { type: Number, required: true, min: 0 }, // AED per km
-    km: { type: Number, required: true, min: 0 },
+    basis: { type: String, enum: AGREED_PRICE_BASES, default: 'rate' }, // older ones are all rate
+    rate: { type: Number, min: 0 }, // AED per km
+    km: { type: Number, min: 0 },
+    unitPrice: { type: Number, min: 0 },
+    quantity: { type: Number, min: 1 },
     amount: { type: Number, required: true, min: 0 },
   },
   { _id: false }
@@ -154,7 +160,21 @@ const BreakdownSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// What accepting the invoice took off the vendor's LPO. Never shown to vendors.
+// The LPO line the creator chose when raising or correcting the VSR (2026-11-10). Its amount is
+// booked against the line until the GRN deducts it. Never shown to vendors.
+const LpoLineSchema = new mongoose.Schema(
+  {
+    lpo: { type: mongoose.Schema.Types.ObjectId, ref: 'Lpo', required: true },
+    lpoNumber: { type: String, required: true },
+    item: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+    name: { type: String, required: true },
+    kind: { type: String, required: true },
+    unitPrice: { type: Number, min: 0 },
+  },
+  { _id: false }
+);
+
+// What the GRN took off the LPO; before 2026-11-10, what accepting the invoice took. Never shown to vendors.
 const LpoDeductionSchema = new mongoose.Schema(
   {
     status: { type: String, enum: ['deducted', 'noLpo'], required: true },
@@ -236,6 +256,9 @@ const TicketSchema = new mongoose.Schema(
       replacedPartsReceived: Boolean,
     },
     agreedPrice: AgreedPriceSchema,
+    lpoLine: LpoLineSchema,
+    quantity: { type: Number, min: 1 }, // tyres or batteries the job is for, as raised
+    estimatedAmount: { type: Number, min: 0 }, // the creator's estimate, booked against the LPO until approval
     intervalUsage: IntervalUsageSchema,
     approvedEstimate: { type: Number, min: 0 }, // the price the supervisor approved
     // Set when the approved estimate was AED 0: the job closes when the bus is back, with no invoice.

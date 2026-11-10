@@ -882,18 +882,71 @@
           },
           "agreedPrice": {
             "type": "object",
-            "description": "Oil and transmission: rate on the bus times its interval, frozen at raising",
+            "description": "Fixed at raising, so the VSR goes straight to the supervisor. rate: oil and transmission, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
             "properties": {
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "rate",
+                  "lpo"
+                ]
+              },
               "rate": {
                 "type": "number"
               },
               "km": {
                 "type": "number"
               },
+              "unitPrice": {
+                "type": "number"
+              },
+              "quantity": {
+                "type": "integer"
+              },
               "amount": {
                 "type": "number"
               }
             }
+          },
+          "lpoLine": {
+            "type": "object",
+            "description": "The LPO line chosen at raising or correction; its amount is booked on it until the GRN. Never sent to vendors.",
+            "properties": {
+              "lpo": {
+                "type": "string",
+                "example": "64b7f0c2e1d2a9b1c8a4f123"
+              },
+              "lpoNumber": {
+                "type": "string"
+              },
+              "item": {
+                "type": "string",
+                "example": "64b7f0c2e1d2a9b1c8a4f123"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "repairMaintenance",
+                  "tyre",
+                  "battery",
+                  "other"
+                ]
+              },
+              "unitPrice": {
+                "type": "number"
+              }
+            }
+          },
+          "quantity": {
+            "type": "integer",
+            "description": "Tyres or batteries the job is for. Vendors see it on tyre and battery jobs only."
+          },
+          "estimatedAmount": {
+            "type": "number",
+            "description": "The creator's estimate, booked on the LPO line until approval. Never sent to vendors."
           },
           "intervalUsage": {
             "type": "object",
@@ -930,7 +983,7 @@
           },
           "lpoDeduction": {
             "type": "object",
-            "description": "What accepting the invoice took off the LPO. Never sent to vendors.",
+            "description": "What the GRN took off the LPO (before 2026-11-10, accepting the invoice). Never sent to vendors.",
             "additionalProperties": true
           },
           "approvedEstimate": {
@@ -1559,7 +1612,7 @@
           }
         }
       },
-      "LpoPreview": {
+      "LpoLines": {
         "type": "object",
         "properties": {
           "kind": {
@@ -1582,48 +1635,160 @@
               "noLpo",
               "notNeeded"
             ],
-            "description": "notNeeded: other work with no Other line, as when charged"
+            "description": "notNeeded: other work, which comes off no line"
           },
-          "lpo": {
+          "lines": {
+            "type": "array",
+            "description": "The bus's own vendor's lines first, then the soonest ending, then by LPO number",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lpo": {
+                  "type": "object",
+                  "properties": {
+                    "_id": {
+                      "type": "string",
+                      "example": "64b7f0c2e1d2a9b1c8a4f123"
+                    },
+                    "number": {
+                      "type": "string"
+                    },
+                    "date": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "validTo": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "vendor": {
+                      "type": "object",
+                      "properties": {
+                        "_id": {
+                          "type": "string",
+                          "example": "64b7f0c2e1d2a9b1c8a4f123"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "item": {
+                  "type": "object",
+                  "properties": {
+                    "_id": {
+                      "type": "string",
+                      "example": "64b7f0c2e1d2a9b1c8a4f123"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "repairMaintenance",
+                        "tyre",
+                        "battery",
+                        "other"
+                      ]
+                    },
+                    "make": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "size": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "lifeKm": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "unitPrice": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "balance": {
+                  "$ref": "#/components/schemas/LpoBalance"
+                }
+              }
+            }
+          }
+        }
+      },
+      "LpoBalance": {
+        "type": "object",
+        "properties": {
+          "value": {
             "type": "object",
-            "nullable": true,
             "properties": {
-              "_id": {
-                "type": "string",
-                "example": "64b7f0c2e1d2a9b1c8a4f123"
-              },
-              "number": {
-                "type": "string"
-              },
-              "make": {
-                "type": "string",
-                "nullable": true,
-                "description": "null: covers every make"
-              },
-              "validFrom": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "validTo": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "lineTotal": {
+              "amount": {
                 "type": "number"
               },
-              "lineRemaining": {
-                "type": "number"
-              },
-              "remainingQuantity": {
+              "quantity": {
                 "type": "number",
-                "nullable": true,
-                "description": "Tyres and batteries only"
+                "nullable": true
               }
             }
           },
-          "fits": {
-            "type": "boolean",
-            "description": "Only when an amount is given and an LPO is found. false: this job would overrun it"
+          "booked": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "type": "number"
+              },
+              "quantity": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "description": "Open VSRs on the line not yet on a GRN"
+          },
+          "grn": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "type": "number"
+              },
+              "quantity": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "description": "What GRNs took off"
+          },
+          "available": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "type": "number"
+              },
+              "quantity": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "description": "value - booked - grn: the limit for the next VSR"
+          },
+          "afterGrn": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "type": "number"
+              },
+              "quantity": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "description": "value - grn"
+          },
+          "vsrs": {
+            "type": "integer",
+            "description": "VSRs on the line, every status but declined"
           }
         }
       }
@@ -4382,6 +4547,20 @@
                   "isBreakdown": {
                     "type": "boolean",
                     "description": "Broke down on the road. Never sent to vendors."
+                  },
+                  "lpoItemId": {
+                    "type": "string",
+                    "example": "64b7f0c2e1d2a9b1c8a4f123",
+                    "description": "The LPO line the job comes off; required when GET /api/lpos/for-vsr lists any. Its vendor does the work."
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Tyres and batteries off a line: priced at its unit price, straight to the supervisor"
+                  },
+                  "estimatedAmount": {
+                    "type": "number",
+                    "description": "Repairs and brake pads off a line, and oil and transmission off one without a rate on the bus"
                   }
                 }
               }
@@ -4852,6 +5031,103 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Correct the details of a returned ticket; the same as PUT /api/tickets/{id}/details",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/tickets/{id}/approve": {
@@ -5066,7 +5342,7 @@
         "tags": [
           "Tickets"
         ],
-        "summary": "Correct the details of a returned ticket",
+        "summary": "Correct the details of a returned ticket, with the same fields as raising it. Checked against what its LPO line has left without its own booking.",
         "description": "Roles: serviceCreator, supervisor",
         "security": [
           {
@@ -7235,7 +7511,7 @@
         "tags": [
           "Purchasing"
         ],
-        "summary": "Make one GRN for a batch of forwarded VSRs from one vendor (multipart: number, ticketIds, date, notes, attachments)",
+        "summary": "Make one GRN for a batch of forwarded VSRs from one vendor (multipart: number, ticketIds, date, notes, attachments). Takes each VSR's accepted invoice off its LPO line.",
         "description": "Roles: purchaseManager",
         "security": [
           {
@@ -7493,7 +7769,7 @@
         "tags": [
           "Purchasing"
         ],
-        "summary": "List LPOs",
+        "summary": "List LPOs, each with amount totals value, booked, grn, available, afterGrn, vsrs and inDate",
         "description": "Roles: purchaseManager, supervisor, serviceCreator",
         "security": [
           {
@@ -7599,7 +7875,7 @@
         "tags": [
           "Purchasing"
         ],
-        "summary": "Create an LPO. Repairs, brake pads, oil and transmission come off one repairMaintenance line for one make; tyre, battery and other LPOs name no make and cover every bus.",
+        "summary": "Create an LPO. The API names each line: Repair & Maintenance of {make} Buses, Tyre size {size}, Battery {type}.",
         "description": "Roles: purchaseManager",
         "security": [
           {
@@ -7616,6 +7892,7 @@
                 "required": [
                   "number",
                   "vendorId",
+                  "date",
                   "validFrom",
                   "validTo",
                   "items"
@@ -7628,9 +7905,9 @@
                     "type": "string",
                     "example": "64b7f0c2e1d2a9b1c8a4f123"
                   },
-                  "make": {
+                  "date": {
                     "type": "string",
-                    "description": "Required with a repairMaintenance line and refused without one. Must be a make on the fleet, in any letter case; stored as the fleet spells it."
+                    "format": "date"
                   },
                   "validFrom": {
                     "type": "string",
@@ -7645,10 +7922,7 @@
                     "items": {
                       "type": "object",
                       "required": [
-                        "kind",
-                        "name",
-                        "quantity",
-                        "unitPrice"
+                        "kind"
                       ],
                       "properties": {
                         "kind": {
@@ -7656,21 +7930,34 @@
                           "enum": [
                             "repairMaintenance",
                             "tyre",
-                            "battery",
-                            "other"
+                            "battery"
                           ]
                         },
-                        "name": {
-                          "type": "string"
+                        "make": {
+                          "type": "string",
+                          "description": "repairMaintenance only, required: a make on the fleet in any letter case, stored as the fleet spells it"
+                        },
+                        "size": {
+                          "type": "string",
+                          "description": "The tyre size or battery type; required for those"
+                        },
+                        "lifeKm": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Tyres only, optional. Fitting them sets the bus's tyre interval to it"
                         },
                         "description": {
-                          "type": "string"
+                          "type": "string",
+                          "maxLength": 300
                         },
                         "quantity": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Tyres and batteries; repair and maintenance is always 1"
                         },
                         "unitPrice": {
-                          "type": "number"
+                          "type": "number",
+                          "description": "Above 0. For repair and maintenance, the amount"
                         }
                       }
                     }
@@ -7757,12 +8044,91 @@
         }
       }
     },
+    "/api/lpos/items": {
+      "get": {
+        "tags": [
+          "Purchasing"
+        ],
+        "summary": "The LPO form's lists: the fleet's makes, and the tyre sizes and battery types already on LPOs",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "makes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "tyreSizes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "batteryTypes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/lpos/for-vsr": {
       "get": {
         "tags": [
           "Purchasing"
         ],
-        "summary": "Which LPO a job would come off, for the new VSR form and the VSR page. Reads only; accepting the invoice uses the same choice.",
+        "summary": "The LPO lines a job can be raised against, with what is left on each, for the new VSR and correction forms. Reads only.",
         "description": "Roles: purchaseManager, supervisor, serviceCreator",
         "security": [
           {
@@ -7778,15 +8144,6 @@
               "type": "string",
               "example": "64b7f0c2e1d2a9b1c8a4f123"
             }
-          },
-          {
-            "name": "vendorId",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "example": "64b7f0c2e1d2a9b1c8a4f123"
-            },
-            "description": "Defaults to the bus's vendor"
           },
           {
             "name": "serviceType",
@@ -7806,22 +8163,13 @@
             }
           },
           {
-            "name": "amount",
+            "name": "ticketId",
             "in": "query",
             "schema": {
-              "type": "number",
-              "minimum": 0
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
             },
-            "description": "AED. Given, the answer says whether it fits"
-          },
-          {
-            "name": "quantity",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "description": "Tyres or batteries fitted, matched as the charge matches them"
+            "description": "A VSR being corrected: its own booking is left out of what is left"
           }
         ],
         "responses": {
@@ -7840,7 +8188,7 @@
                       "type": "string"
                     },
                     "data": {
-                      "$ref": "#/components/schemas/LpoPreview"
+                      "$ref": "#/components/schemas/LpoLines"
                     }
                   }
                 }
@@ -7895,7 +8243,7 @@
         "tags": [
           "Purchasing"
         ],
-        "summary": "One LPO with the VSRs that used it",
+        "summary": "One LPO; each line with its balance and its VSRs (vsrs: _id, vsrNumber, fleetNumber, status, reserved, deducted, quantity, grnNumber)",
         "description": "Roles: purchaseManager, supervisor, serviceCreator",
         "security": [
           {
@@ -7959,6 +8307,151 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/lpo-balances": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Each LPO line's value, booked, GRN, available and after-GRN figures and VSRs issued, with per-LPO subtotals (amounts) and a total",
+        "description": "Roles: purchaseManager, supervisor, serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "vendorId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "repairMaintenance",
+                "tyre",
+                "battery",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "inDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "description": "Valid today or not; left out, every LPO"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "today": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "lpos": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "total": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "filters": {
+                          "type": "object",
+                          "properties": {
+                            "vendors": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            },
+                            "kinds": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
             "content": {
               "application/json": {
                 "schema": {

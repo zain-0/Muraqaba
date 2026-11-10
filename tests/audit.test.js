@@ -2,10 +2,10 @@
  * What an independent review of the workshop flow found: races, dead ends, and data that
  * slipped past the checks. Each test names the failure it stops happening again.
  */
-import { test, before, after, describe } from 'node:test';
+import { test, before, after, afterEach, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
-import { api, busBody, createBus, estimate, fillBreakdown, multipart, newVendor, run, signInEveryone, toAcknowledged, toForwarded, toInvoiceAccepted } from './helpers.js';
+import { api, busBody, clearLpos, createBus, estimate, fillBreakdown, grnFor, multipart, newVendor, run, signInEveryone, testDb, toAcknowledged, toForwarded, toInvoiceAccepted } from './helpers.js';
 
 let users;
 let bus;
@@ -277,13 +277,21 @@ describe('after the review', () => {
 
   describe('LPO and figures', () => {
     const YEAR = new Date().getUTCFullYear();
-    const VALID = { validFrom: '2026-01-01', validTo: '2099-12-31' };
+    const VALID = { date: '2026-01-01', validFrom: '2026-01-01', validTo: '2099-12-31' };
     const lpoOf = (vendor, label, items) => api('POST', '/lpos', { token: users.purchasing.token, body: { number: `LPO-${run}-${label}`, vendorId: vendor.id, ...VALID, items } });
+    // Any vendor's line can carry a job, so these LPOs must not reach the tests after.
+    afterEach(clearLpos);
+    /** Through to the GRN, which is where the LPO is charged since 2026-11-10. */
+    const chargedAtGrn = async (ticket, vendor, amount, label) => {
+      await toForwarded(users, ticket, vendor, { invoice: { amount } });
+      assert.equal((await grnFor(users, ticket._id, label)).status, 201);
+      return (await api('GET', `/tickets/${ticket._id}`, { token: users.supervisor.token })).body.data;
+    };
 
     test('a tyre job counts its tyres, not its valves and weights', async () => {
       const vendor = await newVendor('aud-lpo');
       const own = await createBus(users, 'AUDT', vendor.id, { rates: undefined });
-      await lpoOf(vendor, 'T', [{ kind: 'tyre', name: 'Tyre', quantity: 10, unitPrice: 800 }]);
+      // Raised before the LPO, so it is priced by the vendor's estimate and charged by the automatic choice.
       const ticket = await raise({ serviceType: 'tyre', repairCategory: undefined, currentReading: 1000 }, own._id);
       await estimate(ticket._id, vendor.token, { amount: '1700' });
       const saved = await put(ticket._id, 'breakdown', users.creator.token, {
@@ -296,24 +304,37 @@ describe('after the review', () => {
       });
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
       assert.equal(saved.body.data.breakdown.unitsFitted, 2);
+      assert.equal((await put(ticket._id, 'breakdown', users.creator.token, { unitsFitted: -1, consumables: 1 })).status, 400, 'and it is checked');
       await put(ticket._id, 'escalate', users.creator.token);
-      const done = await toInvoiceAccepted(users, { ...ticket, status: 'pending' }, vendor, { invoice: { amount: '1700' } });
+      assert.equal((await lpoOf(vendor, 'T', [{ kind: 'tyre', size: '295/80 R22.5', quantity: 10, unitPrice: 800 }])).status, 201);
+      const done = await chargedAtGrn({ ...ticket, status: 'pending' }, vendor, '1700', 'AUDT');
       assert.equal(done.lpoDeduction.quantity, 2);
       assert.equal(done.lpoDeduction.overrun, false);
-      assert.equal((await put(ticket._id, 'breakdown', users.creator.token, { unitsFitted: -1, consumables: 1 })).status, 400, 'and it is checked');
     });
 
-    test('other work comes off an Other line when the vendor has one, and is quiet when not', async () => {
+    test('other work comes off nothing and is quiet, unless an older LPO has an Other line for it', async () => {
       const vendor = await newVendor('aud-other');
       const own = await createBus(users, 'AUDX', vendor.id, { rates: undefined });
-      const none = await toInvoiceAccepted(users, await raise({ serviceType: 'other', repairCategory: undefined, currentReading: 1000 }, own._id), vendor, { invoice: { amount: '300' } });
+      const none = await chargedAtGrn(await raise({ serviceType: 'other', repairCategory: undefined, currentReading: 1000 }, own._id), vendor, '300', 'AUDX1');
       assert.equal(none.lpoDeduction, undefined, 'no line for it, so no warning');
+      assert.equal((await lpoOf(vendor, 'X', [{ kind: 'other', name: 'Cleaning', quantity: 1, unitPrice: 5000 }])).body.errors[0].field, 'items[0].kind', 'Other is no longer offered');
 
-      const lpo = (await lpoOf(vendor, 'X', [{ kind: 'other', name: 'Cleaning', quantity: 1, unitPrice: 5000 }])).body.data;
-      const done = await toInvoiceAccepted(users, await raise({ serviceType: 'other', repairCategory: undefined, currentReading: 1000 }, own._id), vendor, { invoice: { amount: '300' } });
+      // An LPO written before 2026-11-10 with an Other line.
+      const connection = await testDb();
+      const lineId = new mongoose.Types.ObjectId();
+      const lpoId = new mongoose.Types.ObjectId();
+      try {
+        await connection.collection('lpos').insertOne({
+          _id: lpoId, number: `LPO-${run}-X`, vendor: new mongoose.Types.ObjectId(vendor.id), validFrom: new Date('2026-01-01'), validTo: new Date('2099-12-31'), grandTotal: 5000, usedAmount: 0, createdBy: new mongoose.Types.ObjectId(users.purchasing.id),
+          items: [{ _id: lineId, kind: 'other', name: 'Cleaning', quantity: 1, unitPrice: 5000, total: 5000, usedQuantity: 0, usedAmount: 0 }],
+        });
+      } finally {
+        await connection.close();
+      }
+      const done = await chargedAtGrn(await raise({ serviceType: 'other', repairCategory: undefined, currentReading: 1000 }, own._id), vendor, '300', 'AUDX2');
       assert.equal(done.lpoDeduction.status, 'deducted');
       assert.equal(done.lpoDeduction.quantity, 0);
-      const after = (await api('GET', `/lpos/${lpo._id}`, { token: users.purchasing.token })).body.data;
+      const after = (await api('GET', `/lpos/${lpoId}`, { token: users.purchasing.token })).body.data;
       assert.equal(after.items[0].usedAmount, 300);
     });
 

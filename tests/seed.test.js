@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { mkdtemp, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import mongoose from 'mongoose';
+import { balanceOf } from '../utils/lpoBalance.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const run = promisify(execFile);
@@ -49,22 +50,41 @@ describe('demo data', () => {
       assert.ok(maintenance, 'an oil service came off a repair and maintenance LPO');
       assert.equal(maintenance.lpoDeduction.quantity, 0);
 
-      // LPOs by make (2026-11-09): repair and maintenance for one make, tyres and batteries for every make.
+      // LPOs by make (2026-11-09), with the make on the line (2026-11-10): repair and maintenance for
+      // one make, tyres by size and batteries by type for every make. Every LPO is dated.
       const buses = connection.collection('buses');
       const fleet = await buses.find().toArray();
       const allLpos = await lpos.find().toArray();
-      assert.ok(allLpos.every((lpo) => lpo.items.every((item) => ['repairMaintenance', 'tyre', 'battery', 'other'].includes(item.kind))), 'only the new line kinds');
       for (const lpo of allLpos) {
-        const forMake = lpo.items.some((item) => item.kind === 'repairMaintenance');
-        assert.equal(Boolean(lpo.make), forMake, `${lpo.number} names a make only for repair and maintenance`);
-        if (forMake) assert.ok(fleet.some((bus) => bus.make === lpo.make && String(bus.vendor) === String(lpo.vendor)), `${lpo.number} is for a make its vendor looks after`);
+        assert.ok(lpo.date && !('make' in lpo), `${lpo.number} is dated and names no make of its own`);
+        for (const item of lpo.items) {
+          assert.ok(['repairMaintenance', 'tyre', 'battery'].includes(item.kind), `${lpo.number} only the kinds offered`);
+          assert.equal(Boolean(item.make), item.kind === 'repairMaintenance', `${lpo.number} ${item.name} names a make only for repair and maintenance`);
+          if (item.make) {
+            assert.ok(fleet.some((bus) => bus.make === item.make && String(bus.vendor) === String(lpo.vendor)), `${lpo.number} is for a make its vendor looks after`);
+            assert.equal(item.name, `Repair & Maintenance of ${item.make} Buses`);
+          } else {
+            assert.ok(item.size && item.name.endsWith(item.size), `${lpo.number} ${item.name} has its size or type`);
+          }
+        }
       }
+      const lineOf = (id) => allLpos.flatMap((lpo) => lpo.items).find((item) => String(item._id) === String(id));
       const offDeducted = await tickets.find({ 'lpoDeduction.status': 'deducted', 'lpoDeduction.kind': 'repairMaintenance' }).toArray();
       for (const ticket of offDeducted) {
-        const lpo = allLpos.find((l) => String(l._id) === String(ticket.lpoDeduction.lpo));
         const bus = fleet.find((b) => String(b._id) === String(ticket.busId));
-        assert.equal(lpo.make, bus.make, `${ticket.vsrNumber} came off the LPO for its bus's make`);
+        assert.equal(lineOf(ticket.lpoDeduction.item).make, bus.make, `${ticket.vsrNumber} came off the line for its bus's make`);
       }
+
+      // Each VSR is raised against a line and booked on it; the GRN deducts it there (2026-11-10).
+      const all = await tickets.find().toArray();
+      for (const ticket of all.filter((t) => t.lpoDeduction)) {
+        assert.ok(ticket.grn, `${ticket.vsrNumber} is charged only once it is on a GRN`);
+        if (ticket.lpoDeduction.status === 'deducted') assert.equal(String(ticket.lpoDeduction.item), String(ticket.lpoLine?.item), `${ticket.vsrNumber} came off the line it was raised against`);
+      }
+      assert.ok(all.some((t) => t.lpoLine && !t.lpoDeduction && !['completed', 'declined'].includes(t.status)), 'a VSR booked but not yet on a GRN');
+      assert.ok(all.some((t) => t.serviceType === 'tyre' && t.agreedPrice?.basis === 'lpo' && t.history[0].status === 'pending'), 'tyres off a line went straight to the supervisor');
+      const balances = allLpos.flatMap((lpo) => lpo.items.map((item) => balanceOf(item, all)));
+      assert.ok(balances.some((balance) => balance.available.quantity === 1), 'one line nearly used up, so a VSR for two is refused');
 
       // One bus scrapped and sold, one waiting on a scrap request; neither has work open.
       const requests = await connection.collection('scraprequests').find().toArray();

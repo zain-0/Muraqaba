@@ -9,9 +9,13 @@ import { TICKET_POPULATE, paginate } from '../utils/query.js';
 import { sendStored, withStoredAttachments } from '../utils/uploads.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
-import { deductFromLpo } from '../utils/lpoDeduction.js';
+import { candidateLines, LINE_FOR_SERVICE, lpoLineOf } from '../utils/lpoDeduction.js';
+import { COUNTED_BY_QUANTITY, balancesFor, isOverdrawn, reservedAmount } from '../utils/lpoBalance.js';
+import { toFils } from '../utils/reportMaths.js';
 import { stamp } from '../utils/signatures.js';
-import { notifyLpoProblem } from '../utils/notifications.js';
+import { notifyLpoMissing, notifyLpoOverbooked } from '../utils/notifications.js';
+import { hasText } from '../middleware/validationMiddleware.js';
+import { Lpo } from '../models/Purchase.js';
 import { assertScanConfigured, scanQuotation, SCANNABLE_TYPES } from '../utils/quotationScan.js';
 import { CASE_BLIND } from '../utils/unique.js';
 
@@ -65,9 +69,11 @@ const historyForVendor = (entry) => {
 const forViewer = (user, ticket) => {
   const json = ticket.toJSON ? ticket.toJSON() : ticket;
   if (user.role !== 'vendor') return json;
-  const { returnReason, intervalUsage, isBreakdown, accident, breakdown, grn, purchaseInvoice, lpoDeduction, forwardedAt, invoiceReceivedAt, ...rest } = json;
+  const { returnReason, intervalUsage, isBreakdown, accident, breakdown, grn, purchaseInvoice, lpoDeduction, lpoLine, estimatedAmount, quantity, forwardedAt, invoiceReceivedAt, ...rest } = json;
   return {
     ...rest,
+    // How many tyres or batteries is the job itself; what the LPO holds is not the vendor's business.
+    ...(COUNTED_BY_QUANTITY.includes(json.serviceType) && quantity !== undefined ? { quantity } : {}),
     busId: busForVendor(json.busId),
     history: (json.history || []).filter((entry) => !DEPOT_STEPS.includes(entry.status)).map(historyForVendor),
     signatures: (json.signatures || []).filter((stamp) => !DEPOT_STAMPS.includes(stamp.step)),
@@ -107,7 +113,86 @@ const priceFromBusRate = ({ bus, vendor, serviceType }) => {
   const rate = bus.rates?.[serviceType];
   if (!rate || !bus.vendor.equals(vendor._id)) return undefined;
   const km = bus.intervals[serviceType].everyKm;
-  return { rate, km, amount: Math.round(rate * km * 100) / 100 };
+  return { basis: 'rate', rate, km, amount: Math.round(rate * km * 100) / 100 };
+};
+
+const fieldError = (field, message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field, message }]);
+
+/**
+ * The LPO line the creator chose, checked against the lines this job can come off (2026-11-10).
+ * When lines exist one has to be chosen, and its vendor does the work. Null when there are none:
+ * the VSR is still raised, and purchasing is told.
+ */
+const chosenLine = async ({ bus, serviceType, lpoItemId, vendorId }) => {
+  const lines = await candidateLines({ bus, serviceType });
+  if (!lines.length) {
+    if (hasText(lpoItemId)) throw fieldError('lpoItemId', 'This LPO cannot be used for this job');
+    return null;
+  }
+  if (!hasText(lpoItemId)) throw fieldError('lpoItemId', 'Choose the LPO this job comes off');
+  const line = lines.find(({ item }) => item._id.equals(lpoItemId));
+  if (!line) throw fieldError('lpoItemId', 'This LPO cannot be used for this job');
+  if (hasText(vendorId) && !line.lpo.vendor._id.equals(vendorId)) {
+    throw fieldError('lpoItemId', `This LPO belongs to ${line.lpo.vendor.name}. Choose that vendor or another LPO.`);
+  }
+  return line;
+};
+
+/**
+ * How the VSR is priced and what it books. With a line, tyres and batteries are the quantity times
+ * the line's unit price, an agreed price that goes straight to the supervisor; repairs and brake
+ * pads take the creator's estimate; oil and transmission the rate on the bus, or without one the
+ * creator's estimate. With no line, as before 2026-11-10: the rate on the bus or the vendor's estimate.
+ */
+const pricing = ({ bus, vendor, serviceType, line, quantity, estimatedAmount }) => {
+  const rated = priceFromBusRate({ bus, vendor, serviceType });
+  const counted = COUNTED_BY_QUANTITY.includes(serviceType);
+  if (!line) return { agreedPrice: rated, quantity: counted && quantity ? quantity : undefined, estimatedAmount: undefined };
+  if (counted) {
+    if (!quantity) throw fieldError('quantity', 'Enter how many');
+    const { unitPrice } = line.item;
+    return { agreedPrice: { basis: 'lpo', unitPrice, quantity, amount: money(quantity * unitPrice) }, quantity, estimatedAmount: undefined };
+  }
+  if (rated) return { agreedPrice: rated, quantity: undefined, estimatedAmount: undefined };
+  if (!estimatedAmount) throw fieldError('estimatedAmount', 'Enter the estimated amount');
+  return { agreedPrice: undefined, quantity: undefined, estimatedAmount };
+};
+
+const AED = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Raising or correcting is refused when the job is more than its line has left, counting every
+ * booking and GRN but the VSR's own. Later increases (approval, additional jobs, the GRN) are not.
+ */
+const assertLineHasRoom = async (ticket, line) => {
+  if (!line) return;
+  const { available } = (await balancesFor([line.lpo], { exclude: ticket._id })).get(String(line.item._id));
+  const counted = COUNTED_BY_QUANTITY.includes(line.item.kind);
+  const { number } = line.lpo;
+  const { name } = line.item;
+  if (counted && ticket.quantity > available.quantity) throw fieldError('quantity', `LPO ${number} has ${Math.max(available.quantity, 0)} left of ${name}.`);
+  if (toFils(reservedAmount(ticket)) <= toFils(available.amount)) return;
+  // The error sits on the field the creator can change; a rate price or an estimate can only go on another LPO.
+  const field = counted ? 'quantity' : ticket.estimatedAmount !== undefined ? 'estimatedAmount' : 'lpoItemId';
+  throw fieldError(field, `LPO ${number} has AED ${AED.format(Math.max(available.amount, 0))} left for ${name}. Ask purchasing to add to it, or choose another LPO.`);
+};
+
+/** Purchasing hears of a job raised with no LPO to come off. Other work needs none. A failure here must not fail the VSR. */
+const tellPurchasingNoLpo = async (ticket, bus) => {
+  if (ticket.lpoLine?.item || ticket.serviceType === 'other') return;
+  await notifyLpoMissing(ticket, bus, LINE_FOR_SERVICE[ticket.serviceType]).catch((err) => console.error('Could not tell purchasing about the missing LPO:', err));
+};
+
+/** An increase after raising never blocks; if it takes the VSR's line past its value, purchasing and the supervisor are told. */
+export const flagIfOverbooked = async (ticket) => {
+  if (!ticket.lpoLine?.item) return;
+  try {
+    const lpo = await Lpo.findById(ticket.lpoLine.lpo);
+    const balance = lpo && (await balancesFor([lpo])).get(String(ticket.lpoLine.item));
+    if (balance && isOverdrawn(balance)) await notifyLpoOverbooked(ticket);
+  } catch (err) {
+    console.error('Could not check the LPO:', err);
+  }
 };
 
 const readingError = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'currentReading', message }]);
@@ -142,17 +227,22 @@ const assertInOperation = (bus) => {
   if (NO_VSR_WHILE[bus.lifecycle]) throw new AppError(NO_VSR_WHILE[bus.lifecycle], 409, 'INVALID_STATE');
 };
 
-/** The fields the creator fills in, shared by raising a ticket and correcting a returned one. */
-const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown, location, accident }, user) => {
+/**
+ * The fields the creator fills in, shared by raising a ticket and correcting a returned one.
+ * Returns them with the bus and the chosen LPO line (or null), which the checks after need.
+ */
+const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown, location, accident, lpoItemId, quantity, estimatedAmount }, user) => {
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
   assertInOperation(bus);
   assertBusTracks(bus, serviceType);
-  const vendor = await assertVendorExists(vendorId || bus.vendor);
+  const line = await chosenLine({ bus, serviceType, lpoItemId, vendorId });
+  // A chosen line brings its vendor.
+  const vendor = await assertVendorExists(line ? line.lpo.vendor._id : vendorId || bus.vendor);
   const intervalUsage = usageWhenRaised(bus, serviceType, currentReading);
   assertReadingAfterLastService(intervalUsage);
   assertReadingAfterAnyService(bus, currentReading);
-  return {
+  const fields = {
     busId: bus._id,
     serviceType,
     repairCategory: serviceType === 'repair' ? repairCategory : undefined,
@@ -163,23 +253,27 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
     ...(location ? { location } : {}),
     accident: isAccident({ serviceType, repairCategory }) ? { severity: accident.severity, fault: accident.fault, updatedBy: user._id, updatedAt: new Date() } : undefined,
     vendorId: vendor._id,
-    agreedPrice: priceFromBusRate({ bus, vendor, serviceType }),
+    ...pricing({ bus, vendor, serviceType, line, quantity, estimatedAmount }),
+    lpoLine: line ? lpoLineOf(line) : undefined,
     intervalUsage,
   };
+  return { fields, bus, line };
 };
 
 // POST /api/tickets
 export const createTicket = asyncHandler(async (req, res) => {
-  const fields = await requestFields(req.body, req.user);
+  const { fields, bus, line } = await requestFields(req.body, req.user);
   // An agreed price leaves nothing to negotiate, so it goes straight to the supervisor.
   const status = fields.agreedPrice ? 'pending' : 'sentToVendor';
   const ticket = new Ticket({ ...fields, status, createdBy: req.user._id });
+  await assertLineHasRoom(ticket, line);
   if (fields.agreedPrice) stamp(ticket, req.user, 'escalated');
   ticket.vsrNumber = await nextVsrNumber();
   ticket.history.push({ status, by: req.user._id, note: 'VSR created' });
   await ticket.save();
   // The VSR is real by now, so a problem with the daily sheet must not report it as failed.
   await applyTicketToBusDay(ticket, req.user._id).catch((err) => console.error('Could not update the daily sheet:', err));
+  await tellPurchasingNoLpo(ticket, bus);
 
   await respond(res, ticket, fields.agreedPrice ? 'VSR created and sent for supervisor approval' : 'VSR created and sent to the vendor', 201);
 });
@@ -285,6 +379,7 @@ export const approveTicket = asyncHandler(async (req, res) => {
   ticket.noChargeReason = latest?.noChargeReason;
   stamp(ticket, req.user, 'approved');
   ticket.transition('approved', req.user._id, req.body?.note);
+  // The approved amount is what stays booked on the LPO line from here (2026-11-10).
   // An additional job's bus is already at the vendor, so it has no sending or receiving of its own.
   if (ticket.parentTicket) {
     const { vehicle } = await Ticket.findById(ticket.parentTicket).select('vehicle');
@@ -293,6 +388,7 @@ export const approveTicket = asyncHandler(async (req, res) => {
     ticket.transition('vehicleReceived', req.user._id, undefined, { effectiveAt: vehicle.receivedAt, km: vehicle.receivedKm });
   }
   await ticket.save();
+  await flagIfOverbooked(ticket);
   await respond(res, ticket, ticket.parentTicket ? 'Additional job approved. The vendor can work on it.' : 'VSR approved. The vendor has been asked to acknowledge it.');
 });
 
@@ -333,7 +429,10 @@ export const correctTicketDetails = asyncHandler(async (req, res) => {
   assertStatus(ticket, 'returned', `Only returned VSRs can be changed (this one is ${ticket.status})`);
   // It travels in its parent's bus, so its bus and kind are not open to change.
   if (ticket.parentTicket) throw new AppError('An additional job cannot be changed. Reply to the vendor or send it for approval again.', 409, 'INVALID_STATE');
-  const fields = await requestFields(req.body, req.user);
+  const { fields, bus, line } = await requestFields(req.body, req.user);
+  // A VSR already priced by the vendor's estimate keeps it: the LPO line books it, and its tyres or
+  // batteries are not repriced from the line, which would override the negotiation.
+  if (!ticket.agreedPrice && fields.agreedPrice?.basis === 'lpo') fields.agreedPrice = undefined;
   // Estimates belong to the vendor who wrote them, and a new vendor must not read a rival's prices.
   if (ticket.negotiation.length && !fields.vendorId.equals(ticket.vendorId)) {
     throw new AppError('The vendor cannot be changed once estimates have started. Raise a new VSR instead.', 409, 'INVALID_STATE');
@@ -343,14 +442,17 @@ export const correctTicketDetails = asyncHandler(async (req, res) => {
   if (Boolean(fields.agreedPrice) !== Boolean(ticket.agreedPrice)) {
     throw new AppError('This change would switch how the VSR is priced, between the bus rate and the vendor\'s estimate. Raise a new VSR instead.', 409, 'INVALID_STATE');
   }
-  // The price was set when the VSR was raised. Only another bus or service is priced afresh.
+  // A rate price was set when the VSR was raised; only another bus or service is priced afresh.
+  // A price off an LPO line follows the line and the quantity the creator gives.
   const samePricing = fields.busId.equals(ticket.busId) && fields.serviceType === ticket.serviceType && fields.vendorId.equals(ticket.vendorId);
-  if (samePricing) delete fields.agreedPrice;
+  if (samePricing && fields.agreedPrice?.basis !== 'lpo') delete fields.agreedPrice;
   const busChanged = !fields.busId.equals(ticket.busId);
   ticket.set(fields);
+  await assertLineHasRoom(ticket, line);
   if (busChanged && ticket.breakdown?.labourHours) await repriceLabour(ticket);
   ticket.transition('returned', req.user._id, 'Details corrected');
   await ticket.save();
+  await tellPurchasingNoLpo(ticket, bus);
   await respond(res, ticket, 'VSR details saved');
 });
 
@@ -561,17 +663,9 @@ export const acceptInvoice = asyncHandler(async (req, res) => {
   invoice.approvedBy = req.user._id;
   await invoice.save();
 
+  // Nothing comes off the LPO here any more: the GRN deducts it (2026-11-10).
   ticket.transition('invoiceAccepted', req.user._id, req.body?.note);
   await ticket.save();
-
-  // The invoice stands whatever happens to the LPO, so a failure here must not undo it.
-  try {
-    ticket.lpoDeduction = await deductFromLpo(ticket, invoice);
-    if (ticket.lpoDeduction) await ticket.save();
-    if (ticket.lpoDeduction?.status === 'noLpo' || ticket.lpoDeduction?.overrun) await notifyLpoProblem(ticket);
-  } catch (err) {
-    console.error('Could not update the LPO:', err);
-  }
   await respond(res, ticket, 'Invoice accepted. The service creator receives it and forwards it to purchasing.');
 });
 

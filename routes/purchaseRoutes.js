@@ -1,5 +1,5 @@
 import express from 'express';
-import { createGrn, createLpo, createPurchaseInvoice, exportBatch, getLpo, listGrns, listLpos, lpoForVsr } from '../controllers/purchaseController.js';
+import { createGrn, createLpo, createPurchaseInvoice, exportBatch, getLpo, listGrns, listLpos, lpoForVsr, lpoItems } from '../controllers/purchaseController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
 import { validateGrn, validateGrnExport, validateLpo, validateLpoPreview, validateObjectId, validatePurchaseInvoice } from '../middleware/validationMiddleware.js';
@@ -23,4 +23,5 @@ lpoRoutes.use(authMiddleware);
 lpoRoutes.get('/', DEPOT, listLpos);
 lpoRoutes.post('/', PURCHASING, validateLpo, createLpo);
 lpoRoutes.get('/for-vsr', DEPOT, validateLpoPreview, lpoForVsr);
+lpoRoutes.get('/items', DEPOT, lpoItems);
 lpoRoutes.get('/:id', DEPOT, validateObjectId, getLpo);

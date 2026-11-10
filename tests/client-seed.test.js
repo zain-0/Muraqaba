@@ -82,18 +82,53 @@ describe('client seed', () => {
         }
       }
 
-      // Repair and maintenance are one line for one make, the make most of the vendor's buses have (2026-11-09).
+      // Repair and maintenance are one line for one make, the make most of the vendor's buses have
+      // (2026-11-09), held on the line; tyre and battery lines keep the size and life the records give (2026-11-10).
       const fleet = await db('buses').find().toArray();
-      for (const lpo of await db('lpos').find().toArray()) {
+      const loaded = await db('lpos').find().toArray();
+      for (const lpo of loaded) {
+        const source = data.lpos.find((l) => l.number === lpo.number);
+        assert.equal(lpo.date.toISOString().slice(0, 10), source.validFrom, `${lpo.number} is dated its first day`);
+        assert.ok(!('make' in lpo), `${lpo.number} names no make of its own`);
         assert.ok(lpo.items.every((item) => !['repair', 'maintenance'].includes(item.kind)), `${lpo.number} has no old line kinds`);
-        assert.ok(lpo.items.filter((item) => item.kind === 'repairMaintenance').length <= 1, `${lpo.number} has one repair and maintenance line`);
-        const forMake = lpo.items.some((item) => item.kind === 'repairMaintenance');
-        assert.equal(Boolean(lpo.make), forMake, `${lpo.number} names a make only for repair and maintenance`);
-        if (!forMake) continue;
-        const makes = fleet.filter((bus) => String(bus.vendor) === String(lpo.vendor)).map((bus) => bus.make);
-        const most = Math.max(...makes.map((make) => makes.filter((m) => m.toLowerCase() === make.toLowerCase()).length));
-        assert.equal(makes.filter((m) => m.toLowerCase() === lpo.make.toLowerCase()).length, most, `${lpo.number} is for its vendor's main make`);
+        const repairs = lpo.items.filter((item) => item.kind === 'repairMaintenance');
+        assert.ok(repairs.length <= 1, `${lpo.number} has one repair and maintenance line`);
+        for (const item of repairs) {
+          const makes = fleet.filter((bus) => String(bus.vendor) === String(lpo.vendor)).map((bus) => bus.make);
+          const most = Math.max(...makes.map((make) => makes.filter((m) => m.toLowerCase() === make.toLowerCase()).length));
+          assert.equal(makes.filter((m) => m.toLowerCase() === item.make.toLowerCase()).length, most, `${lpo.number} is for its vendor's main make`);
+          assert.equal(item.name, `Repair & Maintenance of ${item.make} Buses`);
+        }
+        const counted = lpo.items.filter((item) => ['tyre', 'battery'].includes(item.kind));
+        const given = source.items.filter((item) => ['tyre', 'battery'].includes(item.kind));
+        assert.deepEqual(counted.map((item) => [item.size, item.lifeKm]), given.map((item) => [item.size ?? undefined, item.lifeKm ?? undefined]), `${lpo.number} sizes and lives as in the records`);
+        for (const item of counted) assert.equal(item.name, item.size ? `${item.kind === 'tyre' ? 'Tyre size' : 'Battery'} ${item.size}` : item.kind === 'tyre' ? 'Tyres' : 'Batteries');
       }
+
+      // Each VSR is on the line of the LPO the records charge it to, and only its GRN deducted it. An
+      // open VSR the records charge to none yet is booked where the app would take it off: its own
+      // vendor's line valid today, for its make if it is repair and maintenance.
+      const lineAt = new Map(loaded.flatMap((lpo) => lpo.items.map((item) => [String(item._id), { lpo, item }])));
+      const busAt = new Map(fleet.map((bus) => [String(bus._id), bus]));
+      const today = new Date().toISOString().slice(0, 10);
+      for (const vsr of data.vsrs) {
+        const ticket = byNumber.get(vsr.vsrNumber);
+        const on = ticket.lpoLine && lineAt.get(String(ticket.lpoLine.item));
+        if (vsr.lpo && on) assert.equal(on.lpo.number, vsr.lpo, `${vsr.vsrNumber} on its LPO`);
+        if (!vsr.lpo && on) {
+          assert.ok(!ticket.lpoDeduction && !['completed', 'declined'].includes(ticket.status), `${vsr.vsrNumber} open and booked`);
+          assert.ok(String(on.lpo.vendor) === String(ticket.vendorId) && on.lpo.validTo.toISOString().slice(0, 10) >= today, `${vsr.vsrNumber} on its vendor's LPO in date`);
+          if (on.item.kind === 'repairMaintenance') assert.equal(on.item.make.toLowerCase(), busAt.get(String(ticket.busId)).make.toLowerCase(), `${vsr.vsrNumber} for its make`);
+        }
+        if (['tyre', 'battery'].includes(vsr.serviceType) && vsr.parts?.quantity) assert.equal(ticket.quantity, vsr.parts.quantity, `${vsr.vsrNumber} quantity`);
+        if (ticket.lpoDeduction) assert.ok(ticket.grn, `${vsr.vsrNumber} charged at its GRN`);
+        if (ticket.lpoDeduction?.status === 'deducted') assert.equal(String(ticket.lpoDeduction.item), String(ticket.lpoLine.item), `${vsr.vsrNumber} came off its own line`);
+      }
+      // What the GRNs took off the lines, and what had no LPO, is what those VSRs cost.
+      const usedFils = loaded.flatMap((lpo) => lpo.items).reduce((sum, item) => sum + Math.round(item.usedAmount * 100), 0);
+      const noLpoFils = tickets.filter((t) => t.lpoDeduction?.status === 'noLpo').reduce((sum, t) => sum + Math.round(t.lpoDeduction.amount * 100), 0);
+      const spentFils = tickets.filter((t) => t.grn).reduce((sum, t) => sum + Math.round(invoices.get(String(t.invoice)).amount * 100), 0);
+      assert.equal(usedFils + noLpoFils, spentFils, 'GRN on the lines plus no LPO is the spend on VSRs with a GRN');
 
       // Each bus's lifecycle is what its latest daily status says.
       const statusesOf = new Map();
