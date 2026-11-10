@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Ticket, { PURCHASE_VISIBLE_STATUSES } from '../models/Ticket.js';
 import Bus from '../models/Bus.js';
 import Invoice from '../models/Invoice.js';
+import User from '../models/User.js';
 import { nextVsrNumber } from '../models/Counter.js';
 import { assertVendorExists } from './busController.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
@@ -14,17 +15,36 @@ import { COUNTED_BY_QUANTITY, balancesFor, isOverdrawn, reservedAmount } from '.
 import { toFils } from '../utils/reportMaths.js';
 import { stamp } from '../utils/signatures.js';
 import { notifyLpoMissing, notifyLpoOverbooked } from '../utils/notifications.js';
-import { hasText } from '../middleware/validationMiddleware.js';
+import { MAX_TICKET_SEARCH, hasText } from '../middleware/validationMiddleware.js';
 import { Lpo } from '../models/Purchase.js';
 import { assertScanConfigured, scanQuotation, SCANNABLE_TYPES } from '../utils/quotationScan.js';
 import { CASE_BLIND } from '../utils/unique.js';
+
+/** Typed text as a literal, case-blind pattern: every regex character is escaped, so it cannot run as one. */
+const literalPattern = (text) => mongoose.trusted({ $regex: text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
+
+/**
+ * What `q` matches, as one $or: the VSR number, the side number or plate of its bus, and for
+ * depot roles the vendor's name. A vendor only ever sees their own VSRs, so their name is no help
+ * to them. It only narrows: buildListFilter keeps every role and ownership rule beside it.
+ */
+const searchClauses = async (user, text) => {
+  const pattern = literalPattern(text);
+  const busIds = await Bus.find({ $or: [{ fleetNumber: pattern }, { registrationNumber: pattern }] }).distinct('_id');
+  const clauses = [{ vsrNumber: pattern }, { busId: mongoose.trusted({ $in: busIds }) }];
+  if (user.role !== 'vendor') {
+    const vendorIds = await User.find({ role: 'vendor', name: pattern }).distinct('_id');
+    clauses.push({ vendorId: mongoose.trusted({ $in: vendorIds }) });
+  }
+  return clauses;
+};
 
 /**
  * Build the Mongo filter a user is allowed to see, combined with optional query filters.
  * Operator objects built here are server-controlled, so they are marked trusted; the global
  * sanitizeFilter setting still neutralises operators smuggled in through user input.
  */
-const buildListFilter = (user, q = {}) => {
+const buildListFilter = async (user, q = {}) => {
   const filter = {};
   if (user.role === 'vendor') filter.vendorId = user._id;
   if (user.role === 'purchaseManager') {
@@ -40,6 +60,8 @@ const buildListFilter = (user, q = {}) => {
   }
   if (q.busId) filter.busId = q.busId;
   if (q.mine) filter.createdBy = user._id;
+  const text = typeof q.q === 'string' ? q.q.trim().slice(0, MAX_TICKET_SEARCH) : '';
+  if (text) filter.$or = await searchClauses(user, text);
   return filter;
 };
 
@@ -278,9 +300,9 @@ export const createTicket = asyncHandler(async (req, res) => {
   await respond(res, ticket, fields.agreedPrice ? 'VSR created and sent for supervisor approval' : 'VSR created and sent to the vendor', 201);
 });
 
-// GET /api/tickets  (role-scoped; supports ?status=&busId=&mine=&page=&limit=)
+// GET /api/tickets  (role-scoped; supports ?status=&busId=&mine=&q=&page=&limit=)
 export const listTickets = asyncHandler(async (req, res) => {
-  const result = await paginate(Ticket, buildListFilter(req.user, req.query), {
+  const result = await paginate(Ticket, await buildListFilter(req.user, req.query), {
     page: req.query.page,
     limit: req.query.limit,
     sort: req.query.sort,
@@ -291,7 +313,7 @@ export const listTickets = asyncHandler(async (req, res) => {
 
 const listWithStatus = (status) =>
   asyncHandler(async (req, res) => {
-    const result = await paginate(Ticket, buildListFilter(req.user, { ...req.query, status }), {
+    const result = await paginate(Ticket, await buildListFilter(req.user, { ...req.query, status }), {
       page: req.query.page,
       limit: req.query.limit,
       sort: req.query.sort,
@@ -307,7 +329,7 @@ export const getCompletedTickets = listWithStatus('completed');
 
 // GET /api/tickets/my-tickets
 export const getMyTickets = asyncHandler(async (req, res) => {
-  const result = await paginate(Ticket, buildListFilter(req.user, { ...req.query, mine: true }), {
+  const result = await paginate(Ticket, await buildListFilter(req.user, { ...req.query, mine: true }), {
     page: req.query.page,
     limit: req.query.limit,
     sort: req.query.sort,

@@ -296,6 +296,58 @@ describe('Muraqaba API', () => {
       const badStatus = await api('GET', '/tickets?status=bogus', { token: users.creator.token });
       assert.equal(badStatus.status, 400);
     });
+
+    test('q searches every page by VSR number, side number, plate and vendor name, and only narrows', async () => {
+      const raise = async (suffix, vendorId) => {
+        const bus = await api('POST', '/buses', { token: users.creator.token, body: busBody(suffix, vendorId, { rates: undefined }) });
+        assert.equal(bus.status, 201, JSON.stringify(bus.body));
+        const vsr = await api('POST', '/tickets', {
+          token: users.creator.token,
+          body: { busId: bus.body.data._id, serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 1000, description: 'Search test job.' },
+        });
+        assert.equal(vsr.status, 201, JSON.stringify(vsr.body));
+        return { bus: bus.body.data, vsr: vsr.body.data };
+      };
+      const mine = await raise('QX', users.vendor1.id);
+      const theirs = await raise('QY', users.vendor2.id);
+      const search = async (user, q, extra = '') => {
+        const res = await api('GET', `/tickets?limit=200&q=${encodeURIComponent(q)}${extra}`, { token: user.token });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return res.body.data.map((t) => t._id);
+      };
+
+      // Number, side number and plate, in any letter case, from a page size of 1 too: the server searches.
+      const byNumber = await search(users.creator, mine.vsr.vsrNumber.toLowerCase());
+      assert.ok(byNumber.includes(mine.vsr._id));
+      assert.ok(!byNumber.includes(theirs.vsr._id));
+      const firstOnly = await api('GET', `/tickets?limit=1&page=1&q=${encodeURIComponent(mine.vsr.vsrNumber)}`, { token: users.creator.token });
+      assert.equal(firstOnly.body.data[0]._id, mine.vsr._id);
+      const bySide = await search(users.supervisor, `  ${mine.bus.fleetNumber.toLowerCase()}  `);
+      assert.deepEqual(bySide, [mine.vsr._id]);
+      const byPlate = await search(users.creator, theirs.bus.registrationNumber);
+      assert.deepEqual(byPlate, [theirs.vsr._id]);
+      // The depot finds a vendor's jobs by the vendor's name.
+      const byVendor = await search(users.creator, `vendor-two ${run}`);
+      assert.ok(byVendor.includes(theirs.vsr._id));
+      assert.ok(!byVendor.includes(mine.vsr._id));
+
+      // A vendor never reaches another vendor's VSR through q, by number, bus or name.
+      for (const q of [theirs.vsr.vsrNumber, theirs.bus.fleetNumber, theirs.bus.registrationNumber, `vendor-two ${run}`]) {
+        assert.deepEqual(await search(users.vendor1, q), [], `vendor one searching ${q}`);
+      }
+      assert.deepEqual(await search(users.vendor1, mine.bus.fleetNumber), [mine.vsr._id]);
+
+      // It only narrows the other filters and each role's scope.
+      assert.deepEqual(await search(users.creator, mine.bus.fleetNumber, '&status=completed'), []);
+      assert.deepEqual(await search(users.purchasing, mine.vsr.vsrNumber), []);
+
+      // Typed text is literal: regex characters match only themselves, and a long paste still searches.
+      assert.deepEqual(await search(users.creator, '.*'), []);
+      assert.deepEqual(await search(users.creator, '(['), []);
+      assert.ok((await search(users.creator, `${mine.bus.fleetNumber}${'x'.repeat(200)}`)).length === 0);
+      const twice = await api('GET', '/tickets?q=a&q=b', { token: users.creator.token });
+      assert.equal(twice.status, 400);
+    });
   });
 
   describe('audit regressions', () => {
@@ -595,6 +647,17 @@ describe('Muraqaba API', () => {
 
       const detail = await api('GET', `/buses/${bus._id}`, { token: users.creator.token });
       assert.equal(detail.body.data.openTickets, 1);
+    });
+
+    test("the purchase manager's total value adds every visible VSR's current invoice, not one page of them", async () => {
+      const dash = (await api('GET', '/users/dashboard', { token: users.purchasing.token })).body.data;
+      let fils = 0;
+      for (let page = 1; ; page += 1) {
+        const list = (await api('GET', `/tickets?limit=50&page=${page}`, { token: users.purchasing.token })).body;
+        fils += list.data.reduce((sum, ticket) => sum + Math.round((ticket.invoice?.amount ?? 0) * 100), 0);
+        if (page >= list.pages) break;
+      }
+      assert.equal(Math.round(dash.invoiceTotal * 100), fils);
     });
 
     test('lists can be ordered oldest first', async () => {

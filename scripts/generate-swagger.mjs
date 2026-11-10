@@ -235,6 +235,12 @@ const ticketListQuery = [
   { name: 'status', in: 'query', schema: { type: 'string', enum: TICKET_STATUSES } },
   { name: 'busId', in: 'query', schema: objectId },
   { name: 'mine', in: 'query', schema: { type: 'boolean' }, description: 'Only tickets created by the caller' },
+  {
+    name: 'q',
+    in: 'query',
+    schema: { type: 'string', maxLength: 60 },
+    description: "Search, case-blind and literal: part of the VSR number, the bus's side number or plate, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see.",
+  },
   ...pageQuery,
 ];
 

@@ -102,12 +102,21 @@ const vendorDashboard = async (user) => {
 };
 
 const purchaseManagerDashboard = async (user) => {
-  const [tickets, amounts] = await Promise.all([
-    // Same scope as the purchase manager's ticket list: only tickets that have an invoice, so a
-    // no-charge job, which closes without one, is left out.
-    countByStatus({ status: mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES }), noChargeReason: mongoose.trusted({ $exists: false }) }),
+  // Same scope as the purchase manager's ticket list: only tickets that have an invoice, so a
+  // no-charge job, which closes without one, is left out.
+  const visible = { status: mongoose.trusted({ $in: PURCHASE_VISIBLE_STATUSES }), noChargeReason: mongoose.trusted({ $exists: false }) };
+  const [tickets, amounts, current] = await Promise.all([
+    countByStatus(visible),
     Invoice.aggregate([
       { $group: { _id: '$status', n: { $sum: 1 }, amount: { $sum: '$amount' } } },
+    ]),
+    // The "Total value" tile: each of those VSRs' current invoice, summed here rather than over the
+    // page of VSRs the dashboard loads, which on a real fleet is only part of them. Summed in fils.
+    Ticket.aggregate([
+      { $match: { status: { $in: PURCHASE_VISIBLE_STATUSES }, noChargeReason: { $exists: false }, invoice: { $exists: true } } },
+      { $lookup: { from: Invoice.collection.name, localField: 'invoice', foreignField: '_id', as: 'current' } },
+      { $unwind: '$current' },
+      { $group: { _id: null, fils: { $sum: { $round: [{ $multiply: ['$current.amount', 100] }, 0] } } } },
     ]),
   ]);
   const invoices = { pending: { count: 0, amount: 0 }, approved: { count: 0, amount: 0 }, rejected: { count: 0, amount: 0 } };
@@ -119,6 +128,7 @@ const purchaseManagerDashboard = async (user) => {
     role: user.role,
     tickets,
     invoices,
+    invoiceTotal: (current[0]?.fils ?? 0) / 100,
     actionRequired: tickets.forwardedToPurchase + tickets.grnCreated,
   };
 };
