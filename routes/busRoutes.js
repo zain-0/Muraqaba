@@ -1,5 +1,6 @@
 import express from 'express';
 import { getAllBuses, getBusById, createBus, updateBus } from '../controllers/busController.js';
+import { getBusCosts } from '../controllers/busCostController.js';
 import { downloadSaleAttachment, recordSale } from '../controllers/scrapController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
@@ -17,6 +18,7 @@ router.get('/', roleMiddleware(READERS), getAllBuses);
 router.post('/', roleMiddleware(MANAGERS), validateBusCreate, createBus);
 router.post('/create', roleMiddleware(MANAGERS), validateBusCreate, createBus); // legacy path
 router.get('/:id', roleMiddleware(READERS), validateObjectId, getBusById);
+router.get('/:id/costs', roleMiddleware(READERS), validateObjectId, getBusCosts);
 router.put('/:id', roleMiddleware(['serviceCreator']), validateObjectId, validateBusUpdate, updateBus);
 router.put('/:id/sale', roleMiddleware(['supervisor']), validateObjectId, parseAttachments, validateSale, recordSale);
 router.get('/:id/sale/attachments/:attachmentId', roleMiddleware(READERS), validateAttachmentParams, downloadSaleAttachment);
