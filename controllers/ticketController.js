@@ -6,7 +6,7 @@ import User from '../models/User.js';
 import { nextVsrNumber } from '../models/Counter.js';
 import { assertVendorExists } from './busController.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
-import { TICKET_POPULATE, paginate } from '../utils/query.js';
+import { BY_VSR_NUMBER, TICKET_POPULATE, paginate } from '../utils/query.js';
 import { sendStored, withStoredAttachments } from '../utils/uploads.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
@@ -20,23 +20,40 @@ import { Lpo } from '../models/Purchase.js';
 import { assertScanConfigured, scanQuotation, SCANNABLE_TYPES } from '../utils/quotationScan.js';
 import { CASE_BLIND } from '../utils/unique.js';
 
-/** Typed text as a literal, case-blind pattern: every regex character is escaped, so it cannot run as one. */
-const literalPattern = (text) => mongoose.trusted({ $regex: text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' });
+/** Typed text with every regex character escaped, so it cannot run as one. */
+const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Typed text as a literal, case-blind pattern. */
+const literalPattern = (text) => mongoose.trusted({ $regex: literal(text), $options: 'i' });
+
+/** Matches nothing: a $or needs at least one clause. */
+const noMatch = () => [{ _id: mongoose.trusted({ $in: [] }) }];
 
 /**
- * What `q` matches, as one $or: the VSR number, the side number or plate of its bus, and for
- * depot roles the vendor's name. A vendor only ever sees their own VSRs, so their name is no help
- * to them. It only narrows: buildListFilter keeps every role and ownership rule beside it.
+ * What `q` matches, as one $or. `field` is where the person chose to look (validateTicketListQuery
+ * lists them): all of them, or only the VSR number, the bus's side number, its plate, its brand and
+ * type, or for depot roles the vendor's name. A vendor only ever sees their own VSRs, so their name
+ * is no help to them. It only narrows: buildListFilter keeps every role and ownership rule beside it.
  */
-const searchClauses = async (user, text) => {
+const searchClauses = async (user, text, field = 'all') => {
   const pattern = literalPattern(text);
-  const busIds = await Bus.find({ $or: [{ fleetNumber: pattern }, { registrationNumber: pattern }] }).distinct('_id');
-  const clauses = [{ vsrNumber: pattern }, { busId: mongoose.trusted({ $in: busIds }) }];
-  if (user.role !== 'vendor') {
+  const wanted = (name) => field === 'all' || field === name;
+  const clauses = [];
+  if (wanted('vsr')) clauses.push({ vsrNumber: pattern });
+  const bus = [];
+  if (wanted('side')) bus.push({ fleetNumber: pattern });
+  if (wanted('plate')) bus.push({ registrationNumber: pattern });
+  // Brand and type as the list shows them, "Hino Coach", so either one or both together match.
+  if (wanted('brandType')) {
+    const input = { $concat: [{ $ifNull: ['$make', ''] }, ' ', { $ifNull: ['$model', ''] }] };
+    bus.push({ $expr: mongoose.trusted({ $regexMatch: { input, regex: literal(text), options: 'i' } }) });
+  }
+  if (bus.length) clauses.push({ busId: mongoose.trusted({ $in: await Bus.find({ $or: bus }).distinct('_id') }) });
+  if (wanted('vendor') && user.role !== 'vendor') {
     const vendorIds = await User.find({ role: 'vendor', name: pattern }).distinct('_id');
     clauses.push({ vendorId: mongoose.trusted({ $in: vendorIds }) });
   }
-  return clauses;
+  return clauses.length ? clauses : noMatch();
 };
 
 /**
@@ -61,7 +78,7 @@ const buildListFilter = async (user, q = {}) => {
   if (q.busId) filter.busId = q.busId;
   if (q.mine) filter.createdBy = user._id;
   const text = typeof q.q === 'string' ? q.q.trim().slice(0, MAX_TICKET_SEARCH) : '';
-  if (text) filter.$or = await searchClauses(user, text);
+  if (text) filter.$or = await searchClauses(user, text, q.searchIn);
   return filter;
 };
 
@@ -300,43 +317,27 @@ export const createTicket = asyncHandler(async (req, res) => {
   await respond(res, ticket, fields.agreedPrice ? 'VSR created and sent for supervisor approval' : 'VSR created and sent to the vendor', 201);
 });
 
-// GET /api/tickets  (role-scoped; supports ?status=&busId=&mine=&q=&page=&limit=)
-export const listTickets = asyncHandler(async (req, res) => {
-  const result = await paginate(Ticket, await buildListFilter(req.user, req.query), {
-    page: req.query.page,
-    limit: req.query.limit,
-    sort: req.query.sort,
-    populate: TICKET_POPULATE,
-  });
-  res.json({ ...result, data: result.data.map((t) => forViewer(req.user, t)) });
-});
-
-const listWithStatus = (status) =>
+/** One page of the VSRs this user may see, newest VSR number first (sort=oldest reverses it). */
+const listPage = (overrides = {}) =>
   asyncHandler(async (req, res) => {
-    const result = await paginate(Ticket, await buildListFilter(req.user, { ...req.query, status }), {
+    const result = await paginate(Ticket, await buildListFilter(req.user, { ...req.query, ...overrides }), {
       page: req.query.page,
       limit: req.query.limit,
       sort: req.query.sort,
+      by: BY_VSR_NUMBER,
       populate: TICKET_POPULATE,
     });
     res.json({ ...result, data: result.data.map((t) => forViewer(req.user, t)) });
   });
 
+// GET /api/tickets  (role-scoped; supports ?status=&busId=&mine=&q=&searchIn=&page=&limit=&sort=)
+export const listTickets = listPage();
 // GET /api/tickets/pending
-export const getAllPendingTickets = listWithStatus('pending');
+export const getAllPendingTickets = listPage({ status: 'pending' });
 // GET /api/tickets/completed
-export const getCompletedTickets = listWithStatus('completed');
-
+export const getCompletedTickets = listPage({ status: 'completed' });
 // GET /api/tickets/my-tickets
-export const getMyTickets = asyncHandler(async (req, res) => {
-  const result = await paginate(Ticket, await buildListFilter(req.user, { ...req.query, mine: true }), {
-    page: req.query.page,
-    limit: req.query.limit,
-    sort: req.query.sort,
-    populate: TICKET_POPULATE,
-  });
-  res.json(result);
-});
+export const getMyTickets = listPage({ mine: true });
 
 /** Loads a ticket with the same visibility rules for the detail page and its files. */
 const loadVisibleTicket = async (req) => {

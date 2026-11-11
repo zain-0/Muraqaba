@@ -54,6 +54,8 @@ const pageQuery = [
   { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 } },
   { name: 'sort', in: 'query', schema: { type: 'string', enum: ['newest', 'oldest'], default: 'newest' }, description: 'Order by creation date' },
 ];
+/** VSR lists run by VSR number, compared as numbers, with an additional job (VSR-0012b) beside its parent. */
+const vsrPageQuery = pageQuery.map((param) => (param.name === 'sort' ? { ...param, description: 'Order by VSR number, compared as numbers: newest is the highest number first' } : param));
 
 const user = {
   type: 'object',
@@ -239,9 +241,15 @@ const ticketListQuery = [
     name: 'q',
     in: 'query',
     schema: { type: 'string', maxLength: 60 },
-    description: "Search, case-blind and literal: part of the VSR number, the bus's side number or plate, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see.",
+    description: "Search, case-blind and literal: part of the VSR number, the bus's side number, plate, brand and type, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see.",
   },
-  ...pageQuery,
+  {
+    name: 'searchIn',
+    in: 'query',
+    schema: { type: 'string', enum: ['all', 'vsr', 'side', 'plate', 'brandType', 'vendor'], default: 'all' },
+    description: 'Where q looks: everywhere, or only the VSR number, side number, plate, brand and type, or vendor name. A vendor searching by vendor finds nothing: every VSR they see is their own.',
+  },
+  ...vsrPageQuery,
 ];
 
 const spec = {
@@ -357,9 +365,9 @@ const spec = {
         response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409),
       }),
     },
-    '/api/tickets/pending': { get: op('Tickets', 'Tickets awaiting supervisor approval', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
-    '/api/tickets/my-tickets': { get: op('Tickets', 'Tickets created by the caller', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
-    '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: pageQuery, response: listEnvelope(ref('Ticket')) }) },
+    '/api/tickets/pending': { get: op('Tickets', 'Tickets awaiting supervisor approval', ['serviceCreator', 'supervisor'], { query: vsrPageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
+    '/api/tickets/my-tickets': { get: op('Tickets', 'Tickets created by the caller', ['serviceCreator', 'supervisor'], { query: vsrPageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
+    '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: vsrPageQuery, response: listEnvelope(ref('Ticket')) }) },
     '/api/tickets/{id}': {
       get: op('Tickets', 'Ticket detail with full invoice history', ROLES, { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 404) }),
       put: op('Tickets', 'Correct the details of a returned ticket; the same as PUT /api/tickets/{id}/details', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }),

@@ -497,12 +497,16 @@ const pageQuery = [
 /** Longest search the VSR lists take: more than any VSR number, side number, plate or vendor name needs. */
 export const MAX_TICKET_SEARCH = 60;
 
+/** Where the VSR search looks: everywhere, or only the VSR number, side number, plate, brand and type, or vendor. */
+export const TICKET_SEARCH_FIELDS = ['all', 'vsr', 'side', 'plate', 'brandType', 'vendor'];
+
 export const validateTicketListQuery = [
   qstr('status').isIn(TICKET_STATUSES).withMessage('Unknown status'),
   qstr('busId').isMongoId().withMessage('Invalid bus'),
   qstr('mine').isBoolean().withMessage('mine must be true or false').toBoolean(),
   // Free text, trimmed and cut to length rather than refused: a pasted long line still searches.
   qstr('q').trim().customSanitizer((value) => value.slice(0, MAX_TICKET_SEARCH)),
+  qstr('searchIn').isIn(TICKET_SEARCH_FIELDS).withMessage('Choose where to search'),
   ...pageQuery,
   handleValidationErrors,
 ];
