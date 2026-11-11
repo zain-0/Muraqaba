@@ -2642,12 +2642,262 @@
         }
       }
     },
+    "/api/sheets/readings/report": {
+      "get": {
+        "tags": [
+          "Sheets"
+        ],
+        "summary": "Km each bus ran between two days: its last reading on or before `to`, less its last reading on or before `from` (with none by then, its first reading in the range: startsLater). km is null with no reading in the range. Rows for the buses chosen, or the whole fleet; `buses` lists every bus to choose from.",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-10-01"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "2026-10-31"
+            }
+          },
+          {
+            "name": "busIds",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated bus ids; left out, the whole fleet"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sheets/readings/import/preview": {
+      "post": {
+        "tags": [
+          "Sheets"
+        ],
+        "summary": "What importing an Excel workbook of km readings would do; nothing is saved. Multipart form: one .xlsx in attachments, and month (YYYY-MM) for a header of day numbers. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each). Reads the client's grid (a row per bus, a header row of dates) or a list with the columns Side number, Date and Km. Counts new, changed, unchanged, refused (with the reason) and skipped (words such as cancel, and 0) readings. Each reading meets the rules typing it would, in date order.",
+        "description": "Roles: serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "attachments"
+                ],
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "example": "2026-10"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sheets/readings/import": {
+      "post": {
+        "tags": [
+          "Sheets"
+        ],
+        "summary": "Import the workbook: the same check as the preview, then the new and changed readings are saved (data.saved). Multipart form: one .xlsx in attachments, and month (YYYY-MM). Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each).",
+        "description": "Roles: serviceCreator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "attachments"
+                ],
+                "properties": {
+                  "month": {
+                    "type": "string",
+                    "example": "2026-10"
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sheets/status": {
       "get": {
         "tags": [
           "Sheets"
         ],
-        "summary": "Daily status of every bus in a month, with a day-wise summary",
+        "summary": "Daily status of every bus in a month, with a day-wise summary. Raising a VSR marks the bus out from that day; the bus being back (vehicle returned) makes it Ready, or the status of another open VSR on it. Scrapping and removed are never overridden, and a day set by hand keeps it (the VSR change starts the next day).",
         "description": "Roles: serviceCreator, supervisor",
         "security": [
           {

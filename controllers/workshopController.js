@@ -7,6 +7,7 @@ import Ticket from '../models/Ticket.js';
 import { Lpo } from '../models/Purchase.js';
 import { BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
+import { applyReturnToBusDay } from '../utils/busDay.js';
 import { usageWhenRaised } from '../utils/intervals.js';
 import { LINE_FOR_SERVICE } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
@@ -204,6 +205,8 @@ export const markVehicleReturned = asyncHandler(async (req, res) => {
   await Promise.all(moving.map((member) => member.save()));
   await Promise.all(moving.map((member) => moveLastService(member, km, when)));
   await BusDailyReading.updateOne({ bus: ticket.busId, date: uaeDay(when) }, { $setOnInsert: { km, by: req.user._id } }, { upsert: true });
+  // The bus is back, so the daily sheet shows it Ready (2026-11-11). The step is recorded either way.
+  await applyReturnToBusDay(self, req.user._id, when).catch((err) => console.error('Could not update the daily sheet:', err));
   await respond(res, self, BACK_MESSAGES[depot ? 'depot' : 'trip'][self.noChargeReason ? 1 : 0]);
 });
 

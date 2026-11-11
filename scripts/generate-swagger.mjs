@@ -317,8 +317,31 @@ const spec = {
       get: op('Sheets', 'Daily km readings for every bus in a month', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
       put: op('Sheets', 'Save or clear one day of a bus (km: null clears it)', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date'], properties: { busId: objectId, date: { type: 'string' }, km: { type: 'integer', nullable: true } } }, response: { type: 'object' }, more: pick(400, 403, 404) }),
     },
+    '/api/sheets/readings/report': {
+      get: op('Sheets', "Km each bus ran between two days: its last reading on or before `to`, less its last reading on or before `from` (with none by then, its first reading in the range: startsLater). km is null with no reading in the range. Rows for the buses chosen, or the whole fleet; `buses` lists every bus to choose from.", ['serviceCreator', 'supervisor'], {
+        query: [
+          { name: 'from', in: 'query', required: true, schema: { type: 'string', example: '2026-10-01' } },
+          { name: 'to', in: 'query', required: true, schema: { type: 'string', example: '2026-10-31' } },
+          { name: 'busIds', in: 'query', schema: { type: 'string', description: 'Comma-separated bus ids; left out, the whole fleet' } },
+        ],
+        response: { type: 'object' },
+        more: pick(400, 403),
+      }),
+    },
+    '/api/sheets/readings/import/preview': {
+      post: {
+        ...op('Sheets', `What importing an Excel workbook of km readings would do; nothing is saved. ${multipartNote('one .xlsx in attachments, and month (YYYY-MM) for a header of day numbers')} Reads the client's grid (a row per bus, a header row of dates) or a list with the columns Side number, Date and Km. Counts new, changed, unchanged, refused (with the reason) and skipped (words such as cancel, and 0) readings. Each reading meets the rules typing it would, in date order.`, ['serviceCreator'], { response: { type: 'object' }, more: pick(400, 403) }),
+        requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['attachments'], properties: { month: { type: 'string', example: '2026-10' }, attachments: { type: 'array', items: { type: 'string', format: 'binary' } } } } } } },
+      },
+    },
+    '/api/sheets/readings/import': {
+      post: {
+        ...op('Sheets', `Import the workbook: the same check as the preview, then the new and changed readings are saved (data.saved). ${multipartNote('one .xlsx in attachments, and month (YYYY-MM)')}`, ['serviceCreator'], { response: { type: 'object' }, more: pick(400, 403) }),
+        requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['attachments'], properties: { month: { type: 'string', example: '2026-10' }, attachments: { type: 'array', items: { type: 'string', format: 'binary' } } } } } } },
+      },
+    },
     '/api/sheets/status': {
-      get: op('Sheets', 'Daily status of every bus in a month, with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
+      get: op('Sheets', 'Daily status of every bus in a month, with a day-wise summary. Raising a VSR marks the bus out from that day; the bus being back (vehicle returned) makes it Ready, or the status of another open VSR on it. Scrapping and removed are never overridden, and a day set by hand keeps it (the VSR change starts the next day).', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
       put: op('Sheets', 'Change a bus status from a day onward. Scrapping and removed are refused (they come from scrap requests), and so is any day from a scrapped or sold bus\'s scrappedOn (409).', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date', 'status'], properties: { busId: objectId, date: { type: 'string' }, status: { type: 'string', enum: ['ready', 'repair', 'maintenance', 'tyreChange', 'batteryChange', 'accident'] } } }, response: { type: 'object' }, more: pick(400, 403, 404, 409) }),
     },
     '/api/sheets/repairs': { get: op('Sheets', 'Repair process list with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }) },
