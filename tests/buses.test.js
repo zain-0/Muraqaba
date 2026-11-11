@@ -62,7 +62,7 @@ describe('buses', () => {
 
     const early = await raise(bus._id, { serviceType: 'oil', currentReading: 9700 });
     assert.equal(early.status, 201, JSON.stringify(early.body));
-    assert.equal(early.body.data.status, 'pending');
+    assert.equal(early.body.data.status, 'approved', 'an agreed price goes to the vendor to acknowledge');
     assert.deepEqual(early.body.data.agreedPrice, { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 });
     assert.deepEqual(early.body.data.intervalUsage, { unit: 'km', interval: 10000, actual: 9700, left: 300, delayed: 0 });
 

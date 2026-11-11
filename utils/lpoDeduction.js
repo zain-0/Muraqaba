@@ -15,6 +15,7 @@ import Bus from '../models/Bus.js';
 import { Lpo } from '../models/Purchase.js';
 import { COUNTED_BY_QUANTITY, balanceOf, balancesFor, reservedAmount, unitsOf } from './lpoBalance.js';
 import { brandKey, toAed, toFils } from './reportMaths.js';
+import { tyreSizeFits } from './tyreSize.js';
 import { uaeDay } from './uaeTime.js';
 
 export { COUNTED_BY_QUANTITY };
@@ -45,12 +46,19 @@ export const isInDate = (lpo, day = uaeDay()) => lpo.validFrom.toISOString().sli
 /** What the creator may raise this job against. Other work has no line of its own any more, and an accident chooses none. */
 const raisedAgainst = (serviceType) => (['other', 'accident'].includes(serviceType) ? undefined : LINE_FOR_SERVICE[serviceType]);
 
-/** Whether a line can carry this job when raising: its kind, and for repair and maintenance the bus's make exactly. */
-export const fitsJob = (item, { kind, make }) => item.kind === kind && (kind !== 'repairMaintenance' || (Boolean(brandKey(item.make)) && brandKey(item.make) === brandKey(make)));
+/**
+ * Whether a line can carry this job when raising: its kind, for repair and maintenance the bus's
+ * make exactly, and for tyres the bus's tyre size (2026-11-11). A bus with no size takes every
+ * tyre line, and so does an old tyre line with no size.
+ */
+export const fitsJob = (item, { kind, make, tyreSize }) =>
+  item.kind === kind &&
+  (kind !== 'repairMaintenance' || (Boolean(brandKey(item.make)) && brandKey(item.make) === brandKey(make))) &&
+  (kind !== 'tyre' || !item.size?.trim() || tyreSizeFits(tyreSize, item.size));
 
 /**
  * The lines a job of `serviceType` on `bus` can be raised against, as `{ lpo, item }` with the
- * LPO's vendor populated (_id and name). Any vendor's: the bus's own vendor first, then the
+ * LPO's vendor populated (_id and name). Tyre lines are only those that fit the bus's tyre size. Any vendor's: the bus's own vendor first, then the
  * soonest ending, then by LPO number.
  */
 export const candidateLines = async ({ bus, serviceType }) => {
@@ -61,7 +69,7 @@ export const candidateLines = async ({ bus, serviceType }) => {
   const ownVendor = String(bus.vendor?._id ?? bus.vendor);
   const rank = ({ lpo }) => (String(lpo.vendor?._id ?? lpo.vendor) === ownVendor ? 0 : 1);
   return lpos
-    .flatMap((lpo) => lpo.items.filter((item) => fitsJob(item, { kind, make })).map((item) => ({ lpo, item })))
+    .flatMap((lpo) => lpo.items.filter((item) => fitsJob(item, { kind, make, tyreSize: bus.tyreSize })).map((item) => ({ lpo, item })))
     .sort((a, b) => rank(a) - rank(b) || a.lpo.validTo - b.lpo.validTo || a.lpo.number.localeCompare(b.lpo.number, undefined, { numeric: true }));
 };
 

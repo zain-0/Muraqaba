@@ -52,6 +52,8 @@ const BusSchema = new mongoose.Schema(
     year: { type: Number, required: true, min: 1900 },
     registrationExpiry: Date, // required by the API whenever there is a registration number
     expectedLifeYears: { type: Number, required: true, min: 1 },
+    // As the tyre LPO lines write it, e.g. "295/80 R22.5"; a tyre change is offered the lines that fit (2026-11-11).
+    tyreSize: { type: String, trim: true, maxlength: 30 },
 
     labourRate: { type: Number, min: 0 }, // AED per repair labour hour
     rates: {

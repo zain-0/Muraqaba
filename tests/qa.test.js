@@ -137,7 +137,7 @@ describe('browser testing findings', () => {
       for (const lastDate of ['1900-01-01', '2099-01-01']) {
         const res = await api('POST', '/buses', {
           token: users.creator.token,
-          body: { ...busBody(`BD${lastDate.slice(0, 2)}`, users.vendor1.id), year: 2020, intervals: { oil: { everyKm: 10000, lastKm: 0 }, transmission: { everyKm: 60000, lastKm: 0 }, tyre: { everyKm: 40000, lastKm: 0 }, brakePads: { everyKm: 40000, lastKm: 0 }, battery: { everyMonths: 18, lastDate } } },
+          body: { ...busBody(`BD${lastDate.slice(0, 2)}`, users.vendor1.id), year: 2020, intervals: { oil: { everyKm: 10000, lastKm: 0 }, tyre: { everyKm: 40000, lastKm: 0 }, brakePads: { everyKm: 40000, lastKm: 0 }, battery: { everyMonths: 18, lastDate } } },
         });
         assert.equal(res.status, 400, lastDate);
         assert.equal(firstError(res).field, 'intervals.battery.lastDate');
@@ -192,7 +192,7 @@ describe('browser testing findings', () => {
 
     test('an agreed price stays as raised when only the details change', async () => {
       const rated = await createBus(users, 'PRICE', users.vendor1.id, { rates: { oil: 0.15 } });
-      const raisedRes = await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000 } });
+      const raisedRes = await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000, supervisorFirst: true } });
       const raised = raisedRes.body.data;
       assert.equal(raised.agreedPrice.amount, 1500);
       const edit = { ...busBody('PRICE', users.vendor1.id), rates: { oil: 0.25 }, intervals: { ...busBody('PRICE', users.vendor1.id).intervals, oil: { everyKm: 12000, lastKm: 0 } } };
@@ -215,7 +215,7 @@ describe('browser testing findings', () => {
       assert.equal(toOil.status, 409);
       assert.match(toOil.body.message, /how the VSR is priced/);
 
-      const oil = (await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000 } })).body.data;
+      const oil = (await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000, supervisorFirst: true } })).body.data;
       const other = await newVendor('qa-switch');
       const toOtherVendor = await correct(await returned(oil), { vendorId: other.id });
       assert.equal(toOtherVendor.status, 409);

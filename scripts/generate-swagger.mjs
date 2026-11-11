@@ -57,6 +57,8 @@ const pageQuery = [
   { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 } },
   { name: 'sort', in: 'query', schema: { type: 'string', enum: ['newest', 'oldest'], default: 'newest' }, description: 'Order by creation date' },
 ];
+/** VSR lists run by VSR number, compared as numbers, with an additional job (VSR-0012b) beside its parent. */
+const vsrPageQuery = pageQuery.map((param) => (param.name === 'sort' ? { ...param, description: 'Order by VSR number, compared as numbers: newest is the highest number first' } : param));
 
 const user = {
   type: 'object',
@@ -82,6 +84,7 @@ const busInput = {
     year: { type: 'integer', description: 'Shown as the Model year', example: 2021 },
     registrationExpiry: { type: 'string', format: 'date' },
     expectedLifeYears: { type: 'integer', example: 15 },
+    tyreSize: { type: 'string', maxLength: 30, example: '295/80 R22.5', description: 'Optional. A tyre change is offered only the tyre LPO lines that fit it. Empty clears it.' },
     labourRate: { type: 'number', description: 'AED per repair labour hour' },
     rates: { type: 'object', description: 'AED per km, for the bus vendor', properties: { oil: { type: 'number' } } },
     intervals: {
@@ -148,6 +151,7 @@ const lpoLines = {
   properties: {
     kind: { type: 'string', enum: LPO_KINDS },
     make: { type: 'string', description: 'The bus\'s make' },
+    tyreSize: { type: 'string', nullable: true, description: 'Tyre changes only: the bus\'s tyre size, which the tyre lines fit; null when the bus has none, and every tyre line is listed' },
     status: { type: 'string', enum: ['found', 'noLpo', 'notNeeded'], description: 'notNeeded: other work, which comes off no line' },
     lines: {
       type: 'array',
@@ -199,7 +203,7 @@ const ticket = {
     isBreakdown: { type: 'boolean', description: 'A repair that broke down on the road; false on anything else. Never sent to vendors.' },
     accident: { type: 'object', description: 'Accidents only: severity and fault. Never sent to vendors.', properties: { severity: { type: 'string', enum: ['minor', 'medium', 'major'] }, fault: { type: 'string', enum: ['ourDriver', 'otherParty', 'unknown'] } } },
     daysToComplete: { type: 'integer', description: 'The vendor\'s latest promise' },
-    agreedPrice: { type: 'object', description: 'Fixed at raising, so the VSR goes straight to the supervisor. rate: oil, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line\'s unit price', properties: { basis: { type: 'string', enum: ['rate', 'lpo'] }, rate: { type: 'number' }, km: { type: 'number' }, unitPrice: { type: 'number' }, quantity: { type: 'integer' }, amount: { type: 'number' } } },
+    agreedPrice: { type: 'object', description: 'Fixed at raising, so the VSR goes straight to the vendor to acknowledge (to the supervisor first with supervisorFirst). rate: oil, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line\'s unit price', properties: { basis: { type: 'string', enum: ['rate', 'lpo'] }, rate: { type: 'number' }, km: { type: 'number' }, unitPrice: { type: 'number' }, quantity: { type: 'integer' }, amount: { type: 'number' } } },
     lpoLine: { type: 'object', description: 'The LPO line chosen at raising or correction; its amount is booked on it until the GRN. Never sent to vendors.', properties: { lpo: objectId, lpoNumber: { type: 'string' }, item: objectId, name: { type: 'string' }, kind: { type: 'string', enum: LPO_KINDS }, unitPrice: { type: 'number' } } },
     quantity: { type: 'integer', description: 'Tyres or batteries the job is for. Vendors see it on tyre and battery jobs only.' },
     estimatedAmount: { type: 'number', description: 'The creator\'s estimate, booked on the LPO line until approval. Never sent to vendors.' },
@@ -230,7 +234,8 @@ const credentials = { type: 'object', required: ['email', 'password'], propertie
 // What raising or correcting a VSR takes for its LPO line (2026-11-10).
 const vsrLpoFields = {
   lpoItemId: { ...objectId, description: 'The LPO line the job comes off; required when GET /api/lpos/for-vsr lists any. Its vendor does the work.' },
-  quantity: { type: 'integer', minimum: 1, description: 'Tyres and batteries off a line: priced at its unit price, straight to the supervisor' },
+  quantity: { type: 'integer', minimum: 1, description: 'Tyres and batteries off a line: priced at its unit price, an agreed price' },
+  supervisorFirst: { type: 'boolean', description: 'Raising only. An agreed price goes to the vendor to acknowledge; true sends it to a supervisor for approval first' },
   estimatedAmount: { type: 'number', description: 'Repairs off a line, and oil off one without a rate on the bus. An accident is raised against no line.' },
 };
 const stepBody = { type: 'object', properties: { date: { type: 'string', format: 'date', description: 'Defaults to now, cannot be in the future' } } };
@@ -243,9 +248,15 @@ const ticketListQuery = [
     name: 'q',
     in: 'query',
     schema: { type: 'string', maxLength: 60 },
-    description: "Search, case-blind and literal: part of the VSR number, the bus's side number or plate, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see.",
+    description: "Search, case-blind and literal: part of the VSR number, the bus's side number, plate, brand and type, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see.",
   },
-  ...pageQuery,
+  {
+    name: 'searchIn',
+    in: 'query',
+    schema: { type: 'string', enum: ['all', 'vsr', 'side', 'plate', 'brandType', 'vendor'], default: 'all' },
+    description: 'Where q looks: everywhere, or only the VSR number, side number, plate, brand and type, or vendor name. A vendor searching by vendor finds nothing: every VSR they see is their own.',
+  },
+  ...vsrPageQuery,
 ];
 
 const spec = {
@@ -310,8 +321,31 @@ const spec = {
       get: op('Sheets', 'Daily km readings for every bus in a month', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
       put: op('Sheets', 'Save or clear one day of a bus (km: null clears it)', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date'], properties: { busId: objectId, date: { type: 'string' }, km: { type: 'integer', nullable: true } } }, response: { type: 'object' }, more: pick(400, 403, 404) }),
     },
+    '/api/sheets/readings/report': {
+      get: op('Sheets', "Km each bus ran between two days: its last reading on or before `to`, less its last reading on or before `from` (with none by then, its first reading in the range: startsLater). km is null with no reading in the range. Rows for the buses chosen, or the whole fleet; `buses` lists every bus to choose from.", ['serviceCreator', 'supervisor'], {
+        query: [
+          { name: 'from', in: 'query', required: true, schema: { type: 'string', example: '2026-10-01' } },
+          { name: 'to', in: 'query', required: true, schema: { type: 'string', example: '2026-10-31' } },
+          { name: 'busIds', in: 'query', schema: { type: 'string', description: 'Comma-separated bus ids; left out, the whole fleet' } },
+        ],
+        response: { type: 'object' },
+        more: pick(400, 403),
+      }),
+    },
+    '/api/sheets/readings/import/preview': {
+      post: {
+        ...op('Sheets', `What importing an Excel workbook of km readings would do; nothing is saved. ${multipartNote('one .xlsx in attachments, and month (YYYY-MM) for a header of day numbers')} Reads the client's grid (a row per bus, a header row of dates) or a list with the columns Side number, Date and Km. Counts new, changed, unchanged, refused (with the reason) and skipped (words such as cancel, and 0) readings. Each reading meets the rules typing it would, in date order.`, ['serviceCreator'], { response: { type: 'object' }, more: pick(400, 403) }),
+        requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['attachments'], properties: { month: { type: 'string', example: '2026-10' }, attachments: { type: 'array', items: { type: 'string', format: 'binary' } } } } } } },
+      },
+    },
+    '/api/sheets/readings/import': {
+      post: {
+        ...op('Sheets', `Import the workbook: the same check as the preview, then the new and changed readings are saved (data.saved). ${multipartNote('one .xlsx in attachments, and month (YYYY-MM)')}`, ['serviceCreator'], { response: { type: 'object' }, more: pick(400, 403) }),
+        requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['attachments'], properties: { month: { type: 'string', example: '2026-10' }, attachments: { type: 'array', items: { type: 'string', format: 'binary' } } } } } } },
+      },
+    },
     '/api/sheets/status': {
-      get: op('Sheets', 'Daily status of every bus in a month, with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
+      get: op('Sheets', 'Daily status of every bus in a month, with a day-wise summary. Raising a VSR marks the bus out from that day; the bus being back (vehicle returned) makes it Ready, or the status of another open VSR on it. Scrapping and removed are never overridden, and a day set by hand keeps it (the VSR change starts the next day).', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }),
       put: op('Sheets', 'Change a bus status from a day onward. Scrapping and removed are refused (they come from scrap requests), and so is any day from a scrapped or sold bus\'s scrappedOn (409).', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date', 'status'], properties: { busId: objectId, date: { type: 'string' }, status: { type: 'string', enum: ['ready', 'repair', 'maintenance', 'tyreChange', 'batteryChange', 'accident'] } } }, response: { type: 'object' }, more: pick(400, 403, 404, 409) }),
     },
     '/api/sheets/repairs': { get: op('Sheets', 'Repair process list with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }) },
@@ -324,6 +358,32 @@ const spec = {
     '/api/buses/{id}': {
       get: op('Buses', 'Bus details with open ticket count and its scrap requests, newest first', ['serviceCreator', 'supervisor', 'purchaseManager'], { params: [idParam], response: envelope(ref('Bus')), more: pick(400, 404) }),
       put: op('Buses', 'Edit a bus. New tickets use the changes; the vendor stays as it was. A sold bus cannot be edited (409).', ['serviceCreator'], { params: [idParam], body: ref('BusInput'), response: envelope(ref('Bus')), more: pick(400, 403, 404, 409) }),
+    },
+    // Added by hand to swagger.json with the bus cost summary (fleet-lpo); kept here so a regeneration keeps it.
+    '/api/buses/{id}/costs': {
+      get: {
+        ...op('Buses', 'What the bus has cost over its whole life: accepted invoices by kind of work, repairs and accidents counted, current km and cost per km', ['serviceCreator', 'supervisor', 'purchaseManager'], {
+          params: [idParam],
+          response: envelope({
+            type: 'object',
+            properties: {
+              busId: { type: 'string' },
+              fleetNumber: { type: 'string' },
+              costs: { type: 'object', properties: Object.fromEntries(['repair', 'maintenance', 'tyre', 'battery', 'accident', 'other'].map((group) => [group, { type: 'number', example: 0 }])) },
+              grandTotal: { type: 'number', example: 0 },
+              repairs: { type: 'integer' },
+              accidents: { type: 'integer' },
+              vsrs: { type: 'integer' },
+              currentKm: { type: 'number' },
+              kmSource: { type: 'string', enum: ['reading', 'lastService'] },
+              costPerKm: { type: 'number', nullable: true },
+            },
+          }),
+          more: pick(400, 403, 404),
+        }),
+        description:
+          'Roles: serviceCreator, supervisor, purchaseManager. A VSR costs its current invoice once accepted (as in the cost reports); declined VSRs never count and a no-charge job counts 0. Maintenance is oil, repair is repairs (transmission and brake pads among them), accident is accident VSRs; records from before 2026-11-11 (transmission and brake-pad services, repairs in the Accident category) count the same way. The current km is the latest daily reading, else the furthest last service. costPerKm = grandTotal / currentKm with four decimals, null with no km.',
+      },
     },
     '/api/buses/{id}/sale': {
       put: {
@@ -364,9 +424,9 @@ const spec = {
         response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409),
       }),
     },
-    '/api/tickets/pending': { get: op('Tickets', 'Tickets awaiting supervisor approval', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
-    '/api/tickets/my-tickets': { get: op('Tickets', 'Tickets created by the caller', ['serviceCreator', 'supervisor'], { query: pageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
-    '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: pageQuery, response: listEnvelope(ref('Ticket')) }) },
+    '/api/tickets/pending': { get: op('Tickets', 'Tickets awaiting supervisor approval', ['serviceCreator', 'supervisor'], { query: vsrPageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
+    '/api/tickets/my-tickets': { get: op('Tickets', 'Tickets created by the caller', ['serviceCreator', 'supervisor'], { query: vsrPageQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
+    '/api/tickets/completed': { get: op('Tickets', 'Completed tickets visible to the caller', ROLES, { query: vsrPageQuery, response: listEnvelope(ref('Ticket')) }) },
     '/api/tickets/{id}': {
       get: op('Tickets', 'Ticket detail with full invoice history', ROLES, { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 404) }),
       put: op('Tickets', 'Correct the details of a returned ticket; the same as PUT /api/tickets/{id}/details', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }),

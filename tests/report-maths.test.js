@@ -222,6 +222,7 @@ describe('grouping', () => {
     assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'BRAKE PADS' }), 'repair');
     assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'TRANSMISSION' }), 'repair');
     assert.equal(kindOf({ serviceType: 'oil' }), 'oil');
+    assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'ACCIDENT' }), 'accident', 'a record not yet migrated');
   });
 
   test('brands match case-blind and ignore stray spaces', () => {

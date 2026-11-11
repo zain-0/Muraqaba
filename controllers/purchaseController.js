@@ -351,7 +351,7 @@ export const getLpo = asyncHandler(async (req, res) => {
 // GET /api/lpos/for-vsr?busId=&serviceType=&ticketId=  (depot; reads only)
 export const lpoForVsr = asyncHandler(async (req, res) => {
   const { busId, serviceType, ticketId } = req.query;
-  const bus = await Bus.findById(busId).select('make vendor');
+  const bus = await Bus.findById(busId).select('make vendor tyreSize');
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
   const lines = await candidateLines({ bus, serviceType });
   const lpos = [...new Map(lines.map(({ lpo }) => [String(lpo._id), lpo])).values()];
@@ -362,6 +362,8 @@ export const lpoForVsr = asyncHandler(async (req, res) => {
     data: {
       kind: LINE_FOR_SERVICE[serviceType],
       make: bus.make?.trim() ?? null,
+      // Tyre lines are only those of the bus's size, so the form can name it, or ask for it when there is none.
+      ...(LINE_FOR_SERVICE[serviceType] === 'tyre' ? { tyreSize: bus.tyreSize ?? null } : {}),
       status: lineStatus(serviceType, lines),
       lines: lines.map(({ lpo, item }) => ({
         lpo: { _id: lpo._id, number: lpo.number, date: lpo.date ?? lpo.validFrom, validTo: lpo.validTo, vendor: { _id: lpo.vendor._id, name: lpo.vendor.name } },

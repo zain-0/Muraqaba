@@ -18,8 +18,10 @@ Repairs, accidents, tyres, batteries and other work, where the price has to be a
 sentToVendor ──estimate (vendor)──▶ estimateSubmitted ──reply (creator)──▶ estimateCountered ──estimate (vendor)──▶ estimateSubmitted
                                             └──parts and labour, then escalate (creator)──▶ pending
 
-Oil, when the bus has a rate and the VSR uses the bus's vendor: raised straight into pending,
-priced at rate per km × the bus's interval. intervalUsage keeps how much was left or delayed.
+Oil, when the bus has a rate and the VSR uses the bus's vendor: priced at rate per km × the bus's interval.
+intervalUsage keeps how much was left or delayed. Tyres and batteries off an LPO line: priced at
+quantity × the line's unit price. Such an agreed price is raised straight into approved, for the vendor to
+acknowledge, with no supervisor stamp; with supervisorFirst: true it is raised into pending instead (2026-11-11).
 
 Then, for both:
 pending ──approve (supervisor)──▶ approved ──acknowledge (vendor)──▶ acknowledged
@@ -52,9 +54,9 @@ invoice, additional job); on any other VSR those steps stay the vendor's own. Ou
 `GET /api/vendors` and every vendor picker; `GET /api/vendors/outside` lists their names for the next accident.
 `scripts/migrate-owner-testing.js` brings older data into this shape (dry run unless `--apply`).
 
-LPOs (2026-11-10). Purchasing enters a dated LPO whose lines are Repair & Maintenance of one fleet make (one amount), a tyre size (quantity, unit price, optional life in km) or a battery type (quantity, unit price); the API names each line. Repairs and oil come off the repair and maintenance line for the bus's make; tyres and batteries off a line of their kind, for any make. An accident is raised against no line, since its vendor may be anyone, and its GRN takes it off its vendor's repair and maintenance line for the make, if there is one.
+LPOs (2026-11-10). Purchasing enters a dated LPO whose lines are Repair & Maintenance of one fleet make (one amount), a tyre size (quantity, unit price, optional life in km) or a battery type (quantity, unit price); the API names each line. Repairs and oil come off the repair and maintenance line for the bus's make; tyres and batteries off a line of their kind, for any make. An accident is raised against no line, since its vendor may be anyone, and its GRN takes it off its vendor's repair and maintenance line for the make, if there is one. Tyres only off a line that fits the bus's `tyreSize` (same rim diameter, and the same width and profile when both give them); a bus with no size takes every tyre line.
 
-- Raising or correcting a VSR: when any vendor's lines valid today fit the job, the creator picks one (`lpoItemId`) and its vendor does the work. Tyres and batteries then take a `quantity` and are priced at the line (`agreedPrice.basis: 'lpo'`), straight to the supervisor; repairs take an `estimatedAmount`; oil the rate on the bus, or without one an `estimatedAmount`. With no line the VSR is raised as before and purchasing is notified (`lpoMissing`); never for an accident or other work.
+- Raising or correcting a VSR: when any vendor's lines valid today fit the job, the creator picks one (`lpoItemId`) and its vendor does the work. Tyres and batteries then take a `quantity` and are priced at the line (`agreedPrice.basis: 'lpo'`), straight to the vendor (or the supervisor first, `supervisorFirst`); repairs take an `estimatedAmount`; oil the rate on the bus, or without one an `estimatedAmount`. With no line the VSR is raised as before and purchasing is notified (`lpoMissing`); never for an accident or other work.
 - What a VSR books on its line: the approved amount, else the agreed price, the creator's estimate or the vendor's latest estimate, and for tyres and batteries the units. Only open VSRs not yet on a GRN book anything. Raising or correcting past what is left (value − booked − GRN, the VSR's own booking left out) is refused; an approval or additional job that goes past it only notifies purchasing and the supervisor (`lpoProblem`).
 - The GRN takes each VSR's accepted invoice (and units) off its line, in place of the booking. A VSR with no line gets the automatic choice: its vendor's lines valid today for the make and kind, ending first, the first with room. A short or missing LPO is notified and never blocks the GRN. VSRs charged at invoice acceptance before 2026-11-10 are not charged again.
 - Tyres fitted off a line with a life in km set the bus's tyre interval to it.
@@ -67,12 +69,19 @@ Documents are stored in `uploads/` (or `UPLOAD_DIR`), outside git, and served on
 
 Vendors never receive: `breakdown`, `isBreakdown`, `accident`, `intervalUsage`, `returnReason`, `lpoLine`, `estimatedAmount`, `lpoDeduction`, `grn`, `purchaseInvoice`, bus rates and intervals. They do see `quantity` and `agreedPrice` on tyre and battery jobs, which are the job itself.
 
-Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed; raising a ticket picks it. Scrapping and Removed are never set by hand: approving a scrap request writes Scrapping on the day (source `scrap`), and the sale writes Removed on the sale day. From a bus's `scrappedOn` the sheet refuses changes; days before can still be corrected. A bus already removed before a month (or year) and unchanged in it is left off that period's sheets and reports.
+Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed. VSRs keep it (2026-11-11): raising one marks the bus out from that day, and the bus being back (`vehicle/returned`, also the depot's work-done step) makes it Ready from that day, or the status of another open VSR on the bus raised by then. Additional jobs travel with their parent. A day set by hand keeps its status, and a VSR's change on that day starts the next day. Daily km can be imported from an .xlsx (`POST /api/sheets/readings/import/preview`, then `/import`): the client's grid or a Side number, Date, Km list, each reading checked as if typed. `GET /api/sheets/readings/report?from=&to=&busIds=` gives the km each bus ran between two days. Scrapping and Removed are never set by hand: approving a scrap request writes Scrapping on the day (source `scrap`), and the sale writes Removed on the sale day. From a bus's `scrappedOn` the sheet refuses changes; days before can still be corrected. A bus already removed before a month (or year) and unchanged in it is left off that period's sheets and reports.
 
 Databases from before 2026-11-09 are brought over by `scripts/migrate-fleet-lifecycle.js`, which sets each bus's lifecycle from its latest status and merges each LPO's repair and maintenance lines, taking the make most of the vendor's buses have. It can run any number of times; `--dry-run` writes nothing, and `--uri` (or `MONGO_URI`) chooses the database:
 
 ```bash
 node scripts/migrate-fleet-lifecycle.js --dry-run --uri mongodb://localhost:27017/muraqaba_next
+```
+
+Buses whose VSR came back before 2026-11-11 still show the VSR's status. `scripts/sync-bus-status.js` gives each bus whose latest status came from a VSR that is now back the status the rule would have given on its return day. It is a dry run unless given `--apply`, and prints what it would change:
+
+```bash
+node scripts/sync-bus-status.js --uri mongodb://localhost:27017/muraqaba_next
+node scripts/sync-bus-status.js --uri mongodb://localhost:27017/muraqaba_next --apply
 ```
 
 Then `scripts/migrate-lpo-items.js` brings LPOs and open VSRs into the 2026-11-10 shape: it dates each LPO by its first day, moves the LPO's make onto its repair and maintenance lines, names every line by the rule, and gives each open VSR with no line the one its GRN would take it off, so it is booked. Past deductions are left alone. The same `--dry-run` and `--uri`:
@@ -139,6 +148,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET | /api/buses | creator, supervisor, purchasing | Fleet, with `intervalStatus`, `lifecycle`, `scrappedOn` and `sale`. Sold buses are included; screens hide them by default |
 | POST | /api/buses | creator, supervisor | Add a bus |
 | GET | /api/buses/:id | creator, supervisor, purchasing | Details with `openTickets` and `scrapRequests`, newest first |
+| GET | /api/buses/:id/costs | creator, supervisor, purchasing | Whole-life costs for the scrap request form: accepted invoices by repair, maintenance (oil, and transmission as a service), tyre, battery, accident and other; `grandTotal`, `repairs`, `accidents`, `currentKm` (latest daily reading, else the furthest last service; `kmSource`) and `costPerKm` (null with no km). Declined VSRs never count; no-charge jobs count 0 |
 | PUT | /api/buses/:id | creator | Edit a bus. New tickets use the changes; the vendor stays. A sold bus cannot be edited |
 | PUT | /api/buses/:id/sale | supervisor | Multipart: `date` (on or after `scrappedOn`, not in the future), `buyer`, `price`, `note`, `attachments`. scrapped → sold |
 | GET | /api/buses/:id/sale/attachments/:attachmentId | creator, supervisor, purchasing | Download a sale document |
@@ -149,7 +159,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/scrap-requests/:id/reject | supervisor | `note` (the reason) required; the bus is back in operation |
 | PUT | /api/scrap-requests/:id/cancel | creator who raised it | The bus is back in operation |
 | GET | /api/scrap-requests/:id/attachments/:attachmentId | creator, supervisor, purchasing | Download a scrap request document |
-| GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&sort=oldest` |
+| GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&q=&searchIn=&sort=oldest`. Newest VSR number first, compared as numbers. `searchIn` is `all` (default), `vsr`, `side`, `plate`, `brandType` or `vendor` |
 | POST | /api/tickets | creator, supervisor | Raise ticket, with optional `isBreakdown` (repairs only). `lpoItemId` is required when lines fit the job; `quantity` for tyres and batteries off a line; `estimatedAmount` for repairs off a line, and oil without a rate. An accident takes `accident` and may take `outsideVendorName` instead of `vendorId` |
 | GET | /api/tickets/:id | any | Detail with `history`, all `invoices`, `linkedTickets` and signature drawings |
 | POST | /api/tickets/:id/estimate | vendor (owner); creator for an outside vendor | Multipart: `amount`, `quotationNumber`, `daysToComplete`, `note`, `attachments` |
@@ -194,6 +204,8 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET, PUT | /api/sheets/readings | read: creator, supervisor; write: creator | Daily km (`?month=YYYY-MM`) |
 | GET, PUT | /api/sheets/status | read: creator, supervisor; write: creator | Daily status (`?month=YYYY-MM`) |
 | GET | /api/sheets/repairs | creator, supervisor | Repair process (`?month=YYYY-MM`) |
+| GET | /api/sheets/readings/report | creator, supervisor | Km run between two days (`?from=&to=&busIds=`) |
+| POST | /api/sheets/readings/import/preview, /api/sheets/readings/import | creator | Daily km from an .xlsx: preview, then save |
 
 ## Adding email
 

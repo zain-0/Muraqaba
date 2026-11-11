@@ -1,10 +1,14 @@
+import { extname } from 'node:path';
 import mongoose from 'mongoose';
 import Bus from '../models/Bus.js';
 import Ticket, { CLOSED_STATUSES } from '../models/Ticket.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { fleetBuses, fleetDays, statusSummary } from '../utils/fleetDays.js';
+import { kmInRange } from '../utils/reportMaths.js';
 import { USER_FIELDS } from '../utils/query.js';
+import { planReadingImport } from '../utils/readingImport.js';
+import { READING_MESSAGES, readingProblem } from '../utils/readingRules.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
 // scrappedOn tells the sheet which days are locked: from it on, only the scrap request and the sale change a bus's status.
@@ -15,11 +19,6 @@ const assertDayCanChange = async (busId, date) => {
   if (!(await Bus.exists({ _id: busId }))) throw new AppError('Bus not found', 404, 'NOT_FOUND');
 };
 
-// A bus covers far less than this in a day; more than it between two readings is a typing slip.
-const MOST_KM_A_DAY = 2000;
-const READING_MARGIN_KM = 20000;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 const readingError = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'km', message }]);
 
 /** An odometer only goes up, and only as far as a bus can drive between two readings. */
@@ -28,12 +27,8 @@ const assertReadingFits = async (busId, date, km) => {
     BusDailyReading.findOne({ bus: busId, date: mongoose.trusted({ $lt: date }) }).sort({ date: -1 }),
     BusDailyReading.findOne({ bus: busId, date: mongoose.trusted({ $gt: date }) }).sort({ date: 1 }),
   ]);
-  if (earlier && km < earlier.km) throw readingError('This is lower than the reading on an earlier day');
-  if (later && km > later.km) throw readingError('This is higher than the reading on a later day');
-  if (earlier) {
-    const days = (Date.parse(date) - Date.parse(earlier.date)) / DAY_MS;
-    if (km - earlier.km > Math.max(READING_MARGIN_KM, days * MOST_KM_A_DAY)) throw readingError('This is far above the earlier reading. Check it.');
-  }
+  const problem = readingProblem(date, km, earlier, later);
+  if (problem) throw readingError(READING_MESSAGES[problem]);
 };
 
 // GET /api/sheets/readings?month=YYYY-MM
@@ -69,6 +64,68 @@ export const setReading = asyncHandler(async (req, res) => {
   return res.json({ success: true, message: 'Reading saved' });
 });
 
+// GET /api/sheets/readings/report?from=&to=&busIds=  (owner's testing notes, 2026-11-11)
+export const getKmReport = asyncHandler(async (req, res) => {
+  const { from, to } = req.query;
+  if (to < from) throw new AppError('The end date is before the start date', 400, 'VALIDATION_ERROR', [{ field: 'to', message: 'The end date is before the start date' }]);
+  const chosen = req.query.busIds ? new Set(req.query.busIds.split(',')) : null;
+  const fleet = await fleetBuses(to, from);
+  const buses = chosen ? fleet.filter((bus) => chosen.has(String(bus._id))) : fleet;
+  const readings = await BusDailyReading.find({ bus: mongoose.trusted({ $in: buses.map((bus) => bus._id) }), date: mongoose.trusted({ $lte: to }) })
+    .select('bus date km')
+    .lean();
+  const byBus = new Map();
+  readings.forEach((reading) => {
+    const key = String(reading.bus);
+    if (!byBus.has(key)) byBus.set(key, []);
+    byBus.get(key).push(reading);
+  });
+  const rows = buses.map((bus) => ({
+    busId: String(bus._id),
+    fleetNumber: bus.fleetNumber,
+    make: bus.make,
+    model: bus.model,
+    ...kmInRange(byBus.get(String(bus._id)) ?? [], from, to),
+  }));
+  const counted = rows.filter((row) => row.km !== null);
+  res.json({
+    success: true,
+    data: {
+      from,
+      to,
+      today: uaeDay(),
+      rows,
+      total: { km: counted.reduce((sum, row) => sum + row.km, 0), buses: rows.length, withReadings: counted.length },
+      buses: fleet.map(({ _id, fleetNumber, registrationNumber, make, model }) => ({ _id, fleetNumber, registrationNumber, make, model })),
+    },
+  });
+});
+
+/** The one .xlsx a creator chose, read into what importing it would do. */
+const planFromUpload = async (req) => {
+  const files = req.files ?? [];
+  const fileError = (message) => new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'attachments', message }]);
+  if (!files.length) throw fileError('Choose an Excel file (.xlsx) to import');
+  if (files.length > 1) throw fileError('Choose one Excel file at a time');
+  if (extname(files[0].originalname).toLowerCase() !== '.xlsx') throw fileError('Choose an Excel file (.xlsx). Save an older .xls file as .xlsx first.');
+  return planReadingImport(files[0].buffer, { month: req.body.month || undefined, today: uaeDay() });
+};
+
+// POST /api/sheets/readings/import/preview  (multipart: one .xlsx, optional month YYYY-MM) - writes nothing
+export const previewReadingImport = asyncHandler(async (req, res) => {
+  const { toSave, ...preview } = await planFromUpload(req);
+  res.json({ success: true, data: preview });
+});
+
+// POST /api/sheets/readings/import  (the same form) - saves the new and changed readings
+export const importReadings = asyncHandler(async (req, res) => {
+  const { toSave, ...result } = await planFromUpload(req);
+  if (toSave.length) {
+    await BusDailyReading.bulkWrite(toSave.map(({ bus, date, km }) => ({ updateOne: { filter: { bus, date }, update: { $set: { km, by: req.user._id } }, upsert: true } })), { ordered: false });
+  }
+  res.json({ success: true, message: 'Readings imported', data: { ...result, saved: toSave.length } });
+});
+
 // GET /api/sheets/status?month=YYYY-MM
 export const getStatusSheet = asyncHandler(async (req, res) => {
   const month = req.query.month || uaeMonth();
@@ -99,7 +156,7 @@ export const setBusStatus = asyncHandler(async (req, res) => {
     { $set: { status, source: 'manual', by: req.user._id }, $unset: { ticket: 1 } },
     { upsert: true, runValidators: true }
   );
-  res.json({ success: true, message: 'Status saved. It stays until someone changes it.' });
+  res.json({ success: true, message: 'Status saved. VSRs still change it when the bus goes out or comes back.' });
 });
 
 export const REPAIR_STAGES = ['waitingEstimate', 'negotiation', 'waitingApproval', 'estimateApproved', 'goneForRepair', 'received', 'invoicing', 'closed'];

@@ -371,7 +371,7 @@ describe('Muraqaba API', () => {
 
     test('an agreed price leaves nothing to negotiate, even after a return', async () => {
       const bus = await newBus('PRICE', users.vendor1.id, {});
-      const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'oil', currentReading: 9000 } });
+      const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'oil', currentReading: 9000, supervisorFirst: true } });
       assert.equal(raised.body.data.status, 'pending');
       const id = raised.body.data._id;
 

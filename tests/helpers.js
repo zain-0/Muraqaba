@@ -131,7 +131,10 @@ const ok = (res) => {
   return res.body.data;
 };
 
-/** Walks a raised VSR up to the vendor's acknowledgement. Repairs get an estimate of AED 900. */
+/**
+ * Walks a raised VSR up to the vendor's acknowledgement. Repairs get an estimate of AED 900. An
+ * agreed price is already with the vendor, unless it was sent to the supervisor first.
+ */
 export const toAcknowledged = async (users, ticket, vendor) => {
   const id = ticket._id;
   if (ticket.status === 'sentToVendor') {
@@ -139,7 +142,7 @@ export const toAcknowledged = async (users, ticket, vendor) => {
     await fillBreakdown(users, id, 900);
     ok(await api('PUT', `/tickets/${id}/escalate`, { token: users.creator.token }));
   }
-  ok(await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token }));
+  if (ticket.status !== 'approved') ok(await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token }));
   return ok(await api('PUT', `/tickets/${id}/acknowledge`, { token: vendor.token, body: { daysToComplete: 3 } }));
 };
 

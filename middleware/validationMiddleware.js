@@ -158,6 +158,7 @@ const busRules = () => [
     .if((value, meta) => !registered(value, meta))
     .custom((value) => value === undefined || value === null || value === ''),
   body('expectedLifeYears', 'Enter the expected life in years').not().isArray().isInt({ min: 1, max: 100 }).toInt(),
+  optionalNumber('tyreSize', 'Tyre size'),
   number('labourRate', 'Enter the labour charge per hour, above 0', { above: 0, money: true }).optional({ values: 'null' }),
   // A rate per km is finer than money: 3,300 for a 40,000 km service is 0.0825 a km. Only oil has
   // one since 2026-11-11; a transmission rate sent by an older screen is not read.
@@ -202,6 +203,8 @@ export const validateTicketCreate = [
   // An accident may go to a vendor outside the list, named here (2026-11-11); the controller refuses it on other work.
   body('outsideVendorName', 'Enter the vendor\'s name, 2 to 80 characters').optional({ values: 'falsy' }).isString().trim().isLength({ min: 2, max: 80 }),
   body('isBreakdown', 'Breakdown must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
+  // An agreed price goes to the vendor unless the creator asks for a supervisor's approval first (2026-11-11).
+  body('supervisorFirst', 'Sending to the supervisor first must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
   body('location', 'Choose where the work is done').optional({ values: 'falsy' }).isString().isIn(WORK_LOCATIONS),
   // For the depot's own records: required on an accident, and dropped on anything else.
   body('accident.severity', SEVERITY).if(isAccident).isString().isIn(ACCIDENT_SEVERITIES),
@@ -230,6 +233,28 @@ export const validateAccident = [
 
 export const validateSheetMonth = [
   qstr('month').matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('Choose a valid month'),
+  handleValidationErrors,
+];
+
+// The month that day numbers in an imported sheet's header belong to; left out when it has dates.
+export const validateReadingImport = [
+  body('month').optional({ values: 'falsy' }).isString().matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('Choose a valid month'),
+  handleValidationErrors,
+];
+
+const queryDay = (field) => query(field).isString().withMessage('Choose a valid day').bail().matches(/^\d{4}-\d{2}-\d{2}$/).isISO8601({ strict: true }).withMessage('Choose a valid day');
+
+// The km report: two days, and the buses chosen (left out, the whole fleet).
+export const validateKmRange = [
+  queryDay('from'),
+  queryDay('to'),
+  query('busIds')
+    .optional({ values: 'falsy' })
+    .isString()
+    .withMessage('Choose buses from the list')
+    .bail()
+    .custom((value) => value.split(',').every((id) => /^[a-f\d]{24}$/i.test(id)))
+    .withMessage('Choose buses from the list'),
   handleValidationErrors,
 ];
 
@@ -498,12 +523,16 @@ const pageQuery = [
 /** Longest search the VSR lists take: more than any VSR number, side number, plate or vendor name needs. */
 export const MAX_TICKET_SEARCH = 60;
 
+/** Where the VSR search looks: everywhere, or only the VSR number, side number, plate, brand and type, or vendor. */
+export const TICKET_SEARCH_FIELDS = ['all', 'vsr', 'side', 'plate', 'brandType', 'vendor'];
+
 export const validateTicketListQuery = [
   qstr('status').isIn(TICKET_STATUSES).withMessage('Unknown status'),
   qstr('busId').isMongoId().withMessage('Invalid bus'),
   qstr('mine').isBoolean().withMessage('mine must be true or false').toBoolean(),
   // Free text, trimmed and cut to length rather than refused: a pasted long line still searches.
   qstr('q').trim().customSanitizer((value) => value.slice(0, MAX_TICKET_SEARCH)),
+  qstr('searchIn').isIn(TICKET_SEARCH_FIELDS).withMessage('Choose where to search'),
   ...pageQuery,
   handleValidationErrors,
 ];

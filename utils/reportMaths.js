@@ -13,8 +13,12 @@ export const toFils = (aed) => Math.round(Number(aed ?? 0) * 100);
 /** Whole fils back to AED; an integer divided by 100 is the nearest double to the 2-decimal amount. */
 export const toAed = (fils) => fils / 100;
 
-/** The figure a VSR counts under: its service type. Accidents have been one of their own since 2026-11-11. */
-export const kindOf = ({ serviceType }) => serviceType;
+/**
+ * The figure a VSR counts under: its service type, accidents apart from repairs. Since 2026-11-11 an
+ * accident is a service type of its own; a record not yet migrated may still be a repair in the old
+ * Accident category, which counts as an accident too (utils/busCosts.js relies on it).
+ */
+export const kindOf = ({ serviceType, repairCategory }) => (serviceType === 'repair' && repairCategory === 'ACCIDENT' ? 'accident' : serviceType);
 
 /** A brand typed as "hino" on one bus and "Hino" on another is one brand. */
 export const brandKey = (make) => String(make ?? '').trim().toLowerCase();
@@ -72,6 +76,22 @@ export const kmInMonth = (readings, month) => {
   if (!inMonth.length) return null;
   const before = sorted.filter((r) => r.date < days[0]).at(-1) ?? inMonth[0];
   return Math.max(inMonth.at(-1).km - before.km, 0);
+};
+
+/**
+ * A bus's km between two days (owner's testing notes, 2026-11-11): its last reading on or before
+ * `to`, less its last reading on or before `from`; with none by `from`, its first reading in the
+ * range (`startsLater`). Null km when it has no reading in the range. Never negative.
+ */
+export const kmInRange = (readings, from, to) => {
+  const sorted = [...readings].sort((a, b) => a.date.localeCompare(b.date)).map(({ date, km }) => ({ date, km }));
+  const upTo = (day) => sorted.filter((r) => r.date <= day).at(-1) ?? null;
+  const inRange = sorted.filter((r) => r.date >= from && r.date <= to);
+  const before = upTo(from);
+  const end = upTo(to);
+  if (!inRange.length) return { start: before, end, km: null, startsLater: false };
+  const start = before ?? inRange[0];
+  return { start, end, km: Math.max(end.km - start.km, 0), startsLater: !before };
 };
 
 /** Km bands for a month's driving; 0 km is "not operated" and sits outside them. */

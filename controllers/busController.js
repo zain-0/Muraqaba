@@ -47,12 +47,13 @@ export const getBusById = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...withIntervalStatus(bus, km), openTickets, scrapRequests } });
 });
 
-/** An empty chassis or registration number is left out, so an edit clears it and the sparse indexes never see "" or null. */
+/** An empty chassis or registration number (or tyre size) is left out, so an edit clears it and the sparse indexes never see "" or null. */
 const present = (value) => (hasText(value) ? value.trim() : undefined);
 
 /** What the add-bus and edit-bus forms can set. The vendor is only chosen when adding. */
-const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model, year, registrationExpiry, expectedLifeYears, labourRate, rates, intervals }) => ({
+const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model, year, registrationExpiry, expectedLifeYears, tyreSize, labourRate, rates, intervals }) => ({
   chassisNumber: present(chassisNumber),
+  tyreSize: present(tyreSize),
   fleetNumber,
   registrationNumber: present(registrationNumber),
   make,
