@@ -31,16 +31,31 @@ export const SCRAP_REQUEST_POPULATE = [
 ];
 
 /**
- * Runs a Mongoose query with page/limit from the request and returns the
- * standard list envelope.
+ * VSR lists run by VSR number compared as numbers (owner's testing notes, 2026-11-11: "the ids
+ * should be in sequence"): VSR-22557 before VSR-22260 before VSR-9999, and an additional job
+ * (VSR-22557b) right beside its parent. The number is unique, and _id breaks a tie the collation
+ * could see (VSR-12 and VSR-0012), so pages never repeat or skip a VSR.
  */
-export const paginate = async (Model, filter, { page = 1, limit = 50, sort, populate = [] }) => {
-  const order = { createdAt: sort === 'oldest' ? 1 : -1 };
+export const BY_VSR_NUMBER = { field: 'vsrNumber', collation: { locale: 'en', numericOrdering: true } };
+
+/**
+ * Runs a Mongoose query with page/limit from the request and returns the
+ * standard list envelope. Newest first by creation date, or by `by` when given.
+ */
+export const paginate = async (Model, filter, { page = 1, limit = 50, sort, populate = [], by }) => {
+  const direction = sort === 'oldest' ? 1 : -1;
+  const order = by ? { [by.field]: direction, _id: direction } : { createdAt: direction };
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
   const safePage = Math.max(Number(page) || 1, 1);
+  const count = Model.countDocuments(filter);
+  const find = Model.find(filter);
+  if (by?.collation) {
+    count.collation(by.collation);
+    find.collation(by.collation);
+  }
   const [total, data] = await Promise.all([
-    Model.countDocuments(filter),
-    Model.find(filter)
+    count,
+    find
       .sort(order)
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)

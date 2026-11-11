@@ -133,7 +133,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/scrap-requests/:id/reject | supervisor | `note` (the reason) required; the bus is back in operation |
 | PUT | /api/scrap-requests/:id/cancel | creator who raised it | The bus is back in operation |
 | GET | /api/scrap-requests/:id/attachments/:attachmentId | creator, supervisor, purchasing | Download a scrap request document |
-| GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&sort=oldest` |
+| GET | /api/tickets | any | Role-scoped list, `?status=&busId=&mine=&q=&searchIn=&sort=oldest`. Newest VSR number first, compared as numbers. `searchIn` is `all` (default), `vsr`, `side`, `plate`, `brandType` or `vendor` |
 | POST | /api/tickets | creator, supervisor | Raise ticket, with optional `isBreakdown`. `lpoItemId` is required when lines fit the job; `quantity` for tyres and batteries off a line; `estimatedAmount` for repairs and brake pads off a line, and oil and transmission without a rate |
 | GET | /api/tickets/:id | any | Detail with `history`, all `invoices`, `linkedTickets` and signature drawings |
 | POST | /api/tickets/:id/estimate | vendor (owner) | Multipart: `amount`, `quotationNumber`, `daysToComplete`, `note`, `attachments` |
