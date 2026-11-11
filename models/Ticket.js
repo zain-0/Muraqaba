@@ -1,19 +1,22 @@
 import mongoose from 'mongoose';
 import { AttachmentSchema } from './shared.js';
 
-export const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'brakePads', 'repair', 'other'];
-// The last four come from the depot's own repair log (2026-11-06).
+// Owner's testing notes, 2026-11-11: transmission and brake pads are repair categories, and
+// accident is a service type of its own (it was a repair category until then).
+export const SERVICE_TYPES = ['oil', 'tyre', 'battery', 'repair', 'accident', 'other'];
+// DIAGNOSTIC to BRAKES come from the depot's own repair log (2026-11-06).
 export const REPAIR_CATEGORIES = [
   'ELECTRICAL',
   'MECHANICAL',
   'AC REPAIR',
   'ENGINE',
+  'TRANSMISSION',
   'BODY',
-  'ACCIDENT',
   'DIAGNOSTIC',
   'DRIVETRAIN',
   'SUSPENSION',
   'BRAKES',
+  'BRAKE PADS',
 ];
 /** How a repair category reads in English, for files such as the GRN's Excel sheet. */
 export const REPAIR_CATEGORY_LABELS = {
@@ -21,12 +24,13 @@ export const REPAIR_CATEGORY_LABELS = {
   MECHANICAL: 'Mechanical',
   'AC REPAIR': 'AC repair',
   ENGINE: 'Engine',
+  TRANSMISSION: 'Transmission',
   BODY: 'Body',
-  ACCIDENT: 'Accident',
   DIAGNOSTIC: 'Diagnostic & inspection',
   DRIVETRAIN: 'Drivetrain & axle',
   SUSPENSION: 'Suspension & steering',
   BRAKES: 'Brake system',
+  'BRAKE PADS': 'Brake pads',
 };
 
 // Why a job costs the depot nothing: the vendor's estimate of AED 0 has to say which.
@@ -98,8 +102,8 @@ const NegotiationRoundSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// A price fixed when the ticket is raised, so the VSR goes straight to the supervisor. Oil and
-// transmission: the rate on the bus times its interval. Tyres and batteries off an LPO line
+// A price fixed when the ticket is raised, so the VSR goes straight to the supervisor. Oil (and
+// transmission, before 2026-11-11): the rate on the bus times its interval. Tyres and batteries off an LPO line
 // (2026-11-10): the quantity times the line's unit price.
 export const AGREED_PRICE_BASES = ['rate', 'lpo'];
 const AgreedPriceSchema = new mongoose.Schema(
@@ -231,10 +235,10 @@ const TicketSchema = new mongoose.Schema(
     },
     description: { type: String, trim: true, maxlength: 1000 },
     location: { type: String, enum: WORK_LOCATIONS, default: 'vendorWorkshop' },
-    accident: AccidentSchema, // repair VSRs in the ACCIDENT category; never shown to vendors
+    accident: AccidentSchema, // accident VSRs only; never shown to vendors
     // Odometer in km when the ticket was raised. The API requires it; older tickets have none.
     currentReading: { type: Number, min: 0 },
-    isBreakdown: { type: Boolean, default: false }, // broke down on the road; our own statistics, not for vendors
+    isBreakdown: { type: Boolean, default: false }, // a repair that broke down on the road; our own statistics, not for vendors
     daysToComplete: { type: Number, min: 1 }, // the vendor's latest promise
 
     // The vendor doing the work: the bus's vendor unless the creator chose another.

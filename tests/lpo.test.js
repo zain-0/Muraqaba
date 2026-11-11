@@ -188,24 +188,26 @@ describe('LPO', () => {
     });
   });
 
-  describe('oil and transmission', () => {
-    /** A bus with rates, so these VSRs are priced from the bus and skip the estimates. */
-    const pricedBus = (label) => setup(label, { rates: { oil: 0.1, transmission: 0.05 } });
+  describe('oil services', () => {
+    /** A bus with an oil rate, so these VSRs are priced from the bus and skip the estimates. */
+    const pricedBus = (label) => setup(label, { rates: { oil: 0.1 } });
     const service = async ({ vendor, bus }, serviceType, amount, extra = {}) => {
       const raised = ok(await raise(bus, serviceType, extra));
       assert.equal(raised.status, 'approved', 'priced from the rate on the bus, so it goes to the vendor');
       return toForwarded(users, raised, vendor, { invoice: { amount: String(amount) } });
     };
 
-    test('both take the price off the repair and maintenance line for the bus make, and never a quantity', async () => {
+    test('they take the price off the repair and maintenance line for the bus make, and never a quantity', async () => {
       const context = await pricedBus('MNT');
       const tyres = await makeLpo(context.vendor.id, TYRES);
       const maintenance = await makeLpo(context.vendor.id, RM(50000));
       const lpoItemId = maintenance.items[0]._id;
       const oil = await onGrn(await service(context, 'oil', 900, { lpoItemId }), 'MNT1');
       assert.deepEqual([oil.lpoDeduction.status, oil.lpoDeduction.lpoNumber, oil.lpoDeduction.kind, oil.lpoDeduction.quantity, oil.lpoDeduction.amount], ['deducted', maintenance.number, 'repairMaintenance', 0, 900]);
-      const transmission = await onGrn(await service(context, 'transmission', 3000, { lpoItemId }), 'MNT2');
-      assert.equal(transmission.lpoDeduction.lpoNumber, maintenance.number);
+      // A second bus of the same vendor and make, so its oil service is priced from its own rate too.
+      const second = { ...context, bus: await createBus(users, 'LMNT2', context.vendor.id, { make: MAKE, rates: { oil: 0.1 } }) };
+      const again = await onGrn(await service(second, 'oil', 3000, { lpoItemId }), 'MNT2');
+      assert.equal(again.lpoDeduction.lpoNumber, maintenance.number);
 
       const after = await getLpo(maintenance._id);
       assert.deepEqual([after.items[0].usedAmount, after.items[0].usedQuantity, after.items[0].remainingAmount, after.usage.length], [3900, 0, 46100, 2]);

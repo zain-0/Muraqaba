@@ -31,7 +31,8 @@ const authMiddleware = async (req, res, next) => {
 
   try {
     const user = await User.findById(decoded.id);
-    if (!user) {
+    // A vendor outside the list has no account to use, whatever the token says.
+    if (!user || user.outside) {
       return res.status(401).json({ success: false, code: 'USER_NOT_FOUND', message: 'Account no longer exists' });
     }
     req.user = user;

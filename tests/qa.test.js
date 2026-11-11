@@ -137,7 +137,7 @@ describe('browser testing findings', () => {
       for (const lastDate of ['1900-01-01', '2099-01-01']) {
         const res = await api('POST', '/buses', {
           token: users.creator.token,
-          body: { ...busBody(`BD${lastDate.slice(0, 2)}`, users.vendor1.id), year: 2020, intervals: { oil: { everyKm: 10000, lastKm: 0 }, transmission: { everyKm: 60000, lastKm: 0 }, tyre: { everyKm: 40000, lastKm: 0 }, brakePads: { everyKm: 40000, lastKm: 0 }, battery: { everyMonths: 18, lastDate } } },
+          body: { ...busBody(`BD${lastDate.slice(0, 2)}`, users.vendor1.id), year: 2020, intervals: { oil: { everyKm: 10000, lastKm: 0 }, tyre: { everyKm: 40000, lastKm: 0 }, brakePads: { everyKm: 40000, lastKm: 0 }, battery: { everyMonths: 18, lastDate } } },
         });
         assert.equal(res.status, 400, lastDate);
         assert.equal(firstError(res).field, 'intervals.battery.lastDate');
@@ -191,11 +191,11 @@ describe('browser testing findings', () => {
     const returned = async (ticket) => (await api('PUT', `/tickets/${ticket._id}/return`, { token: users.supervisor.token, body: { reason: 'Check it' } })).body.data;
 
     test('an agreed price stays as raised when only the details change', async () => {
-      const rated = await createBus(users, 'PRICE', users.vendor1.id, { rates: { oil: 0.15, transmission: 1 } });
+      const rated = await createBus(users, 'PRICE', users.vendor1.id, { rates: { oil: 0.15 } });
       const raisedRes = await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000, supervisorFirst: true } });
       const raised = raisedRes.body.data;
       assert.equal(raised.agreedPrice.amount, 1500);
-      const edit = { ...busBody('PRICE', users.vendor1.id), rates: { oil: 0.25, transmission: 1 }, intervals: { ...busBody('PRICE', users.vendor1.id).intervals, oil: { everyKm: 12000, lastKm: 0 } } };
+      const edit = { ...busBody('PRICE', users.vendor1.id), rates: { oil: 0.25 }, intervals: { ...busBody('PRICE', users.vendor1.id).intervals, oil: { everyKm: 12000, lastKm: 0 } } };
       delete edit.vendorId;
       assert.equal((await api('PUT', `/buses/${rated._id}`, { token: users.creator.token, body: edit })).status, 200);
       const back = await returned(raised);
@@ -357,9 +357,9 @@ describe('browser testing findings', () => {
         [{ make: 'B'.repeat(61) }, 'make', 'Keep this to 60 characters or fewer'],
         [{ intervals: intervals({ oil: { everyKm: 10000.5, lastKm: 0 } }) }, 'intervals.oil.everyKm', 'Enter a whole number'],
         [{ intervals: intervals({ tyre: { everyKm: 40000, lastKm: 1000.75 } }) }, 'intervals.tyre.lastKm', 'Enter a whole number'],
-        [{ rates: { oil: 0.00001, transmission: 1 } }, 'rates.oil', 'Use at most 4 decimals'],
+        [{ rates: { oil: 0.00001 } }, 'rates.oil', 'Use at most 4 decimals'],
         [{ labourRate: 50.125 }, 'labourRate', 'Use at most 2 decimals'],
-        [{ rates: { oil: 1, transmission: 999999999999 } }, 'rates.transmission', 'That rate makes the service price too large'],
+        [{ rates: { oil: 999999999 } }, 'rates.oil', 'That rate makes the service price too large'],
         [{ registrationExpiry: '9999-12-31' }, 'registrationExpiry', 'Choose an expiry date within the next 10 years'],
       ];
       for (const [overrides, field, message] of cases) {

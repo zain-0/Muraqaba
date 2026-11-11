@@ -53,7 +53,7 @@ const busesNeedingService = async (filter) => {
     if (offFleet.has(String(bus._id))) return false; // scrapped or removed
     const status = intervalStatus(bus, latest.get(String(bus._id)));
     // Brake pads only on buses that have the interval; older buses have none.
-    return ['oil', 'transmission', 'tyre', 'battery', 'brakePads'].some((service) => status[service]?.state === 'overdue');
+    return ['oil', 'tyre', 'battery', 'brakePads'].some((service) => status[service]?.state === 'overdue');
   }).length;
 };
 

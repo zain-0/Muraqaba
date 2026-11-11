@@ -156,6 +156,26 @@ describe('client seed', () => {
         if (before && String(before.bus) === String(r.bus)) assert.ok(r.km >= before.km, `reading on ${r.date} below the day before`);
       });
 
+      // The kinds of work as the app has them since 2026-11-11: transmission and brake pads are repair
+      // categories, an accident is a service type of its own, and only a repair can have broken down.
+      const recorded = (test) => data.vsrs.filter(test).length;
+      assert.equal(await db('tickets').countDocuments({ serviceType: { $in: ['transmission', 'brakePads'] } }), 0, 'no old service types');
+      assert.equal(await db('tickets').countDocuments({ repairCategory: 'ACCIDENT' }), 0, 'accident is no repair category');
+      assert.equal(
+        await db('tickets').countDocuments({ serviceType: 'accident' }),
+        recorded((v) => v.serviceType === 'accident' || (v.serviceType === 'repair' && v.repairCategory === 'ACCIDENT')),
+        'every accident in the records is an accident'
+      );
+      assert.equal(await db('tickets').countDocuments({ serviceType: 'repair', repairCategory: 'BRAKE PADS' }), recorded((v) => v.serviceType === 'brakePads' || v.repairCategory === 'BRAKE PADS'));
+      assert.equal(await db('tickets').countDocuments({ serviceType: 'repair', repairCategory: 'TRANSMISSION' }), recorded((v) => v.serviceType === 'transmission' || v.repairCategory === 'TRANSMISSION'));
+      assert.equal(await db('tickets').countDocuments({ isBreakdown: true, serviceType: { $ne: 'repair' } }), 0, 'only repairs break down');
+      assert.equal(await db('tickets').countDocuments({ accident: { $exists: true }, serviceType: { $ne: 'accident' } }), 0, 'accident details only on accidents');
+      assert.equal(await db('buses').countDocuments({ $or: [{ 'intervals.transmission': { $exists: true } }, { 'rates.transmission': { $exists: true } }] }), 0, 'no transmission interval or rate');
+      for (const vsr of data.vsrs.filter((v) => !v.lpo && v.stage !== 'completed')) {
+        const ticket = byNumber.get(vsr.vsrNumber);
+        if (ticket.serviceType === 'accident') assert.equal(ticket.lpoLine, undefined, `${vsr.vsrNumber}: an accident is raised against no LPO line`);
+      }
+
       // Missing numbers are left out, never stored empty, so the sparse unique indexes hold.
       const buses = await db('buses').find().toArray();
       assert.ok(buses.every((bus) => ![bus.chassisNumber, bus.registrationNumber].some((value) => value === null || value === '')));

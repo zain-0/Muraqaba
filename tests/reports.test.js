@@ -12,9 +12,9 @@ const raise = async (busId, body) => {
   assert.equal(res.status, 201, JSON.stringify(res.body));
   return res.body.data;
 };
-// Accident repairs need their internal details since 2026-11-06.
-const repair = (busId, category = 'ENGINE', extra = {}) =>
-  raise(busId, { serviceType: 'repair', repairCategory: category, ...(category === 'ACCIDENT' ? { accident: { severity: 'minor', fault: 'unknown' } } : {}), ...extra });
+const repair = (busId, category = 'ENGINE', extra = {}) => raise(busId, { serviceType: 'repair', repairCategory: category, ...extra });
+// An accident is a service type of its own since 2026-11-11, with its internal details.
+const accident = (busId) => raise(busId, { serviceType: 'accident', accident: { severity: 'minor', fault: 'unknown' } });
 const YEAR = new Date().getUTCFullYear();
 
 describe('purchasing queries', () => {
@@ -28,13 +28,13 @@ describe('purchasing queries', () => {
     vendor = await newVendor('reports');
     bus = await createBus(users, 'Q1', vendor.id, { make: brand, rates: undefined });
     const second = await createBus(users, 'Q2', vendor.id, { make: brand, rates: undefined });
-    await repair(bus._id, 'ACCIDENT');
-    await repair(second._id, 'ACCIDENT', { isBreakdown: true });
-    await repair(bus._id, 'ENGINE');
+    await accident(bus._id);
+    await accident(second._id);
+    await repair(bus._id, 'ENGINE', { isBreakdown: true });
     await raise(bus._id, { serviceType: 'tyre' });
     await raise(bus._id, { serviceType: 'battery' });
     await raise(bus._id, { serviceType: 'oil' });
-    await raise(bus._id, { serviceType: 'transmission' });
+    await repair(bus._id, 'TRANSMISSION');
     await toInvoiceAccepted(users, await repair(bus._id, 'BODY'), vendor, { invoice: { amount: '700' } });
   });
 
@@ -57,9 +57,9 @@ describe('purchasing queries', () => {
     assert.deepEqual(result.rows.map((r) => [r.key, r.count]), [[brand, 2]]);
   });
 
-  test('accidents are repairs, but a repair query can ask for everything else separately', async () => {
-    assert.equal((await query({ brand, type: 'repair', year: YEAR })).total.count, 2, 'engine and body');
-    assert.equal((await query({ brand, type: 'maintenance', year: YEAR })).total.count, 2, 'oil and transmission');
+  test('accidents are apart from repairs, and maintenance is the oil service', async () => {
+    assert.equal((await query({ brand, type: 'repair', year: YEAR })).total.count, 3, 'engine, transmission and body');
+    assert.equal((await query({ brand, type: 'maintenance', year: YEAR })).total.count, 1, 'oil only');
     assert.equal((await query({ brand, type: 'tyre', year: YEAR })).total.count, 1);
     assert.equal((await query({ brand, type: 'battery', year: YEAR })).total.count, 1);
     assert.equal((await query({ brand, year: YEAR })).total.count, 8, 'no type means all of them');
@@ -124,13 +124,13 @@ describe('purchasing queries', () => {
     const { months, totals, brands } = res.body.data;
     assert.equal(months.length, 12);
     const now = months[new Date().getUTCMonth()];
-    assert.deepEqual(now, { month: now.month, repair: 4, tyre: 1, battery: 1, maintenance: 2 }, 'accidents count as repairs here');
-    assert.deepEqual({ repair: totals.repair, tyre: totals.tyre, battery: totals.battery, maintenance: totals.maintenance }, { repair: 4, tyre: 1, battery: 1, maintenance: 2 });
+    assert.deepEqual(now, { month: now.month, repair: 5, tyre: 1, battery: 1, maintenance: 1 }, 'accidents count as repairs here');
+    assert.deepEqual({ repair: totals.repair, tyre: totals.tyre, battery: totals.battery, maintenance: totals.maintenance }, { repair: 5, tyre: 1, battery: 1, maintenance: 1 });
     assert.ok(brands.includes(brand));
 
     const generic = await api('GET', `/reports/fleet?year=${YEAR}`, { token: users.purchasing.token });
-    assert.ok(generic.body.data.totals.repair > 4, 'with no brand it covers the whole fleet, other brands included');
-    assert.ok(generic.body.data.byBrand.some((row) => row.brand === brand && row.repair === 4 && row.maintenance === 2));
+    assert.ok(generic.body.data.totals.repair > 5, 'with no brand it covers the whole fleet, other brands included');
+    assert.ok(generic.body.data.byBrand.some((row) => row.brand === brand && row.repair === 5 && row.maintenance === 1));
   });
 });
 
@@ -142,7 +142,7 @@ describe('weekly supervisor report', () => {
     await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 9500 } });
     const tyre = await raise(bus._id, { serviceType: 'tyre', currentReading: 9500 });
     await raise(bus._id, { serviceType: 'battery', currentReading: 9500 });
-    const transmission = await raise(bus._id, { serviceType: 'transmission', currentReading: 9500 });
+    const pads = await repair(bus._id, 'BRAKE PADS', { currentReading: 9500 });
 
     assert.equal((await api('GET', '/reports/weekly', { token: users.creator.token })).status, 403);
     const res = await api('GET', '/reports/weekly', { token: users.supervisor.token });
@@ -151,11 +151,12 @@ describe('weekly supervisor report', () => {
     assert.ok(report.from < report.to);
     assert.ok(report.raised.tyre.some((t) => t._id === tyre._id));
     assert.ok(report.raised.battery.length >= 1);
-    assert.ok(report.raised.transmission.some((t) => t._id === transmission._id), 'transmission is reported too');
+    assert.ok(report.raised.brakePads.some((t) => t._id === pads._id), 'a brake-pad repair is reported under brake pads');
+    assert.ok(!('transmission' in report.raised) && !('transmission' in report.due), 'transmission has no interval any more');
     const due = report.due.oil.find((row) => row.fleetNumber === bus.fleetNumber);
     assert.equal(due.state, 'soon');
     assert.equal(due.left, 500);
-    assert.ok(Array.isArray(report.due.tyre) && Array.isArray(report.due.battery) && Array.isArray(report.due.transmission));
+    assert.ok(Array.isArray(report.due.tyre) && Array.isArray(report.due.battery) && Array.isArray(report.due.brakePads));
   });
 });
 
@@ -197,20 +198,21 @@ describe('notifications', () => {
     assert.equal(open.length, 1, 'the old one stays in history, nothing new');
   });
 
-  test('supervisors hear about transmission services due, like the others', async () => {
+  test('supervisors hear about brake pads due, like the others, and never about transmission', async () => {
     const vendor = await newVendor('due-t');
     const bus = await createBus(users, 'DUET', vendor.id, { rates: undefined });
     const { today } = (await api('GET', '/sheets/readings', { token: users.creator.token })).body.data;
-    await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 59500 } });
+    await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 39500 } });
 
     const supervisor = await inbox(users.supervisor.token);
-    const notice = supervisor.data.find((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'transmission');
-    assert.ok(notice, 'transmission is due soon');
+    const notice = supervisor.data.find((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'brakePads');
+    assert.ok(notice, 'brake pads are due soon');
     assert.equal(notice.params.state, 'soon');
     assert.equal(notice.params.left, 500);
+    assert.ok(!supervisor.data.some((n) => n.type === 'serviceDue' && n.params.service === 'transmission'));
 
     const report = (await api('GET', '/reports/weekly', { token: users.supervisor.token })).body.data;
-    assert.equal(report.due.transmission.find((row) => row.fleetNumber === bus.fleetNumber).left, 500);
+    assert.equal(report.due.brakePads.find((row) => row.fleetNumber === bus.fleetNumber).left, 500);
   });
 
   test('supervisors hear about tyres, batteries and oil due, and vendors hear nothing', async () => {
@@ -224,7 +226,7 @@ describe('notifications', () => {
     assert.ok(oil, 'oil is overdue');
     assert.equal(oil.params.state, 'overdue');
     assert.equal(oil.params.delayed, 300);
-    assert.ok(!supervisor.data.some((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'transmission'), 'transmission has plenty left here');
+    assert.ok(!supervisor.data.some((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'brakePads'), 'brake pads have plenty left here');
 
     const vendorInbox = await inbox(vendor.token);
     assert.equal(vendorInbox.data.length, 0);

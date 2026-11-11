@@ -117,7 +117,7 @@ describe('the daily status follows the VSRs', () => {
     await put(id, 'vehicle/sent', users.creator.token);
     await put(id, 'vehicle/received', users.vendor1.token, { km: 5050 });
     await put(id, 'work/start', users.vendor1.token);
-    const added = await multipart(`/tickets/${id}/additional`, users.vendor1.token, { description: 'Cracked exhaust found during the work.', serviceType: 'repair', repairCategory: 'ACCIDENT', amount: '400', quotationNumber: 'Q-JOB', daysToComplete: '2' });
+    const added = await multipart(`/tickets/${id}/additional`, users.vendor1.token, { description: 'Cracked exhaust found during the work.', serviceType: 'repair', repairCategory: 'MECHANICAL', amount: '400', quotationNumber: 'Q-JOB', daysToComplete: '2' });
     assert.equal(added.status, 201, JSON.stringify(added.body));
     await fillBreakdown(users, added.body.data._id, 400);
     await put(added.body.data._id, 'escalate', users.creator.token);

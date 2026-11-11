@@ -19,7 +19,7 @@ describe('buses', () => {
     assert.equal(bus.registrationExpiry.slice(0, 10), '2030-06-30');
     assert.equal(bus.expectedLifeYears, 15);
     assert.equal(bus.labourRate, 50);
-    assert.deepEqual(bus.rates, { oil: 0.5, transmission: 1 });
+    assert.deepEqual(bus.rates, { oil: 0.5 });
     assert.equal(bus.intervals.oil.everyKm, 10000);
     assert.equal(bus.intervals.battery.everyMonths, 18);
 
@@ -57,7 +57,7 @@ describe('buses', () => {
     assert.equal(rates.status, 404);
   });
 
-  test('oil and transmission charge rate times interval and store what was left or delayed', async () => {
+  test('oil charges rate times interval and stores what was left or delayed', async () => {
     const bus = await createBus(users, 'PRICE', users.vendor1.id);
 
     const early = await raise(bus._id, { serviceType: 'oil', currentReading: 9700 });
@@ -70,9 +70,11 @@ describe('buses', () => {
     assert.deepEqual(late.body.data.agreedPrice, { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 });
     assert.deepEqual(late.body.data.intervalUsage, { unit: 'km', interval: 10000, actual: 10400, left: 0, delayed: 400 });
 
-    const transmission = await raise(bus._id, { serviceType: 'transmission', currentReading: 61000 });
-    assert.deepEqual(transmission.body.data.agreedPrice, { basis: 'rate', rate: 1, km: 60000, amount: 60000 });
-    assert.equal(transmission.body.data.intervalUsage.delayed, 1000);
+    // Transmission is a repair category (2026-11-11): priced by estimate, with no interval of its own.
+    const transmission = await raise(bus._id, { serviceType: 'repair', repairCategory: 'TRANSMISSION', currentReading: 61000 });
+    assert.equal(transmission.body.data.status, 'sentToVendor');
+    assert.equal(transmission.body.data.agreedPrice, undefined);
+    assert.equal(transmission.body.data.intervalUsage, undefined);
 
     const repair = await raise(bus._id, { serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 61000 });
     assert.equal(repair.body.data.status, 'sentToVendor');
@@ -151,7 +153,8 @@ describe('buses', () => {
     const { intervalStatus } = detail.body.data;
     assert.equal(intervalStatus.currentKm, 9500);
     assert.deepEqual(intervalStatus.oil, { unit: 'km', interval: 10000, used: 9500, left: 500, delayed: 0, state: 'soon' });
-    assert.equal(intervalStatus.transmission.state, 'ok');
+    assert.equal(intervalStatus.tyre.state, 'ok');
+    assert.ok(!('transmission' in intervalStatus));
     assert.equal(intervalStatus.battery.unit, 'months');
 
     await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 10300 } });
@@ -164,7 +167,7 @@ describe('buses', () => {
     const bus = await createBus(users, 'EDIT', users.vendor1.id);
     const before = await raise(bus._id, { serviceType: 'oil', currentReading: 9000 });
 
-    const body = busBody('EDIT', users.vendor2.id, { registrationExpiry: '2031-01-15', labourRate: 75, rates: { oil: 2, transmission: 3 } });
+    const body = busBody('EDIT', users.vendor2.id, { registrationExpiry: '2031-01-15', labourRate: 75, rates: { oil: 2 } });
     assert.equal((await api('PUT', `/buses/${bus._id}`, { token: users.supervisor.token, body })).status, 403);
     assert.equal((await api('PUT', `/buses/${bus._id}`, { token: users.vendor1.token, body })).status, 403);
     assert.equal((await api('PUT', `/buses/${bus._id}`, { token: users.creator.token, body: { ...body, expectedLifeYears: 0 } })).status, 400);

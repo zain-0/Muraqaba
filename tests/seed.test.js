@@ -75,11 +75,13 @@ describe('demo data', () => {
         assert.equal(lineOf(ticket.lpoDeduction.item).make, bus.make, `${ticket.vsrNumber} came off the line for its bus's make`);
       }
 
-      // Each VSR is raised against a line and booked on it; the GRN deducts it there (2026-11-10).
+      // Each VSR is raised against a line and booked on it; the GRN deducts it there (2026-11-10). An
+      // accident is raised against none (2026-11-11), so its GRN takes it off its make's line, as above.
       const all = await tickets.find().toArray();
       for (const ticket of all.filter((t) => t.lpoDeduction)) {
         assert.ok(ticket.grn, `${ticket.vsrNumber} is charged only once it is on a GRN`);
-        if (ticket.lpoDeduction.status === 'deducted') assert.equal(String(ticket.lpoDeduction.item), String(ticket.lpoLine?.item), `${ticket.vsrNumber} came off the line it was raised against`);
+        if (ticket.serviceType === 'accident') assert.equal(ticket.lpoLine, undefined, `${ticket.vsrNumber} was raised against no line`);
+        else if (ticket.lpoDeduction.status === 'deducted') assert.equal(String(ticket.lpoDeduction.item), String(ticket.lpoLine?.item), `${ticket.vsrNumber} came off the line it was raised against`);
       }
       assert.ok(all.some((t) => t.lpoLine && !t.lpoDeduction && !['completed', 'declined'].includes(t.status)), 'a VSR booked but not yet on a GRN');
       assert.ok(all.some((t) => t.serviceType === 'tyre' && t.agreedPrice?.basis === 'lpo' && t.history[0].status === 'pending'), 'tyres off a line went straight to the supervisor');
@@ -156,10 +158,21 @@ describe('demo data', () => {
       assert.equal(warranty.negotiation.filter((r) => r.from === 'vendor').at(-1).noChargeReason, 'warranty');
       assert.ok(warranty.breakdown.quotationTotal > 0, 'what the work was worth is on record');
 
-      const accidents = await tickets.find({ repairCategory: 'ACCIDENT' }).toArray();
+      // The owner's testing notes of 2026-11-11.
+      const accidents = await tickets.find({ serviceType: 'accident' }).toArray();
       assert.ok(accidents.length > 0);
-      assert.ok(accidents.every((t) => t.accident?.severity && t.accident?.fault), 'every accident has severity and fault');
-      assert.ok(await tickets.findOne({ serviceType: 'brakePads' }), 'a brake-pad VSR');
+      assert.ok(accidents.every((t) => t.accident?.severity && t.accident?.fault && !t.repairCategory), 'every accident has severity and fault, and no repair category');
+      assert.ok(await tickets.findOne({ serviceType: 'repair', repairCategory: 'BRAKE PADS' }), 'a brake-pad repair');
+      assert.ok(await tickets.findOne({ serviceType: 'repair', repairCategory: 'TRANSMISSION' }), 'a transmission repair');
+      assert.equal(await tickets.countDocuments({ serviceType: { $in: ['transmission', 'brakePads'] } }), 0);
+      assert.equal(await tickets.countDocuments({ isBreakdown: true, serviceType: { $ne: 'repair' } }), 0, 'only repairs break down');
+      assert.ok(fleet.every((bus) => !('transmission' in bus.intervals) && !('transmission' in (bus.rates ?? {}))), 'no transmission interval or rate');
+      const outside = await connection.collection('users').findOne({ outside: true });
+      assert.ok(outside, 'a garage outside the list');
+      const atOutside = accidents.find((t) => String(t.vendorId) === String(outside._id));
+      assert.ok(atOutside, 'an accident taken to it');
+      const creatorId = (await connection.collection('users').findOne({ role: 'serviceCreator' }))._id;
+      assert.ok(atOutside.history.filter((h) => ['estimateSubmitted', 'acknowledged', 'vehicleReceived', 'workInProgress'].includes(h.status)).every((h) => String(h.by) === String(creatorId)), 'the service creator recorded its steps');
     } finally {
       await connection.dropDatabase();
       await connection.close();

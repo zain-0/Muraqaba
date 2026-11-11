@@ -45,6 +45,21 @@ const STAGES = [
 const DATE_FIELD = { approved: 'approvedAt', acknowledged: 'acknowledgedAt', invoiceSubmitted: 'invoiceSubmittedAt', invoiceRejected: 'invoiceRejectedAt', invoiceAccepted: 'invoiceAcceptedAt', completed: 'completedAt' };
 
 /**
+ * The kind of work as the app has it since the owner's testing notes of 2026-11-11: transmission
+ * and brake pads are repair categories, and an accident is a service type of its own. The records
+ * may still use the older shapes, which come in as the migration (migrate-owner-testing.js) leaves them.
+ */
+export const workOf = ({ serviceType, repairCategory, isBreakdown }) => {
+  const moved = {
+    transmission: { serviceType: 'repair', repairCategory: 'TRANSMISSION' },
+    brakePads: { serviceType: 'repair', repairCategory: 'BRAKE PADS' },
+  }[serviceType];
+  const work = moved ?? (serviceType === 'repair' && repairCategory === 'ACCIDENT' ? { serviceType: 'accident' } : { serviceType, repairCategory: serviceType === 'repair' ? repairCategory : undefined });
+  // Breaking down on the road goes with repairs only.
+  return { ...work, isBreakdown: work.serviceType === 'repair' && Boolean(isBreakdown) };
+};
+
+/**
  * @param {string} folder  where client-data.json is
  * @param {{ password: string, staff: Array<{name: string, email: string, role: string}> }} options
  */
@@ -74,6 +89,9 @@ export default async function seedClient(folder, { password, staff }) {
 
   // --- Buses ----------------------------------------------------------------------------------
   const busDocs = data.buses.map((b) => {
+    // A transmission interval or rate is no longer kept (2026-11-11).
+    const { transmission: _interval, ...intervals } = b.intervals;
+    const { transmission: _rate, ...rates } = b.rates ?? {};
     const doc = {
       _id: new ObjectId(),
       fleetNumber: b.fleetNumber,
@@ -81,7 +99,7 @@ export default async function seedClient(folder, { password, staff }) {
       model: b.model,
       year: b.year,
       expectedLifeYears: b.expectedLifeYears,
-      intervals: { ...b.intervals, battery: { everyMonths: b.intervals.battery.everyMonths, lastDate: uaeTime(b.intervals.battery.lastDate, '12:00') } },
+      intervals: { ...intervals, battery: { everyMonths: intervals.battery.everyMonths, lastDate: uaeTime(intervals.battery.lastDate, '12:00') } },
       vendor: vendorOf(b.vendor)._id,
       createdAt: uaeTime(b.createdAt, '07:00'),
     };
@@ -89,7 +107,7 @@ export default async function seedClient(folder, { password, staff }) {
     if (b.registrationNumber) Object.assign(doc, { registrationNumber: b.registrationNumber, registrationExpiry: uaeTime(b.registrationExpiry, '12:00') });
     if (b.chassisNumber) doc.chassisNumber = b.chassisNumber;
     if (b.labourRate) doc.labourRate = b.labourRate;
-    if (b.rates && Object.keys(b.rates).length) doc.rates = b.rates;
+    if (Object.keys(rates).length) doc.rates = rates;
     return doc;
   });
   await Bus.insertMany(busDocs);
@@ -134,7 +152,7 @@ export default async function seedClient(folder, { password, staff }) {
   /** The line of the LPO the records charged this VSR to: of its kind, for tyres the one at the job's unit price, else the first. */
   const lineFor = (vsr) => {
     const lpo = vsr.lpo && lpos.get(vsr.lpo);
-    const lines = lpo ? lpo.items.filter((item) => item.kind === LINE_FOR_SERVICE[vsr.serviceType]) : [];
+    const lines = lpo ? lpo.items.filter((item) => item.kind === LINE_FOR_SERVICE[workOf(vsr).serviceType]) : [];
     if (!lines.length) return undefined;
     return { lpo, item: lines.find((line) => line.unitPrice === vsr.parts?.unitPrice) ?? lines[0] };
   };
@@ -187,17 +205,18 @@ export default async function seedClient(folder, { password, staff }) {
     // A job at the workshop that is not back yet finishes the day after it was raised.
     const doneDay = (clock) => (vsr.backOn ? backDay(clock) : addDays(sameDay(clock), 1));
 
+    const work = workOf(vsr);
     const ticket = {
       _id: new ObjectId(),
       vsrNumber: vsr.vsrNumber,
       busId: bus._id,
-      serviceType: vsr.serviceType,
-      repairCategory: vsr.repairCategory ?? undefined,
+      serviceType: work.serviceType,
+      repairCategory: work.repairCategory ?? undefined,
       description: vsr.description,
       location: vsr.location,
-      accident: vsr.accident ? { ...vsr.accident, updatedBy: creator._id, updatedAt: raised } : undefined,
+      accident: vsr.accident && work.serviceType === 'accident' ? { ...vsr.accident, updatedBy: creator._id, updatedAt: raised } : undefined,
       currentReading: vsr.kmOut ?? undefined,
-      isBreakdown: vsr.isBreakdown,
+      isBreakdown: work.isBreakdown,
       intervalUsage: vsr.intervalUsage ?? undefined,
       vendorId: vendor._id,
       createdBy: creator._id,
@@ -211,7 +230,7 @@ export default async function seedClient(folder, { password, staff }) {
     // The LPO it comes off, chosen as the creator does now; open VSRs are booked against it.
     const line = lineFor(vsr);
     if (line) ticket.lpoLine = lpoLineOf(line);
-    if (COUNTED_BY_QUANTITY.includes(vsr.serviceType) && vsr.parts?.quantity) ticket.quantity = vsr.parts.quantity;
+    if (COUNTED_BY_QUANTITY.includes(work.serviceType) && vsr.parts?.quantity) ticket.quantity = vsr.parts.quantity;
 
     // Each step with the time it is wanted; later the times are pulled back so none is in the future.
     const plan = [];
@@ -393,10 +412,11 @@ export default async function seedClient(folder, { password, staff }) {
 
   // --- Open VSRs the records charge to no LPO yet ------------------------------------------------
   // They are booked on the line their GRN would take them off now, as the migration books them: their
-  // vendor's line valid today for the bus's make and the kind, with room, oldest VSR first.
+  // vendor's line valid today for the bus's make and the kind, with room, oldest VSR first. An accident
+  // is raised against no line (2026-11-11), so its GRN chooses one, as the app does.
   const inDate = [...lpos.values()].filter((lpo) => isInDate(lpo, uaeDay()));
   const unbooked = tickets
-    .filter((t) => !t.lpoLine && !t.lpoDeduction && !t.grn && !CLOSED_STATUSES.includes(t.status))
+    .filter((t) => t.serviceType !== 'accident' && !t.lpoLine && !t.lpoDeduction && !t.grn && !CLOSED_STATUSES.includes(t.status))
     .sort((a, b) => a.createdAt - b.createdAt || a.vsrNumber.localeCompare(b.vsrNumber));
   const busById = new Map(busDocs.map((b) => [String(b._id), b]));
   for (const { ticket, ...line } of linesForOpen(unbooked, { lpos: inDate, makeOf: (t) => busById.get(String(t.busId)).make, room: roomOn(inDate, tickets) })) {

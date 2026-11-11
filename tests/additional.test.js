@@ -187,7 +187,8 @@ describe('additional jobs', () => {
     const parent = await parentAtWork();
     const before = await sheet();
     const index = before.days.indexOf(before.today);
-    await addJob(parent._id, { ...JOB, repairCategory: 'ACCIDENT' });
+    // A tyre job would pick another status than the parent's repair, if jobs picked one.
+    assert.equal((await addJob(parent._id, { ...JOB, serviceType: 'tyre' })).status, 201);
     const after = await sheet();
     assert.equal(after.buses.find((b) => b._id === bus._id).cells[index].status, before.buses.find((b) => b._id === bus._id).cells[index].status);
   });

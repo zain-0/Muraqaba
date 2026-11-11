@@ -216,11 +216,13 @@ describe('km per month from the daily readings', () => {
 });
 
 describe('grouping', () => {
-  test('an accident repair is its own kind of work', () => {
-    assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'ACCIDENT' }), 'accident');
+  test('an accident is its own kind of work, and brake pads and transmission are repairs', () => {
+    assert.equal(kindOf({ serviceType: 'accident' }), 'accident');
     assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'ENGINE' }), 'repair');
-    assert.equal(kindOf({ serviceType: 'brakePads' }), 'brakePads');
+    assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'BRAKE PADS' }), 'repair');
+    assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'TRANSMISSION' }), 'repair');
     assert.equal(kindOf({ serviceType: 'oil' }), 'oil');
+    assert.equal(kindOf({ serviceType: 'repair', repairCategory: 'ACCIDENT' }), 'accident', 'a record not yet migrated');
   });
 
   test('brands match case-blind and ignore stray spaces', () => {

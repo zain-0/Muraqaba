@@ -1,10 +1,21 @@
 /**
- * Service intervals on a bus. Oil, transmission, tyres and brake pads are counted in km, batteries in
- * months. Used when a VSR is raised (what was left or delayed) and to say what is due.
+ * Service intervals on a bus. Oil, tyres and brake pads are counted in km, batteries in months.
+ * Used when a VSR is raised (what was left or delayed) and to say what is due.
  */
 import { BusDailyReading } from '../models/BusDaily.js';
 
 const DUE_SOON = { km: 1000, months: 1 };
+
+export const INTERVAL_SERVICES = ['oil', 'tyre', 'brakePads', 'battery'];
+
+/**
+ * The interval a VSR's work is measured against, if any. Brake pads became a repair category on
+ * 2026-11-11, and a repair in it still counts against the bus's brake-pad interval.
+ */
+export const intervalServiceOf = ({ serviceType, repairCategory }) => {
+  if (serviceType === 'repair') return repairCategory === 'BRAKE PADS' ? 'brakePads' : undefined;
+  return INTERVAL_SERVICES.includes(serviceType) ? serviceType : undefined;
+};
 
 /** Whole months from one date to a later one. */
 export const monthsBetween = (from, to) => {
@@ -22,8 +33,8 @@ const measure = (bus, service, km, now) => {
   return { unit, interval: every, actual, left: Math.max(every - actual, 0), delayed: Math.max(actual - every, 0) };
 };
 
-/** What a VSR stores: how much of the interval was left or delayed when it was raised. */
-export const usageWhenRaised = (bus, serviceType, reading, now = new Date()) => measure(bus, serviceType, reading, now);
+/** What a VSR stores: how much of the interval was left or delayed when it was raised. `service` is from intervalServiceOf. */
+export const usageWhenRaised = (bus, service, reading, now = new Date()) => (service ? measure(bus, service, reading, now) : undefined);
 
 /** The latest km on the daily sheet for each bus, as a map of bus id to km. */
 export const latestKmByBus = async () => {
@@ -36,7 +47,7 @@ export const latestKmByBus = async () => {
  * are left out for a bus added before they had an interval.
  */
 export const intervalStatus = (bus, latestKm, now = new Date()) => {
-  const services = ['oil', 'transmission', 'tyre', 'brakePads', 'battery'].filter((service) => bus.intervals[service]);
+  const services = INTERVAL_SERVICES.filter((service) => bus.intervals[service]);
   // A bus with nothing on the daily sheet yet is as far as its last recorded service.
   const currentKm = latestKm ?? Math.max(...services.filter((service) => service !== 'battery').map((service) => bus.intervals[service].lastKm));
   const status = { currentKm };

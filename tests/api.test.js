@@ -439,12 +439,13 @@ describe('Muraqaba API', () => {
 
       const picked = [
         [{ serviceType: 'oil' }, 'maintenance'],
-        [{ serviceType: 'transmission' }, 'maintenance'],
         [{ serviceType: 'other' }, 'maintenance'],
         [{ serviceType: 'repair', repairCategory: 'ENGINE' }, 'repair'],
+        [{ serviceType: 'repair', repairCategory: 'TRANSMISSION' }, 'repair'],
+        [{ serviceType: 'repair', repairCategory: 'BRAKE PADS' }, 'repair'],
         [{ serviceType: 'tyre' }, 'tyreChange'],
         [{ serviceType: 'battery' }, 'batteryChange'],
-        [{ serviceType: 'repair', repairCategory: 'ACCIDENT', accident: { severity: 'minor', fault: 'otherParty' } }, 'accident'],
+        [{ serviceType: 'accident', accident: { severity: 'minor', fault: 'otherParty' } }, 'accident'],
       ];
       for (const [body, status] of picked) {
         const res = await raise(body);

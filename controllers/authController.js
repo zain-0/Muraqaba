@@ -72,7 +72,8 @@ export const loginUser = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email }).select('+password');
   const matches = await bcrypt.compare(password, user ? user.password : DUMMY_HASH);
   // Same message for unknown email and wrong password so the endpoint does not reveal which accounts exist.
-  if (!user || !matches) {
+  // A vendor outside the list never signs in: the service creator records their steps.
+  if (!user || !matches || user.outside) {
     throw new AppError('Incorrect email or password', 401, 'INVALID_CREDENTIALS');
   }
 

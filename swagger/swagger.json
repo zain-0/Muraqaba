@@ -3,7 +3,7 @@
   "info": {
     "title": "Muraqaba Fleet Maintenance API",
     "version": "1.1.0",
-    "description": "Ticketing API for bus fleet maintenance with four roles.\n\n**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil and transmission with a rate on the bus start at pending. Screens call a ticket a VSR.\n\n**Roles:** serviceCreator manages vendors and buses, raises tickets, fills in parts and labour, sends buses and forwards invoices; supervisor approves tickets and reviews invoices; vendor sends estimates, works on buses, releases them and invoices; purchaseManager makes GRNs, purchase invoices and LPOs and runs queries.\n\nAll list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`."
+    "description": "Ticketing API for bus fleet maintenance with four roles.\n\n**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil with a rate on the bus starts at pending. Screens call a ticket a VSR.\n\n**Roles:** serviceCreator manages vendors and buses, raises tickets, fills in parts and labour, sends buses and forwards invoices; supervisor approves tickets and reviews invoices; vendor sends estimates, works on buses, releases them and invoices; purchaseManager makes GRNs, purchase invoices and LPOs and runs queries.\n\nAll list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`."
   },
   "servers": [
     {
@@ -163,9 +163,6 @@
             "properties": {
               "oil": {
                 "type": "number"
-              },
-              "transmission": {
-                "type": "number"
               }
             }
           },
@@ -173,30 +170,12 @@
             "type": "object",
             "required": [
               "oil",
-              "transmission",
               "tyre",
+              "brakePads",
               "battery"
             ],
             "properties": {
               "oil": {
-                "type": "object",
-                "required": [
-                  "everyKm"
-                ],
-                "properties": {
-                  "everyKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 10000
-                  },
-                  "lastKm": {
-                    "type": "number",
-                    "description": "Odometer at the last service",
-                    "example": 0
-                  }
-                }
-              },
-              "transmission": {
                 "type": "object",
                 "required": [
                   "everyKm"
@@ -231,6 +210,25 @@
                     "example": 0
                   }
                 }
+              },
+              "brakePads": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                },
+                "description": "A repair in the Brake pads category is measured against it"
               },
               "battery": {
                 "type": "object",
@@ -458,9 +456,6 @@
             "properties": {
               "oil": {
                 "type": "number"
-              },
-              "transmission": {
-                "type": "number"
               }
             }
           },
@@ -468,30 +463,12 @@
             "type": "object",
             "required": [
               "oil",
-              "transmission",
               "tyre",
+              "brakePads",
               "battery"
             ],
             "properties": {
               "oil": {
-                "type": "object",
-                "required": [
-                  "everyKm"
-                ],
-                "properties": {
-                  "everyKm": {
-                    "type": "number",
-                    "description": "Kilometres between services",
-                    "example": 10000
-                  },
-                  "lastKm": {
-                    "type": "number",
-                    "description": "Odometer at the last service",
-                    "example": 0
-                  }
-                }
-              },
-              "transmission": {
                 "type": "object",
                 "required": [
                   "everyKm"
@@ -526,6 +503,25 @@
                     "example": 0
                   }
                 }
+              },
+              "brakePads": {
+                "type": "object",
+                "required": [
+                  "everyKm"
+                ],
+                "properties": {
+                  "everyKm": {
+                    "type": "number",
+                    "description": "Kilometres between services",
+                    "example": 10000
+                  },
+                  "lastKm": {
+                    "type": "number",
+                    "description": "Odometer at the last service",
+                    "example": 0
+                  }
+                },
+                "description": "A repair in the Brake pads category is measured against it"
               },
               "battery": {
                 "type": "object",
@@ -626,9 +622,6 @@
                 "properties": {
                   "oil": {
                     "type": "number"
-                  },
-                  "transmission": {
-                    "type": "number"
                   }
                 }
               },
@@ -636,30 +629,12 @@
                 "type": "object",
                 "required": [
                   "oil",
-                  "transmission",
                   "tyre",
+                  "brakePads",
                   "battery"
                 ],
                 "properties": {
                   "oil": {
-                    "type": "object",
-                    "required": [
-                      "everyKm"
-                    ],
-                    "properties": {
-                      "everyKm": {
-                        "type": "number",
-                        "description": "Kilometres between services",
-                        "example": 10000
-                      },
-                      "lastKm": {
-                        "type": "number",
-                        "description": "Odometer at the last service",
-                        "example": 0
-                      }
-                    }
-                  },
-                  "transmission": {
                     "type": "object",
                     "required": [
                       "everyKm"
@@ -694,6 +669,25 @@
                         "example": 0
                       }
                     }
+                  },
+                  "brakePads": {
+                    "type": "object",
+                    "required": [
+                      "everyKm"
+                    ],
+                    "properties": {
+                      "everyKm": {
+                        "type": "number",
+                        "description": "Kilometres between services",
+                        "example": 10000
+                      },
+                      "lastKm": {
+                        "type": "number",
+                        "description": "Odometer at the last service",
+                        "example": 0
+                      }
+                    },
+                    "description": "A repair in the Brake pads category is measured against it"
                   },
                   "battery": {
                     "type": "object",
@@ -863,11 +857,10 @@
             "type": "string",
             "enum": [
               "oil",
-              "transmission",
               "tyre",
               "battery",
-              "brakePads",
               "repair",
+              "accident",
               "other"
             ]
           },
@@ -878,8 +871,13 @@
               "MECHANICAL",
               "AC REPAIR",
               "ENGINE",
+              "TRANSMISSION",
               "BODY",
-              "ACCIDENT"
+              "DIAGNOSTIC",
+              "DRIVETRAIN",
+              "SUSPENSION",
+              "BRAKES",
+              "BRAKE PADS"
             ]
           },
           "description": {
@@ -892,7 +890,29 @@
           },
           "isBreakdown": {
             "type": "boolean",
-            "description": "Broke down on the road. Never sent to vendors."
+            "description": "A repair that broke down on the road; false on anything else. Never sent to vendors."
+          },
+          "accident": {
+            "type": "object",
+            "description": "Accidents only: severity and fault. Never sent to vendors.",
+            "properties": {
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "minor",
+                  "medium",
+                  "major"
+                ]
+              },
+              "fault": {
+                "type": "string",
+                "enum": [
+                  "ourDriver",
+                  "otherParty",
+                  "unknown"
+                ]
+              }
+            }
           },
           "daysToComplete": {
             "type": "integer",
@@ -900,7 +920,7 @@
           },
           "agreedPrice": {
             "type": "object",
-            "description": "Fixed at raising, so the VSR goes straight to the vendor to acknowledge (to the supervisor first with supervisorFirst). rate: oil and transmission, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
+            "description": "Fixed at raising, so the VSR goes straight to the vendor to acknowledge (to the supervisor first with supervisorFirst). rate: oil, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
             "properties": {
               "basis": {
                 "type": "string",
@@ -3134,6 +3154,77 @@
         }
       }
     },
+    "/api/vendors/outside": {
+      "get": {
+        "tags": [
+          "Vendors"
+        ],
+        "summary": "Vendors outside the list that accidents have gone to, by name, to suggest for the next one. Never listed with the vendors.",
+        "description": "Roles: serviceCreator, supervisor",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "_id": {
+                            "type": "string",
+                            "example": "64b7f0c2e1d2a9b1c8a4f123"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/vendors/tickets": {
       "get": {
         "tags": [
@@ -3666,7 +3757,7 @@
           "Buses"
         ],
         "summary": "What the bus has cost over its whole life: accepted invoices by kind of work, repairs and accidents counted, current km and cost per km",
-        "description": "Roles: serviceCreator, supervisor, purchaseManager. A VSR costs its current invoice once accepted (as in the cost reports); declined VSRs never count and a no-charge job counts 0. Maintenance is oil (and transmission services), repair is repairs (and brake pads), accident is accident VSRs (and repairs in the Accident category). The current km is the latest daily reading, else the furthest last service. costPerKm = grandTotal / currentKm with four decimals, null with no km.",
+        "description": "Roles: serviceCreator, supervisor, purchaseManager. A VSR costs its current invoice once accepted (as in the cost reports); declined VSRs never count and a no-charge job counts 0. Maintenance is oil, repair is repairs (transmission and brake pads among them), accident is accident VSRs; records from before 2026-11-11 (transmission and brake-pad services, repairs in the Accident category) count the same way. The current km is the latest daily reading, else the furthest last service. costPerKm = grandTotal / currentKm with four decimals, null with no km.",
         "security": [
           {
             "bearerAuth": []
@@ -3694,6 +3785,9 @@
                     "success": {
                       "type": "boolean",
                       "example": true
+                    },
+                    "message": {
+                      "type": "string"
                     },
                     "data": {
                       "type": "object",
@@ -3788,7 +3882,7 @@
             }
           },
           "403": {
-            "description": "Role not allowed",
+            "description": "Role not allowed or resource owned by someone else",
             "content": {
               "application/json": {
                 "schema": {
@@ -3798,7 +3892,7 @@
             }
           },
           "404": {
-            "description": "Bus not found",
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -4985,11 +5079,10 @@
                     "type": "string",
                     "enum": [
                       "oil",
-                      "transmission",
                       "tyre",
                       "battery",
-                      "brakePads",
                       "repair",
+                      "accident",
                       "other"
                     ]
                   },
@@ -5000,8 +5093,13 @@
                       "MECHANICAL",
                       "AC REPAIR",
                       "ENGINE",
+                      "TRANSMISSION",
                       "BODY",
-                      "ACCIDENT"
+                      "DIAGNOSTIC",
+                      "DRIVETRAIN",
+                      "SUSPENSION",
+                      "BRAKES",
+                      "BRAKE PADS"
                     ],
                     "description": "Required when serviceType is repair"
                   },
@@ -5015,13 +5113,41 @@
                     "example": "64b7f0c2e1d2a9b1c8a4f123",
                     "description": "Defaults to the vendor assigned to the bus"
                   },
+                  "outsideVendorName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 80,
+                    "description": "Accidents only: a vendor outside the list, kept once per name in any letter case. The service creator records its steps."
+                  },
+                  "accident": {
+                    "type": "object",
+                    "description": "Required when serviceType is accident",
+                    "properties": {
+                      "severity": {
+                        "type": "string",
+                        "enum": [
+                          "minor",
+                          "medium",
+                          "major"
+                        ]
+                      },
+                      "fault": {
+                        "type": "string",
+                        "enum": [
+                          "ourDriver",
+                          "otherParty",
+                          "unknown"
+                        ]
+                      }
+                    }
+                  },
                   "description": {
                     "type": "string",
                     "maxLength": 1000
                   },
                   "isBreakdown": {
                     "type": "boolean",
-                    "description": "Broke down on the road. Never sent to vendors."
+                    "description": "Repairs only: broke down on the road. Never sent to vendors."
                   },
                   "lpoItemId": {
                     "type": "string",
@@ -5039,7 +5165,7 @@
                   },
                   "estimatedAmount": {
                     "type": "number",
-                    "description": "Repairs and brake pads off a line, and oil and transmission off one without a rate on the bus"
+                    "description": "Repairs off a line, and oil off one without a rate on the bus. An accident is raised against no line."
                   }
                 }
               }
@@ -5921,7 +6047,7 @@
           "Tickets"
         ],
         "summary": "Vendor sends an estimate (multipart: amount, quotationNumber, daysToComplete, note, attachments)",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -6208,7 +6334,7 @@
           "Tickets"
         ],
         "summary": "Vendor accepts an approved ticket. Gives daysToComplete when it has an agreed price.",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -6708,7 +6834,7 @@
           "Workshop"
         ],
         "summary": "Raise an additional job while the bus is at the workshop (multipart: description, serviceType, repairCategory, amount, quotationNumber, daysToComplete, note, attachments)",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -6923,7 +7049,7 @@
           "Workshop"
         ],
         "summary": "The vendor has the bus",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -7045,7 +7171,7 @@
           "Workshop"
         ],
         "summary": "Work in progress",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -7161,7 +7287,7 @@
           "Workshop"
         ],
         "summary": "Ready for delivery",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -7277,7 +7403,7 @@
           "Workshop"
         ],
         "summary": "Release the bus, with every linked VSR at the workshop",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []
@@ -8632,11 +8758,10 @@
               "type": "string",
               "enum": [
                 "oil",
-                "transmission",
                 "tyre",
                 "battery",
-                "brakePads",
                 "repair",
+                "accident",
                 "other"
               ]
             }
@@ -9377,7 +9502,7 @@
           "Tickets"
         ],
         "summary": "Vendor submits (or resubmits) an invoice (multipart: amount, description, invoiceNumber, attachments; a file is required)",
-        "description": "Roles: vendor",
+        "description": "Roles: vendor, serviceCreator",
         "security": [
           {
             "bearerAuth": []

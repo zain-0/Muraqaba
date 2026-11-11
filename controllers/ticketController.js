@@ -9,8 +9,9 @@ import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
 import { BY_VSR_NUMBER, TICKET_POPULATE, paginate } from '../utils/query.js';
 import { sendStored, withStoredAttachments } from '../utils/uploads.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
-import { usageWhenRaised } from '../utils/intervals.js';
-import { candidateLines, LINE_FOR_SERVICE, lpoLineOf } from '../utils/lpoDeduction.js';
+import { intervalServiceOf, usageWhenRaised } from '../utils/intervals.js';
+import { candidateLines, LINE_FOR_SERVICE, lineStatus, lpoLineOf } from '../utils/lpoDeduction.js';
+import { outsideVendorNamed } from '../utils/outsideVendors.js';
 import { COUNTED_BY_QUANTITY, balancesFor, isOverdrawn, reservedAmount } from '../utils/lpoBalance.js';
 import { toFils } from '../utils/reportMaths.js';
 import { stamp } from '../utils/signatures.js';
@@ -125,10 +126,18 @@ export const loadTicket = async (id) => {
   return ticket;
 };
 
-export const assertVendorOwns = (ticket, user) => {
-  if (!ticket.vendorId.equals(user._id)) {
-    throw new AppError('This VSR is assigned to a different vendor', 403, 'FORBIDDEN');
+/**
+ * The vendor's own step: the vendor of this VSR, or for a vendor outside the list, who cannot sign
+ * in, the service creator recording it for them (2026-11-11). The routes let only these two roles in.
+ */
+export const assertVendorOwns = async (ticket, user) => {
+  const vendorId = ticket.vendorId?._id ?? ticket.vendorId;
+  if (user.role === 'vendor') {
+    if (!vendorId.equals(user._id)) throw new AppError('This VSR is assigned to a different vendor', 403, 'FORBIDDEN');
+    return;
   }
+  const vendor = await User.findById(vendorId).select('outside');
+  if (!vendor?.outside) throw new AppError('This step is for the vendor. The service creator records it only for a vendor outside the list.', 403, 'FORBIDDEN');
 };
 
 export const assertStatus = (ticket, allowed, explanation) => {
@@ -144,9 +153,9 @@ export const respond = async (res, ticket, message, status = 200) => {
 };
 
 /**
- * Oil and transmission services are priced from the rate on the bus, and only for the vendor
- * that rate was agreed with. The vendor charges by the interval whatever the real km were;
- * intervalUsage keeps how much was left or delayed.
+ * Oil services are priced from the rate on the bus, and only for the vendor that rate was agreed
+ * with (transmission was too, until it became a repair category on 2026-11-11). The vendor
+ * charges by the interval whatever the real km were; intervalUsage keeps how much was left or delayed.
  */
 const priceFromBusRate = ({ bus, vendor, serviceType }) => {
   const rate = bus.rates?.[serviceType];
@@ -179,9 +188,9 @@ const chosenLine = async ({ bus, serviceType, lpoItemId, vendorId }) => {
 
 /**
  * How the VSR is priced and what it books. With a line, tyres and batteries are the quantity times
- * the line's unit price, an agreed price that goes to the vendor (or the supervisor first); repairs and brake
- * pads take the creator's estimate; oil and transmission the rate on the bus, or without one the
- * creator's estimate. With no line, as before 2026-11-10: the rate on the bus or the vendor's estimate.
+ * the line's unit price, an agreed price that goes to the vendor (or the supervisor first); repairs
+ * take the creator's estimate; oil the rate on the bus, or without one the creator's estimate. With no
+ * line, as before 2026-11-10: the rate on the bus or the vendor's estimate. An accident never has a line.
  */
 const pricing = ({ bus, vendor, serviceType, line, quantity, estimatedAmount }) => {
   const rated = priceFromBusRate({ bus, vendor, serviceType });
@@ -216,9 +225,9 @@ const assertLineHasRoom = async (ticket, line) => {
   throw fieldError(field, `LPO ${number} has an available limit of AED ${AED.format(Math.max(available.amount, 0))} for ${name}. Ask purchasing to add to it, or choose another LPO.`);
 };
 
-/** Purchasing hears of a job raised with no LPO to come off. Other work needs none. A failure here must not fail the VSR. */
+/** Purchasing hears of a job raised with no LPO to come off. Other work and accidents need none. A failure here must not fail the VSR. */
 const tellPurchasingNoLpo = async (ticket, bus) => {
-  if (ticket.lpoLine?.item || ticket.serviceType === 'other') return;
+  if (ticket.lpoLine?.item || lineStatus(ticket.serviceType, []) === 'notNeeded') return;
   await notifyLpoMissing(ticket, bus, LINE_FOR_SERVICE[ticket.serviceType]).catch((err) => console.error('Could not tell purchasing about the missing LPO:', err));
 };
 
@@ -243,18 +252,33 @@ const assertReadingAfterLastService = (usage) => {
 
 /** An odometer cannot read below any service already recorded at a higher km, whatever the work. */
 const assertReadingAfterAnyService = (bus, reading) => {
-  const { oil, transmission, tyre, brakePads } = bus.intervals;
-  if (reading < Math.max(oil.lastKm, transmission.lastKm, tyre.lastKm, brakePads?.lastKm ?? 0)) throw readingError('The reading is lower than the last service recorded for this bus');
+  const { oil, tyre, brakePads } = bus.intervals;
+  if (reading < Math.max(oil.lastKm, tyre.lastKm, brakePads?.lastKm ?? 0)) throw readingError('The reading is lower than the last service recorded for this bus');
 };
 
-/** Buses added before brake pads were tracked have no interval for them, so a brake-pad job could not be measured. */
-export const assertBusTracks = (bus, serviceType) => {
-  if (serviceType !== 'brakePads' || bus.intervals?.brakePads) return;
+/**
+ * Buses added before brake pads were tracked have no interval for them, so a brake-pad repair
+ * could not be measured. `job` is the VSR's serviceType and repairCategory.
+ */
+export const assertBusTracks = (bus, job) => {
+  if (intervalServiceOf(job) !== 'brakePads' || bus.intervals?.brakePads) return;
   const message = 'This bus has no brake-pad interval. Add it on the bus first.';
-  throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'serviceType', message }]);
+  throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'repairCategory', message }]);
 };
 
-const isAccident = ({ serviceType, repairCategory }) => serviceType === 'repair' && repairCategory === 'ACCIDENT';
+const isAccident = ({ serviceType }) => serviceType === 'accident';
+
+/**
+ * Who does the job. A chosen LPO line brings its vendor. An accident may go to a vendor outside
+ * the list, named here and kept for the next one (2026-11-11); no other work may.
+ */
+const vendorFor = async ({ serviceType, line, vendorId, outsideVendorName, bus }) => {
+  if (hasText(outsideVendorName)) {
+    if (!isAccident({ serviceType })) throw fieldError('outsideVendorName', 'Only an accident can go to a vendor outside the list');
+    return outsideVendorNamed(outsideVendorName);
+  }
+  return assertVendorExists(line ? line.lpo.vendor._id : vendorId || bus.vendor, { allowOutside: isAccident({ serviceType }) });
+};
 
 // Work is raised only on a bus in operation; a bus on its way out of the fleet says where it is.
 const NO_VSR_WHILE = {
@@ -270,24 +294,25 @@ const assertInOperation = (bus) => {
  * The fields the creator fills in, shared by raising a ticket and correcting a returned one.
  * Returns them with the bus and the chosen LPO line (or null), which the checks after need.
  */
-const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, isBreakdown, location, accident, lpoItemId, quantity, estimatedAmount }, user) => {
+const requestFields = async ({ busId, serviceType, repairCategory, description, currentReading, vendorId, outsideVendorName, isBreakdown, location, accident, lpoItemId, quantity, estimatedAmount }, user) => {
   const bus = await Bus.findById(busId);
   if (!bus) throw new AppError('Bus not found', 404, 'NOT_FOUND');
   assertInOperation(bus);
-  assertBusTracks(bus, serviceType);
+  const category = serviceType === 'repair' ? repairCategory : undefined;
+  assertBusTracks(bus, { serviceType, repairCategory: category });
   const line = await chosenLine({ bus, serviceType, lpoItemId, vendorId });
-  // A chosen line brings its vendor.
-  const vendor = await assertVendorExists(line ? line.lpo.vendor._id : vendorId || bus.vendor);
-  const intervalUsage = usageWhenRaised(bus, serviceType, currentReading);
+  const vendor = await vendorFor({ serviceType, line, vendorId, outsideVendorName, bus });
+  const intervalUsage = usageWhenRaised(bus, intervalServiceOf({ serviceType, repairCategory: category }), currentReading);
   assertReadingAfterLastService(intervalUsage);
   assertReadingAfterAnyService(bus, currentReading);
   const fields = {
     busId: bus._id,
     serviceType,
-    repairCategory: serviceType === 'repair' ? repairCategory : undefined,
+    repairCategory: category,
     description,
     currentReading,
-    isBreakdown: Boolean(isBreakdown),
+    // Breaking down on the road is a repair's story (2026-11-11); anything else never carries it.
+    isBreakdown: serviceType === 'repair' && Boolean(isBreakdown),
     // Left out, a new VSR is done at the vendor's workshop and a corrected one stays where it was.
     ...(location ? { location } : {}),
     accident: isAccident({ serviceType, repairCategory }) ? { severity: accident.severity, fault: accident.fault, updatedBy: user._id, updatedAt: new Date() } : undefined,
@@ -434,7 +459,7 @@ export const approveTicket = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/accident  (creator, supervisor; any stage, and never shown to vendors)
 export const updateAccident = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  if (!isAccident(ticket)) throw new AppError('Only an accident repair has accident details.', 409, 'INVALID_STATE');
+  if (!isAccident(ticket)) throw new AppError('Only an accident has accident details.', 409, 'INVALID_STATE');
   const { severity, fault } = req.body;
   ticket.accident = { severity, fault, updatedBy: req.user._id, updatedAt: new Date() };
   await ticket.save();
@@ -508,7 +533,7 @@ const repriceLabour = async (ticket) => {
 // POST /api/tickets/:id/estimate  (vendor who owns the ticket; multipart, with files)
 export const submitEstimate = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   assertStatus(ticket, ['sentToVendor', 'estimateCountered'], `An estimate is not needed at this stage (this one is ${ticket.status})`);
   await withStoredAttachments(req.files, async (attachments) => {
     const { amount, quotationNumber, daysToComplete, note, noChargeReason } = req.body;
@@ -647,7 +672,7 @@ export const downloadAttachment = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/acknowledge  (vendor who owns the ticket)
 export const acknowledgeTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'approved', `A VSR must be approved before it can be acknowledged (this one is ${ticket.status})`);
   if (req.body?.daysToComplete) ticket.daysToComplete = req.body.daysToComplete;
   if (!ticket.daysToComplete) {
@@ -665,7 +690,7 @@ export const acknowledgeTicket = asyncHandler(async (req, res) => {
 export const submitInvoice = asyncHandler(async (req, res) => {
   const { amount, description, invoiceNumber } = req.body;
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   assertStatus(
     ticket,
     ['vehicleReturned', 'invoiceRejected'],
@@ -677,7 +702,8 @@ export const submitInvoice = asyncHandler(async (req, res) => {
   }
 
   await withStoredAttachments(req.files, async (attachments) => {
-    const invoice = new Invoice({ ticketId: ticket._id, vendorId: req.user._id, amount, description, invoiceNumber, attachments });
+    // The VSR's vendor, also when the service creator records it for a vendor outside the list.
+    const invoice = new Invoice({ ticketId: ticket._id, vendorId: ticket.vendorId, amount, description, invoiceNumber, attachments });
     // Save the ticket first: if a concurrent submission already moved it, the version
     // check rejects this one and no orphan invoice is written.
     ticket.invoice = invoice._id;

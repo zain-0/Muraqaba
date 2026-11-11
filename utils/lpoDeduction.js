@@ -20,11 +20,12 @@ import { uaeDay } from './uaeTime.js';
 
 export { COUNTED_BY_QUANTITY };
 
+// An accident is raised against no line (its vendor may be anyone, 2026-11-11); at the GRN it comes
+// off its vendor's repair and maintenance line for the bus's make, if there is one.
 export const LINE_FOR_SERVICE = {
   repair: 'repairMaintenance',
-  brakePads: 'repairMaintenance',
   oil: 'repairMaintenance',
-  transmission: 'repairMaintenance',
+  accident: 'repairMaintenance',
   tyre: 'tyre',
   battery: 'battery',
   other: 'other',
@@ -42,8 +43,8 @@ export const validOn = (day) => ({
 /** Whether an LPO is valid on a UAE day ('YYYY-MM-DD'). */
 export const isInDate = (lpo, day = uaeDay()) => lpo.validFrom.toISOString().slice(0, 10) <= day && lpo.validTo.toISOString().slice(0, 10) >= day;
 
-/** What the creator may raise this job against. Other work has no line of its own any more. */
-const raisedAgainst = (serviceType) => (serviceType === 'other' ? undefined : LINE_FOR_SERVICE[serviceType]);
+/** What the creator may raise this job against. Other work has no line of its own any more, and an accident chooses none. */
+const raisedAgainst = (serviceType) => (['other', 'accident'].includes(serviceType) ? undefined : LINE_FOR_SERVICE[serviceType]);
 
 /**
  * Whether a line can carry this job when raising: its kind, for repair and maintenance the bus's

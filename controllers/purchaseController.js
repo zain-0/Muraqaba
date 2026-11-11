@@ -20,7 +20,7 @@ import { withStoredAttachments } from '../utils/uploads.js';
 
 const money = (value) => Math.round(value * 100) / 100;
 
-const SERVICE_LABELS = { oil: 'Oil service', transmission: 'Transmission service', tyre: 'Tyre change', battery: 'Battery change', brakePads: 'Brake pads', repair: 'Repair', other: 'Other' };
+const SERVICE_LABELS = { oil: 'Oil service', tyre: 'Tyre change', battery: 'Battery change', repair: 'Repair', accident: 'Accident', other: 'Other' };
 
 const serviceLabel = ({ serviceType, repairCategory }) =>
   serviceType === 'repair' && repairCategory ? `Repair: ${REPAIR_CATEGORY_LABELS[repairCategory] ?? repairCategory}` : SERVICE_LABELS[serviceType];

@@ -188,7 +188,7 @@ describe('LPO items, reservations and balances', () => {
       const own = await makeLpo(vendor.id, [RM(5000)], { validTo: '2099-12-31' });
       const sooner = await makeLpo(elsewhere.id, [RM(4000)], { validTo: '2097-12-31' });
 
-      const shown = await forVsr(bus._id, 'brakePads');
+      const shown = await forVsr(bus._id, 'repair');
       assert.deepEqual([shown.kind, shown.status, shown.make], ['repairMaintenance', 'found', MAKE]);
       assert.deepEqual(shown.lines.map((line) => line.lpo.number), [own.number, sooner.number, later.number]);
       const [first] = shown.lines;
@@ -197,7 +197,7 @@ describe('LPO items, reservations and balances', () => {
       assert.deepEqual(first.item, { _id: own.items[0]._id, name: `Repair & Maintenance of ${MAKE} Buses`, kind: 'repairMaintenance', make: MAKE, size: null, lifeKm: null, unitPrice: 5000 });
       assert.deepEqual(first.balance, { value: { amount: 5000, quantity: null }, booked: { amount: 0, quantity: null }, grn: { amount: 0, quantity: null }, available: { amount: 5000, quantity: null }, afterGrn: { amount: 5000, quantity: null }, vsrs: 0 });
 
-      const pads = (extra) => raise({ busId: bus._id, serviceType: 'brakePads', estimatedAmount: 300, lpoItemId: sooner.items[0]._id, ...extra });
+      const pads = (extra) => raise({ busId: bus._id, serviceType: 'repair', repairCategory: 'BRAKE PADS', estimatedAmount: 300, lpoItemId: sooner.items[0]._id, ...extra });
       const taken = ok(await pads());
       assert.equal(taken.vendorId._id, elsewhere.id, 'the LPO\'s vendor does the work');
       const clash = await pads({ vendorId: vendor.id });
@@ -229,21 +229,21 @@ describe('LPO items, reservations and balances', () => {
       assert.deepEqual([battery.status, battery.agreedPrice.amount], ['approved', 640]);
     });
 
-    test('repairs and brake pads take the creator\'s estimate; oil and transmission the rate, or without one the estimate', async () => {
+    test('repairs take the creator\'s estimate; oil the rate, or without one the estimate', async () => {
       const { vendor, bus } = await setup('EST');
       const rated = await createBus(users, 'RSRATED', vendor.id, { make: MAKE });
       const lpo = await makeLpo(vendor.id, [RM(50000)]);
       const line = lpo.items[0]._id;
       assert.deepEqual(firstError(await raise({ busId: bus._id, serviceType: 'repair', repairCategory: 'BODY', lpoItemId: line })), { field: 'estimatedAmount', message: 'Enter the estimated amount' });
       assert.equal(firstError(await raise({ busId: bus._id, serviceType: 'repair', repairCategory: 'BODY', lpoItemId: line, estimatedAmount: 10.005 })).message, 'Use at most 2 decimals');
-      const pads = ok(await raise({ busId: bus._id, serviceType: 'brakePads', lpoItemId: line, estimatedAmount: 750 }));
+      const pads = ok(await raise({ busId: bus._id, serviceType: 'repair', repairCategory: 'BRAKE PADS', lpoItemId: line, estimatedAmount: 750 }));
       assert.deepEqual([pads.status, pads.estimatedAmount, pads.agreedPrice], ['sentToVendor', 750, undefined]);
 
       const oil = ok(await raise({ busId: rated._id, serviceType: 'oil', lpoItemId: line }));
       assert.deepEqual([oil.status, oil.agreedPrice, oil.estimatedAmount], ['approved', { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 }, undefined], 'the rate on the bus');
-      assert.deepEqual(firstError(await raise({ busId: bus._id, serviceType: 'transmission', lpoItemId: line })), { field: 'estimatedAmount', message: 'Enter the estimated amount' });
-      const transmission = ok(await raise({ busId: bus._id, serviceType: 'transmission', lpoItemId: line, estimatedAmount: 2000 }));
-      assert.deepEqual([transmission.status, transmission.estimatedAmount], ['sentToVendor', 2000]);
+      assert.deepEqual(firstError(await raise({ busId: bus._id, serviceType: 'oil', lpoItemId: line })), { field: 'estimatedAmount', message: 'Enter the estimated amount' }, 'oil with no rate on the bus');
+      const unrated = ok(await raise({ busId: bus._id, serviceType: 'oil', lpoItemId: line, estimatedAmount: 2000 }));
+      assert.deepEqual([unrated.status, unrated.estimatedAmount], ['sentToVendor', 2000]);
       assert.equal((await balanceOn(lpo)).booked.amount, 7750);
     });
 

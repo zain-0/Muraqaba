@@ -36,7 +36,7 @@ const PurchaseInvoiceSchema = new mongoose.Schema(
 );
 
 // Which VSRs a line pays for. Tyre and battery lines track quantity and amount, the others amount only.
-// Repairs, brake pads, oil and transmission services all come off one repair and maintenance amount,
+// Repairs, accidents and oil services all come off one repair and maintenance amount,
 // as on the client's e-LPO (2026-11-09). That line is for one make; tyres and batteries cover every make.
 // Other is no longer offered (2026-11-10) but older LPOs may still have such a line.
 export const LPO_KINDS = ['repairMaintenance', 'tyre', 'battery', 'other'];

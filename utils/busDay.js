@@ -19,13 +19,9 @@ export const offFleetBusIds = async (day = uaeDay()) => {
   return new Set(latest.filter((row) => LOCKED_STATUSES.includes(row.status)).map((row) => String(row._id)));
 };
 
-export const statusForTicket = ({ serviceType, repairCategory }) => {
-  if (serviceType === 'tyre') return 'tyreChange';
-  if (serviceType === 'battery') return 'batteryChange';
-  if (serviceType === 'brakePads') return 'repair';
-  if (serviceType !== 'repair') return 'maintenance';
-  return repairCategory === 'ACCIDENT' ? 'accident' : 'repair';
-};
+// Every repair, transmission and brake pads included, is a repair; oil and other work are maintenance.
+const STATUS_FOR_SERVICE = { tyre: 'tyreChange', battery: 'batteryChange', repair: 'repair', accident: 'accident' };
+export const statusForTicket = ({ serviceType }) => STATUS_FOR_SERVICE[serviceType] ?? 'maintenance';
 
 // From raising a VSR until the creator confirms the bus is back, the VSR has the bus out (2026-11-11).
 export const BUS_OUT_STATUSES = ['sentToVendor', 'estimateSubmitted', 'estimateCountered', 'pending', 'returned', 'approved', 'acknowledged', 'vehicleSent', 'vehicleReceived', 'workInProgress', 'readyForDelivery', 'vehicleReleased'];

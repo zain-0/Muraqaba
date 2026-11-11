@@ -53,24 +53,26 @@ before(async () => {
   const accepted = (amount) => [{ amount, status: 'approved' }];
   const add = (fields) => fx.addTicket({ bus: bus.X, vendor: vendor.id, created: uae('2025-06-01T10:00:00'), ...fields });
   await add({ serviceType: 'oil', approved: 1000, invoices: accepted(1000) });
-  await add({ serviceType: 'transmission', approved: 500.5, invoices: accepted(500.5) });
+  const transmissionService = await add({ serviceType: 'oil', approved: 500.5, invoices: accepted(500.5) });
   const engine = await add({ serviceType: 'repair', repairCategory: 'ENGINE', approved: 2100, invoices: accepted(2100) });
   await add({ serviceType: 'repair', repairCategory: 'MECHANICAL', parent: engine, approved: 200, invoices: accepted(200) });
   await add({ serviceType: 'repair', repairCategory: 'MECHANICAL', parent: engine, status: 'declined', invoices: accepted(999) });
-  await add({ serviceType: 'brakePads', approved: 300, invoices: accepted(300) });
-  const transmissionRepair = await add({ serviceType: 'repair', repairCategory: 'ENGINE', approved: 400, invoices: accepted(400) });
+  const brakePadsService = await add({ serviceType: 'repair', repairCategory: 'ENGINE', approved: 300, invoices: accepted(300) });
+  await add({ serviceType: 'repair', repairCategory: 'TRANSMISSION', approved: 400, invoices: accepted(400) });
   await add({ serviceType: 'repair', repairCategory: 'MECHANICAL', approved: 900, status: 'approved' });
   await add({ serviceType: 'repair', repairCategory: 'BODY', approved: 0, noChargeReason: 'warranty' });
-  await add({ serviceType: 'repair', repairCategory: 'ACCIDENT', approved: 4000, invoices: accepted(4000) });
-  const accident = await add({ serviceType: 'repair', repairCategory: 'ACCIDENT', approved: 1500, invoices: accepted(1500) });
+  const accidentRepair = await add({ serviceType: 'accident', approved: 4000, invoices: accepted(4000) });
+  await add({ serviceType: 'accident', approved: 1500, invoices: accepted(1500) });
   await add({ serviceType: 'tyre', approved: 2660, invoices: accepted(2660) });
   await add({ serviceType: 'battery', approved: 600, status: 'invoiceRejected', invoices: [{ amount: 650, status: 'rejected' }] });
   await add({ serviceType: 'battery', approved: 600, invoices: accepted(600) });
   await add({ serviceType: 'other', approved: 50.25, invoices: accepted(50.25) });
-  // The shapes another round of work brings in (2026-11-11), written past the schema's checks:
-  // accident as a service type of its own, and transmission as a repair category.
-  await models.Ticket.collection.updateOne({ _id: accident._id }, { $set: { serviceType: 'accident' }, $unset: { repairCategory: '' } });
-  await models.Ticket.collection.updateOne({ _id: transmissionRepair._id }, { $set: { repairCategory: 'TRANSMISSION' } });
+  // The shapes from before 2026-11-11, written past the schema's checks as a database not yet
+  // migrated still holds them: a transmission service, a brake-pad service, and an accident as a
+  // repair category.
+  await models.Ticket.collection.updateOne({ _id: transmissionService._id }, { $set: { serviceType: 'transmission' } });
+  await models.Ticket.collection.updateOne({ _id: brakePadsService._id }, { $set: { serviceType: 'brakePads' }, $unset: { repairCategory: '' } });
+  await models.Ticket.collection.updateOne({ _id: accidentRepair._id }, { $set: { serviceType: 'repair', repairCategory: 'ACCIDENT' } });
 
   await fx.addTicket({ bus: bus.Y, vendor: vendor.id, serviceType: 'repair', repairCategory: 'ENGINE', created: uae('2025-06-01T10:00:00'), approved: 7777, invoices: accepted(7777) });
 

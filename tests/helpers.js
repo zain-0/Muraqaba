@@ -77,7 +77,7 @@ export const signInEveryone = async () => {
 /** A vendor of a test's own, ready to sign. */
 export const newVendor = async (label) => withSignature(await register('vendor', label), label);
 
-/** A complete add-bus form. Rates are on the bus; oil at AED 0.5 and transmission at AED 1 per km. */
+/** A complete add-bus form. The oil rate is on the bus, AED 0.5 per km. */
 export const busBody = (suffix, vendorId, overrides = {}) => ({
   fleetNumber: `S-${run}-${suffix}`,
   chassisNumber: `CH-${run}-${suffix}`,
@@ -88,10 +88,9 @@ export const busBody = (suffix, vendorId, overrides = {}) => ({
   registrationExpiry: '2030-06-30',
   expectedLifeYears: 15,
   labourRate: 50,
-  rates: { oil: 0.5, transmission: 1 },
+  rates: { oil: 0.5 },
   intervals: {
     oil: { everyKm: 10000, lastKm: 0 },
-    transmission: { everyKm: 60000, lastKm: 0 },
     tyre: { everyKm: 40000, lastKm: 0 },
     brakePads: { everyKm: 40000, lastKm: 0 },
     battery: { everyMonths: 18, lastDate: '2026-01-01' },

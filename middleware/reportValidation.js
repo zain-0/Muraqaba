@@ -6,7 +6,8 @@ import { query } from 'express-validator';
 import { handleValidationErrors } from './validationMiddleware.js';
 import { LPO_KINDS } from '../models/Purchase.js';
 
-export const REPORT_TYPES = ['accident', 'repair', 'maintenance', 'oil', 'transmission', 'tyre', 'battery', 'brakePads', 'other'];
+// Maintenance is the oil service alone since 2026-11-11, when transmission and brake pads became repair categories.
+export const REPORT_TYPES = ['accident', 'repair', 'maintenance', 'oil', 'tyre', 'battery', 'other'];
 
 const optional = (field) => query(field).optional({ values: 'falsy' }).isString().withMessage(`${field} must appear once`).bail();
 
