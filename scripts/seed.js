@@ -25,7 +25,8 @@ import { Grn, Lpo, PurchaseInvoice, lineName } from '../models/Purchase.js';
 import { BusDailyReading, BusStatusChange } from '../models/BusDaily.js';
 import { applyTicketToBusDay } from '../utils/busDay.js';
 import { notifyRoles } from '../utils/notifications.js';
-import { usageWhenRaised } from '../utils/intervals.js';
+import { intervalServiceOf, usageWhenRaised } from '../utils/intervals.js';
+import { outsideVendorNamed } from '../utils/outsideVendors.js';
 import { COUNTED_BY_QUANTITY, LINE_FOR_SERVICE, candidateLines, deductAtGrn, lpoLineOf } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
 import { uaeDay } from '../utils/uaeTime.js';
@@ -52,7 +53,7 @@ const daysAgo = (n) => new Date(Date.now() - n * DAY_MS);
 const daysAhead = (n) => new Date(Date.now() + n * DAY_MS);
 const money = (value) => Math.round(value * 100) / 100;
 
-// Every step a VSR goes through, in order. Oil and transmission with a rate start at pending.
+// Every step a VSR goes through, in order. Oil with a rate starts at pending.
 const ORDER = [
   'sentToVendor',
   'estimateSubmitted',
@@ -124,9 +125,8 @@ async function main() {
   };
 
   // Brake pads every 40,000 km, as on the depot's sheet: BUS-102 is due soon and BUS-103 overdue.
-  const intervals = (oil, transmission, tyre, batteryMonthsAgo, brakePads) => ({
+  const intervals = (oil, tyre, batteryMonthsAgo, brakePads) => ({
     oil: { everyKm: 10000, lastKm: oil },
-    transmission: { everyKm: 60000, lastKm: transmission },
     tyre: { everyKm: 40000, lastKm: tyre },
     brakePads: { everyKm: 40000, lastKm: brakePads },
     battery: { everyMonths: 18, lastDate: daysAgo(batteryMonthsAgo * 30.5) },
@@ -136,16 +136,16 @@ async function main() {
     fleetNumber, chassisNumber, registrationNumber, make, model, year, registrationExpiry: registrationNumber ? daysAhead(expiryDays) : undefined, expectedLifeYears: life, labourRate, rates, intervals: chosenIntervals, vendor: vendor._id, ...extra,
   });
   const buses = await Bus.create([
-    makeBus('BUS-101', 'CH-101-AX', 'DXB-1011', 'Hino', 'Coach', 2019, 400, 15, 70, { oil: 0.12, transmission: 0.05 }, intervals(77000, 60000, 46000, 17, 50000), vendor1),
-    makeBus('BUS-102', 'CH-102-BX', 'DXB-1022', 'Yutong', 'City bus', 2021, 200, 12, 65, { oil: 0.1, transmission: 0.05 }, intervals(40000, 20000, 20000, 6, 12800), vendor1),
-    makeBus('BUS-103', 'CH-103-CX', 'DXB-1033', 'Isuzu', 'Mini bus', 2018, 20, 12, 60, { oil: 0.09, transmission: 0.04 }, intervals(90000, 40000, 60000, 12, 56000), vendor2),
-    makeBus('BUS-104', 'CH-104-DX', 'DXB-1044', 'Hino', 'City bus', 2022, 600, 15, 70, { oil: 0.12, transmission: 0.05 }, intervals(0, 0, 0, 3, 0), vendor2),
+    makeBus('BUS-101', 'CH-101-AX', 'DXB-1011', 'Hino', 'Coach', 2019, 400, 15, 70, { oil: 0.12 }, intervals(77000, 46000, 17, 50000), vendor1),
+    makeBus('BUS-102', 'CH-102-BX', 'DXB-1022', 'Yutong', 'City bus', 2021, 200, 12, 65, { oil: 0.1 }, intervals(40000, 20000, 6, 12800), vendor1),
+    makeBus('BUS-103', 'CH-103-CX', 'DXB-1033', 'Isuzu', 'Mini bus', 2018, 20, 12, 60, { oil: 0.09 }, intervals(90000, 60000, 12, 56000), vendor2),
+    makeBus('BUS-104', 'CH-104-DX', 'DXB-1044', 'Hino', 'City bus', 2022, 600, 15, 70, { oil: 0.12 }, intervals(0, 0, 3, 0), vendor2),
     // An old bus the depot's records hold no chassis number for.
-    makeBus('BUS-105', undefined, 'DXB-1055', 'Yutong', 'Coach', 2012, 90, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(235000, 200000, 210000, 2, 205000), vendor2),
+    makeBus('BUS-105', undefined, 'DXB-1055', 'Yutong', 'Coach', 2012, 90, 15, 65, { oil: 0.1 }, intervals(235000, 210000, 2, 205000), vendor2),
     // A new bus that arrived three weeks ago and runs on a temporary plate until it is registered.
-    makeBus('BUS-106', 'CH-106-FX', undefined, 'Yutong', 'City bus', 2026, undefined, 15, 65, { oil: 0.1, transmission: 0.05 }, intervals(0, 0, 0, 1, 0), vendor1, { createdAt: daysAgo(21) }),
+    makeBus('BUS-106', 'CH-106-FX', undefined, 'Yutong', 'City bus', 2026, undefined, 15, 65, { oil: 0.1 }, intervals(0, 0, 1, 0), vendor1, { createdAt: daysAgo(21) }),
     // Past its service life; the creator has asked for it to be scrapped (below).
-    makeBus('BUS-107', 'CH-107-GX', 'DXB-1077', 'Isuzu', 'Mini bus', 2010, 150, 15, 60, { oil: 0.09, transmission: 0.04 }, intervals(404000, 380000, 395000, 10, 390000), vendor1),
+    makeBus('BUS-107', 'CH-107-GX', 'DXB-1077', 'Isuzu', 'Mini bus', 2010, 150, 15, 60, { oil: 0.09 }, intervals(404000, 395000, 10, 390000), vendor1),
   ]);
   const [bus101, bus102, bus103, bus104, bus105, bus106, bus107] = buses;
 
@@ -155,7 +155,7 @@ async function main() {
   // the open depot tyre job is counted, so a VSR for two tyres off it is refused.
   const day = (text) => new Date(`${text}T00:00:00.000Z`);
   const THIS_YEAR = { date: day('2026-01-01'), validFrom: day('2026-01-01'), validTo: day('2026-12-31') };
-  const repairLine = (make, amount) => ({ kind: 'repairMaintenance', make, name: lineName({ kind: 'repairMaintenance', make }), description: `Repairs, brake pads, oil and transmission services for ${make} buses`, quantity: 1, unitPrice: amount, total: amount });
+  const repairLine = (make, amount) => ({ kind: 'repairMaintenance', make, name: lineName({ kind: 'repairMaintenance', make }), description: `Repairs, accidents and oil services for ${make} buses`, quantity: 1, unitPrice: amount, total: amount });
   const tyreLine = (size, quantity, unitPrice, lifeKm, description) => ({ kind: 'tyre', size, lifeKm, name: lineName({ kind: 'tyre', size }), description, quantity, unitPrice, total: money(quantity * unitPrice) });
   const batteryLine = (size, quantity, unitPrice) => ({ kind: 'battery', size, name: lineName({ kind: 'battery', size }), quantity, unitPrice, total: money(quantity * unitPrice) });
   const lpoOf = (number, vendor, items, dates = THIS_YEAR) => ({ number, vendor: vendor._id, ...dates, items, grandTotal: money(items.reduce((sum, item) => sum + item.total, 0)), createdBy: purchasing._id });
@@ -192,14 +192,17 @@ async function main() {
 
   /** Create a VSR and replay its lifecycle up to `stage`, with dates spread back from today. */
   // A depot job skips the trip; a job at no charge is quoted at AED 0 and closes when the bus is back.
-  const makeTicket = async ({ bus, serviceType, repairCategory, description, stage, createdDaysAgo, amount = 1500, parts, isBreakdown = false, parent, location = 'vendorWorkshop', noChargeReason, accident }) => {
+  // An accident may go to a vendor outside the list (`outside`), whose steps the creator records (2026-11-11).
+  const makeTicket = async ({ bus, serviceType, repairCategory, description, stage, createdDaysAgo, amount = 1500, parts, isBreakdown = false, parent, location = 'vendorWorkshop', noChargeReason, accident, outside }) => {
     // The LPO line it comes off, as the creator would choose: the bus's own vendor's first. An
     // additional job takes its parent's line when that is for the same kind of work.
     const line = parent ? undefined : (await candidateLines({ bus, serviceType }))[0];
     const inherited = parent?.lpoLine?.kind === LINE_FOR_SERVICE[serviceType] ? parent.lpoLine.toObject() : undefined;
     const lpoLine = line ? lpoLineOf(line) : inherited;
     const quantity = COUNTED_BY_QUANTITY.includes(serviceType) && parts ? parts.reduce((sum, part) => sum + part.quantity, 0) : undefined;
-    const vendor = line ? [vendor1, vendor2].find((v) => v._id.equals(line.lpo.vendor._id)) : vendorOf(bus);
+    const vendor = line ? [vendor1, vendor2].find((v) => v._id.equals(line.lpo.vendor._id)) : (outside ?? vendorOf(bus));
+    // The service creator stands in for a vendor outside the list, who cannot sign in.
+    const actingVendor = outside ? creator : vendor;
     const created = daysAgo(createdDaysAgo);
     const currentReading = readingAgo(bus, createdDaysAgo);
     const rate = !parent && bus.rates?.[serviceType];
@@ -215,7 +218,7 @@ async function main() {
       accident: accident && { ...accident, updatedBy: creator._id, updatedAt: created },
       currentReading,
       isBreakdown,
-      intervalUsage: usageWhenRaised(bus, serviceType, currentReading, created),
+      intervalUsage: usageWhenRaised(bus, intervalServiceOf({ serviceType, repairCategory }), currentReading, created),
       vendorId: vendor._id,
       lpoLine,
       quantity,
@@ -255,7 +258,7 @@ async function main() {
 
     const estimateRound = async (number, roundAmount, note) => {
       const file = await attach(`Quotation ${ticket.vsrNumber} ${number}.pdf`, [`Quotation Q-${ticket.vsrNumber}-${number}`, `Vendor: ${vendor.name}`, `Bus: ${bus.fleetNumber}`, `Amount: AED ${roundAmount}`, note]);
-      ticket.negotiation.push({ from: 'vendor', by: vendor._id, amount: roundAmount, quotationNumber: `Q-${ticket.vsrNumber}-${number}`, daysToComplete: 2 + number, estimateNumber: number, noChargeReason, note, attachments: [file], at: when() });
+      ticket.negotiation.push({ from: 'vendor', by: actingVendor._id, amount: roundAmount, quotationNumber: `Q-${ticket.vsrNumber}-${number}`, daysToComplete: 2 + number, estimateNumber: number, noChargeReason, note, attachments: [file], at: when() });
       ticket.daysToComplete = 2 + number;
     };
 
@@ -266,7 +269,7 @@ async function main() {
       await estimateRound(1, estimate, 'Found during the work. Needs doing before the bus goes back.');
     } else if (reached('estimateSubmitted') && !priced) {
       await estimateRound(1, noChargeReason ? 0 : Math.round(estimate * 1.15), noChargeReason ? 'No charge for this work.' : 'Parts and labour for the job as described.');
-      step('estimateSubmitted', vendor, 'Estimate 1');
+      step('estimateSubmitted', actingVendor, 'Estimate 1');
     }
     // There is nothing to bargain over on a job at no charge.
     if (reached('estimateCountered') && !priced && !parent && !noChargeReason) {
@@ -276,7 +279,7 @@ async function main() {
     if (reached('pending') && !priced) {
       if (!parent && !noChargeReason) {
         await estimateRound(2, estimate, 'Agreed at this amount.');
-        step('estimateSubmitted', vendor, 'Estimate 2');
+        step('estimateSubmitted', actingVendor, 'Estimate 2');
       }
       ticket.breakdown = breakdownFor(bus, estimate, parts);
       sign(creator, 'escalated');
@@ -299,8 +302,8 @@ async function main() {
     }
     if (reached('acknowledged') && !parent) {
       ticket.daysToComplete = ticket.daysToComplete ?? 3;
-      sign(vendor, 'acknowledged');
-      step('acknowledged', vendor);
+      sign(actingVendor, 'acknowledged');
+      step('acknowledged', actingVendor);
     }
     // The step's date is the day it was entered, read once so the history and the Vehicle panel agree.
     const stepWithDate = (status, by, field, extra) => {
@@ -312,28 +315,29 @@ async function main() {
     if (reached('vehicleSent') && !parent && !depot) stepWithDate('vehicleSent', creator, 'sentAt');
     if (reached('vehicleReceived') && !parent && !depot) {
       const km = currentReading + DAILY_KM.get(bus);
-      stepWithDate('vehicleReceived', vendor, 'receivedAt', { km });
+      stepWithDate('vehicleReceived', actingVendor, 'receivedAt', { km });
       ticket.vehicle.receivedKm = km;
     }
     if (reached('workInProgress') && depot && !parent) {
       // At the depot the vendor gives the reading when starting, which stands in for receiving the bus.
       const km = currentReading + DAILY_KM.get(bus);
-      stepWithDate('workInProgress', vendor, 'workStartedAt', { km });
+      stepWithDate('workInProgress', actingVendor, 'workStartedAt', { km });
       ticket.vehicle.receivedAt = ticket.vehicle.workStartedAt;
       ticket.vehicle.receivedKm = km;
-    } else if (reached('workInProgress')) stepWithDate('workInProgress', vendor, 'workStartedAt');
-    if (reached('readyForDelivery')) stepWithDate('readyForDelivery', vendor, 'readyAt');
+    } else if (reached('workInProgress')) stepWithDate('workInProgress', actingVendor, 'workStartedAt');
+    if (reached('readyForDelivery')) stepWithDate('readyForDelivery', actingVendor, 'readyAt');
     if (reached('vehicleReleased') && !depot) {
-      sign(vendor, 'vehicleReleased');
-      stepWithDate('vehicleReleased', vendor, 'releasedAt');
+      sign(actingVendor, 'vehicleReleased');
+      stepWithDate('vehicleReleased', actingVendor, 'releasedAt');
     }
     if (reached('vehicleReturned')) {
       const km = currentReading + DAILY_KM.get(bus) * 2;
       stepWithDate('vehicleReturned', creator, 'returnedAt', { km });
       ticket.vehicle.returnedKm = km;
       ticket.vehicle.replacedPartsReceived = true;
-      if (serviceType === 'battery') bus.intervals.battery.lastDate = when();
-      else if (bus.intervals[serviceType]) bus.intervals[serviceType].lastKm = km;
+      const service = intervalServiceOf({ serviceType, repairCategory });
+      if (service === 'battery') bus.intervals.battery.lastDate = when();
+      else if (service && bus.intervals[service]) bus.intervals[service].lastKm = km;
       await bus.save();
       if (noChargeReason) {
         // No invoice to wait for: it closes the moment the bus is back.
@@ -347,7 +351,7 @@ async function main() {
       const invoiceFile = await attach(`Invoice ${ticket.vsrNumber}.pdf`, [`Invoice INV-${ticket.vsrNumber}-1`, `Vendor: ${vendor.name}`, `Bus: ${bus.fleetNumber}`, `Amount: AED ${estimate}`]);
       const inv = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount: estimate, description: `Work completed on ${bus.fleetNumber}`, invoiceNumber: `INV-${ticket.vsrNumber}-1`, attachments: [invoiceFile], submittedAt: when() });
       ticket.invoice = inv._id;
-      step('invoiceSubmitted', vendor, `Invoice ${inv.invoiceNumber}`);
+      step('invoiceSubmitted', actingVendor, `Invoice ${inv.invoiceNumber}`);
       if (reached('invoiceRejected')) {
         inv.status = 'rejected';
         inv.rejectedBy = supervisor._id;
@@ -360,7 +364,7 @@ async function main() {
         const secondFile = await attach(`Invoice ${ticket.vsrNumber} revised.pdf`, [`Invoice INV-${ticket.vsrNumber}-2`, `Vendor: ${vendor.name}`, `Bus: ${bus.fleetNumber}`, `Amount: AED ${money(estimate * 0.95)}`]);
         const inv2 = await Invoice.create({ ticketId: ticket._id, vendorId: vendor._id, amount: money(estimate * 0.95), description: `Itemised invoice for ${bus.fleetNumber}`, invoiceNumber: `INV-${ticket.vsrNumber}-2`, attachments: [secondFile], submittedAt: when() });
         ticket.invoice = inv2._id;
-        step('invoiceSubmitted', vendor, `Invoice ${inv2.invoiceNumber}`);
+        step('invoiceSubmitted', actingVendor, `Invoice ${inv2.invoiceNumber}`);
       }
       if (reached('invoiceAccepted')) {
         const current = await Invoice.findById(ticket.invoice);
@@ -426,7 +430,7 @@ async function main() {
   const history1 = await makeTicket({ bus: bus104, serviceType: 'oil', description: 'First oil service for new vehicle.', stage: 'forwardedToPurchase', createdDaysAgo: 70 });
   const history2 = await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Reverse camera wiring replaced.', stage: 'forwardedToPurchase', createdDaysAgo: 55, amount: 980, isBreakdown: true });
   const history3 = await makeTicket({ bus: bus102, serviceType: 'other', description: 'Interior deep clean and seat repairs after charter.', stage: 'forwardedToPurchase', createdDaysAgo: 40, amount: 750 });
-  const history4 = await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'ACCIDENT', description: 'Front panel damage after a depot collision.', stage: 'forwardedToPurchase', createdDaysAgo: 38, amount: 4200, accident: { severity: 'medium', fault: 'otherParty' } });
+  const history4 = await makeTicket({ bus: bus101, serviceType: 'accident', description: 'Front panel damage after a depot collision.', stage: 'forwardedToPurchase', createdDaysAgo: 38, amount: 4200, accident: { severity: 'medium', fault: 'otherParty' } });
   const batch1 = await makeTicket({ bus: bus103, serviceType: 'tyre', description: 'Replace both rear tyres, tread below legal limit.', stage: 'forwardedToPurchase', createdDaysAgo: 22, amount: 4400, parts: [{ name: 'Tyre 225/75 R17.5', code: 'TYR-225', partNumber: 'BR-22575', quantity: 2, unitPrice: 2200 }] });
   const batch2 = await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Rear suspension bushes worn on both sides.', stage: 'forwardedToPurchase', createdDaysAgo: 28, amount: 1850 });
   const batch3 = await makeTicket({ bus: bus101, serviceType: 'tyre', description: 'Front tyres worn on the inner edge.', stage: 'forwardedToPurchase', createdDaysAgo: 18, amount: 1700, parts: tyres(2) });
@@ -434,7 +438,7 @@ async function main() {
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Steering play checked and tie rods replaced.', stage: 'invoiceReceived', createdDaysAgo: 15, amount: 2600 });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'BODY', description: 'Rear bumper bracket welded and repainted.', stage: 'invoiceAccepted', createdDaysAgo: 14, amount: 1100 });
   await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Dashboard warning lights flickering intermittently.', stage: 'invoiceRejected', createdDaysAgo: 13, amount: 1200 });
-  await makeTicket({ bus: bus101, serviceType: 'transmission', description: 'Transmission service at its interval.', stage: 'invoiceSubmitted', createdDaysAgo: 12 });
+  await makeTicket({ bus: bus101, serviceType: 'repair', repairCategory: 'TRANSMISSION', description: 'Gearbox slipping between second and third gear.', stage: 'invoiceSubmitted', createdDaysAgo: 12 });
   await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'AC REPAIR', description: 'Roof AC compressor seized on the afternoon route.', stage: 'vehicleReturned', createdDaysAgo: 11, amount: 3100 });
   await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'BODY', description: 'Side panel dents from the depot gate.', stage: 'vehicleReleased', createdDaysAgo: 10, amount: 900 });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'AC REPAIR', description: 'Rear AC unit blowing warm air on afternoon routes.', stage: 'readyForDelivery', createdDaysAgo: 9, amount: 1400 });
@@ -442,7 +446,7 @@ async function main() {
   await makeTicket({ bus: bus101, parent: atWork, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Found a cracked exhaust manifold while fixing the turbo hose.', stage: 'workInProgress', createdDaysAgo: 4, amount: 650 });
   await makeTicket({ bus: bus101, parent: atWork, serviceType: 'battery', description: 'Battery failed the load test while the bus was on the lift.', stage: 'pending', createdDaysAgo: 2, amount: 620, parts: battery });
   await atWork.save();
-  await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'MECHANICAL', description: 'Brake pads worn past the limit.', stage: 'vehicleReceived', createdDaysAgo: 7, amount: 780 });
+  await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'BRAKE PADS', description: 'Brake pads worn past the limit.', stage: 'vehicleReceived', createdDaysAgo: 7, amount: 780 });
   await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Passenger door sensor faulty.', stage: 'vehicleSent', createdDaysAgo: 6, amount: 480 });
   await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'BODY', description: 'Windscreen chip spreading.', stage: 'acknowledged', createdDaysAgo: 5, amount: 1250 });
   await makeTicket({ bus: bus104, serviceType: 'repair', repairCategory: 'ENGINE', description: 'Oil leak under the engine after the long route.', stage: 'estimateCountered', createdDaysAgo: 4, amount: 480 });
@@ -455,8 +459,13 @@ async function main() {
   await makeTicket({ bus: bus102, serviceType: 'repair', repairCategory: 'ELECTRICAL', description: 'Alternator stopped charging; replaced under the part warranty.', stage: 'vehicleReturned', createdDaysAgo: 20, noChargeReason: 'warranty', parts: [{ name: 'Alternator 24V 150A', code: 'ALT-24', partNumber: 'AL-24150', quantity: 1, unitPrice: 1450 }] });
   await makeTicket({ bus: bus104, serviceType: 'tyre', location: 'depot', description: 'Front left tyre cut on a kerb; changed at the depot.', stage: 'invoiceAccepted', createdDaysAgo: 12, amount: 850, parts: [{ name: 'Tyre 225/75 R17.5', code: 'TYR-225', partNumber: 'BR-22575', quantity: 1, unitPrice: 900 }] });
   await makeTicket({ bus: bus106, serviceType: 'battery', location: 'depot', description: 'Bus would not start in the morning; battery to be changed at the depot.', stage: 'readyForDelivery', createdDaysAgo: 2, amount: 620, parts: battery });
-  await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'ACCIDENT', description: 'Rear corner hit a bollard while reversing in the depot.', stage: 'estimateSubmitted', createdDaysAgo: 2, amount: 1800, accident: { severity: 'minor', fault: 'ourDriver' } });
-  await makeTicket({ bus: bus103, serviceType: 'brakePads', description: 'Brake pads past their interval; squealing when braking.', stage: 'pending', createdDaysAgo: 1, amount: 950, parts: [{ name: 'Brake pad set, front axle', code: 'BRK-F', partNumber: 'BP-2210', quantity: 1, unitPrice: 1000 }] });
+  await makeTicket({ bus: bus103, serviceType: 'accident', description: 'Rear corner hit a bollard while reversing in the depot.', stage: 'estimateSubmitted', createdDaysAgo: 2, amount: 1800, accident: { severity: 'minor', fault: 'ourDriver' } });
+  await makeTicket({ bus: bus103, serviceType: 'repair', repairCategory: 'BRAKE PADS', description: 'Brake pads past their interval; squealing when braking.', stage: 'pending', createdDaysAgo: 1, amount: 950, parts: [{ name: 'Brake pad set, front axle', code: 'BRK-F', partNumber: 'BP-2210', quantity: 1, unitPrice: 1000 }] });
+
+  // Added for the owner's testing notes of 2026-11-11: an accident taken to a garage outside the list,
+  // whose steps the service creator records.
+  const outsideGarage = await outsideVendorNamed('Gulf Star Body Works');
+  await makeTicket({ bus: bus102, serviceType: 'accident', outside: outsideGarage, description: 'A truck clipped the front left corner at a junction. The other party\'s insurer sends the bus to its own garage.', stage: 'workInProgress', createdDaysAgo: 4, amount: 3400, accident: { severity: 'medium', fault: 'otherParty' } });
 
   await closeBatch([history1, batch1, batch2], 'GRN-2026-001', 'PI-2026-001');
   await closeBatch([history2], 'GRN-2026-002', 'PI-2026-002');

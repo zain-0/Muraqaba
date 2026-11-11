@@ -43,7 +43,6 @@ export const fixture = (models, { prefix, creatorId }) => {
       expectedLifeYears: 15,
       intervals: {
         oil: { everyKm: 10000, lastKm: 0 },
-        transmission: { everyKm: 60000, lastKm: 0 },
         tyre: { everyKm: 40000, lastKm: 0 },
         battery: { everyMonths: 18, lastDate: new Date('2024-01-01') },
         ...(brakePads ? { brakePads } : {}),
@@ -279,13 +278,13 @@ export const assertReconciles = async (users, year, { brands = [], vendorIds = [
     assert.equal(one.total.spend, costs.totals.spend[month - 1], `Vendors spend in month ${month} = that month on Cost per bus`);
   }
 
-  // Repair categories = Cost per bus for repairs + for accidents.
+  // Repair categories = Cost per bus for repairs. Accidents are a service type of their own since 2026-11-11.
   for (const brand of [undefined, ...brands]) {
     const categories = await get('categories', { brand });
     assertTotalsAddUp.categories(categories);
-    const [repairs, accidents] = await Promise.all([get('costs', { brand, type: 'repair' }), get('costs', { brand, type: 'accident' })]);
-    assert.equal(fils(categories.total.spend), fils(repairs.totals.totalSpend) + fils(accidents.totals.totalSpend), `categories spend = repairs + accidents (${brand ?? 'all brands'})`);
-    assert.equal(categories.total.vsrs, repairs.totals.vsrs + accidents.totals.vsrs);
+    const repairs = await get('costs', { brand, type: 'repair' });
+    assert.equal(fils(categories.total.spend), fils(repairs.totals.totalSpend), `categories spend = repairs (${brand ?? 'all brands'})`);
+    assert.equal(categories.total.vsrs, repairs.totals.vsrs);
   }
 
   // Accidents: matrix total = list length = accidents on Queries.

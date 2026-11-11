@@ -18,7 +18,7 @@ import { Lpo, LPO_KINDS } from '../models/Purchase.js';
 import { BUS_DAY_STATUSES, BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler } from '../middleware/errorMiddleware.js';
 import { COUNTED, fleetBuses, fleetDays, statusSummary } from '../utils/fleetDays.js';
-import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
+import { intervalServiceOf, intervalStatus, latestKmByBus } from '../utils/intervals.js';
 import { offFleetBusIds } from '../utils/busDay.js';
 import { USER_FIELDS } from '../utils/query.js';
 import { amountTotals, balancesFor } from '../utils/lpoBalance.js';
@@ -26,10 +26,11 @@ import { isInDate } from '../utils/lpoDeduction.js';
 import { BANDS, averageDays, bandIndex, brandKey, committedFils, daysOfYear, isLate, kindOf, kmInMonth, ratio, spendFils, spendPerKm, toAed, toFils, workshopDays } from '../utils/reportMaths.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
-const MAINTENANCE = ['oil', 'transmission'];
+// Maintenance is the oil service alone since 2026-11-11, when transmission became a repair category.
+const MAINTENANCE = ['oil'];
 const NOT_DECLINED = mongoose.trusted({ $ne: 'declined' });
 // The kinds of work in the order the reports list them.
-const WORK_KINDS = ['repair', 'accident', 'oil', 'transmission', 'tyre', 'battery', 'brakePads', 'other'];
+const WORK_KINDS = ['repair', 'accident', 'oil', 'tyre', 'battery', 'other'];
 
 const matchesType = (ticket, type) => {
   if (!type) return true;
@@ -173,8 +174,8 @@ export const runQuery = asyncHandler(async (req, res) => {
   });
 });
 
-// Brake pads are repairs in the fleet's figures, as they are on the daily status sheet.
-const FLEET_KINDS = { repair: 'repair', accident: 'repair', brakePads: 'repair', tyre: 'tyre', battery: 'battery', oil: 'maintenance', transmission: 'maintenance' };
+// Accidents count with repairs in the fleet's figures; maintenance is the oil service.
+const FLEET_KINDS = { repair: 'repair', accident: 'repair', tyre: 'tyre', battery: 'battery', oil: 'maintenance' };
 const emptyCounts = () => ({ repair: 0, tyre: 0, battery: 0, maintenance: 0 });
 
 // GET /api/reports/fleet?year=&brand=
@@ -385,7 +386,7 @@ export const vendorsReport = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { year, month, kinds: WORK_KINDS, vendors, total: vendorFigures(mergeTallies(tallies)), filters: { year, month }, options } });
 });
 
-// GET /api/reports/categories?year=&brand=
+// GET /api/reports/categories?year=&brand=  (repairs only; an accident is a service type of its own since 2026-11-11)
 export const categoriesReport = asyncHandler(async (req, res) => {
   const { year } = periodOf(req.query);
   const brand = req.query.brand || null;
@@ -406,7 +407,7 @@ export const categoriesReport = asyncHandler(async (req, res) => {
 // GET /api/reports/accidents?year=
 export const accidentsReport = asyncHandler(async (req, res) => {
   const { year } = periodOf(req.query);
-  const [tickets, buses, options] = await Promise.all([ticketsRaised(year, null, { serviceType: 'repair', repairCategory: 'ACCIDENT' }), busLookup(), filterOptions()]);
+  const [tickets, buses, options] = await Promise.all([ticketsRaised(year, null, { serviceType: 'accident' }), busLookup(), filterOptions()]);
   const names = await vendorNames(tickets);
   const severities = [...ACCIDENT_SEVERITIES, 'notRecorded'];
   const faults = [...ACCIDENT_FAULTS, 'notRecorded'];
@@ -478,7 +479,8 @@ export const invoiceCheckReport = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { year, rows, totals: { count: rows.length, approved: toAed(approved), invoiced: toAed(invoiced), difference: toAed(invoiced - approved) }, filters: { year, all }, options } });
 });
 
-const REPORTED_SERVICES = ['tyre', 'battery', 'oil', 'transmission', 'brakePads'];
+// The bus's intervals. Brake pads are a repair category since 2026-11-11 but keep their interval.
+const REPORTED_SERVICES = ['tyre', 'battery', 'oil', 'brakePads'];
 const REPORT_DAYS = 7;
 
 /** Services that are due soon or overdue, for the weekly report and the alerts. */
@@ -506,14 +508,15 @@ export const weeklyReport = asyncHandler(async (req, res) => {
   const to = new Date();
   // Seven whole UAE days, today being the last of them.
   const from = startOfUaeDay(uaeDay(new Date(to.getTime() - (REPORT_DAYS - 1) * 24 * 60 * 60 * 1000)));
-  const tickets = await Ticket.find({ createdAt: mongoose.trusted({ $gte: from, $lte: to }), serviceType: mongoose.trusted({ $in: REPORTED_SERVICES }), status: NOT_DECLINED })
-    .select('vsrNumber serviceType status createdAt busId vendorId intervalUsage')
+  const measured = [{ serviceType: mongoose.trusted({ $in: ['tyre', 'battery', 'oil'] }) }, { serviceType: 'repair', repairCategory: 'BRAKE PADS' }];
+  const tickets = await Ticket.find({ createdAt: mongoose.trusted({ $gte: from, $lte: to }), $or: measured, status: NOT_DECLINED })
+    .select('vsrNumber serviceType repairCategory status createdAt busId vendorId intervalUsage')
     .sort({ createdAt: -1 })
     .populate('busId', 'fleetNumber make')
     .populate('vendorId', USER_FIELDS);
   const raised = Object.fromEntries(REPORTED_SERVICES.map((service) => [service, []]));
   tickets.forEach((ticket) => {
-    raised[ticket.serviceType].push({
+    raised[intervalServiceOf(ticket)].push({
       _id: ticket._id,
       vsrNumber: ticket.vsrNumber,
       fleetNumber: ticket.busId?.fleetNumber,

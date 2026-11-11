@@ -2,12 +2,13 @@
  * The bus's trip to the workshop and back, and the invoice's way to purchasing. Every step
  * takes an optional date, which defaults to now; the history keeps when it was really done.
  */
+import mongoose from 'mongoose';
 import Bus from '../models/Bus.js';
 import Ticket from '../models/Ticket.js';
 import { Lpo } from '../models/Purchase.js';
 import { BusDailyReading } from '../models/BusDaily.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
-import { usageWhenRaised } from '../utils/intervals.js';
+import { intervalServiceOf, usageWhenRaised } from '../utils/intervals.js';
 import { LINE_FOR_SERVICE } from '../utils/lpoDeduction.js';
 import { stamp } from '../utils/signatures.js';
 import { uaeDay } from '../utils/uaeTime.js';
@@ -82,7 +83,7 @@ export const markVehicleSent = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/vehicle/received  (vendor)
 export const markVehicleReceived = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'vehicleSent', `The bus has to be sent before it can be received (this one is ${ticket.status})`);
   const { date, km } = req.body;
   assertAfterPreviousStep(ticket, date);
@@ -95,7 +96,7 @@ export const markVehicleReceived = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/work/start  (vendor; at the depot, straight after acknowledging, with the reading)
 export const startWork = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   const { date, km } = req.body;
   if (atDepot(ticket) && ticket.status !== 'vehicleReceived') {
     // An additional job on a depot VSR is approved into vehicleReceived and starts like any other.
@@ -117,7 +118,7 @@ export const startWork = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/work/ready  (vendor)
 export const markReady = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   assertStatus(ticket, 'workInProgress', `Work has to be in progress before the bus can be ready (this one is ${ticket.status})`);
   assertAfterPreviousStep(ticket, req.body.date);
   step(ticket, 'readyForDelivery', req.user, { date: req.body.date, fields: { readyAt: WHEN } });
@@ -128,7 +129,7 @@ export const markReady = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/vehicle/release  (vendor)
 export const releaseVehicle = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertVendorOwns(ticket, req.user);
+  await assertVendorOwns(ticket, req.user);
   if (atDepot(ticket)) throw new AppError('This job is done at the depot. The service creator confirms when the work is done.', 409, 'INVALID_STATE');
   assertStatus(ticket, 'readyForDelivery', `The bus has to be ready before it can be released (this one is ${ticket.status})`);
   assertAfterPreviousStep(ticket, req.body.date);
@@ -159,13 +160,17 @@ const tyreLifeOf = async (lpoLine) => {
 /**
  * The service this VSR did has just been done, so the bus's interval counts from here. Tyres off
  * an LPO line with a life in km last that long, so the bus's tyre interval becomes it (2026-11-10).
+ * A repair in the Brake pads category moves the brake-pad interval (2026-11-11).
  */
-const moveLastService = async ({ busId, serviceType, lpoLine }, km, when) => {
-  if (serviceType === 'battery') {
+const moveLastService = async ({ busId, serviceType, repairCategory, lpoLine }, km, when) => {
+  const service = intervalServiceOf({ serviceType, repairCategory });
+  if (service === 'battery') {
     await Bus.updateOne({ _id: busId }, { $set: { 'intervals.battery.lastDate': when } });
-  } else if (['oil', 'transmission', 'tyre', 'brakePads'].includes(serviceType)) {
-    const lifeKm = serviceType === 'tyre' ? await tyreLifeOf(lpoLine) : undefined;
-    await Bus.updateOne({ _id: busId }, { $set: { [`intervals.${serviceType}.lastKm`]: km, ...(lifeKm ? { 'intervals.tyre.everyKm': lifeKm } : {}) } });
+  } else if (service) {
+    const lifeKm = service === 'tyre' ? await tyreLifeOf(lpoLine) : undefined;
+    // A bus with no brake-pad interval has nothing to move.
+    const filter = service === 'brakePads' ? { _id: busId, 'intervals.brakePads': mongoose.trusted({ $exists: true }) } : { _id: busId };
+    await Bus.updateOne(filter, { $set: { [`intervals.${service}.lastKm`]: km, ...(lifeKm ? { 'intervals.tyre.everyKm': lifeKm } : {}) } });
   }
 };
 
@@ -232,13 +237,14 @@ export const forwardToPurchase = asyncHandler(async (req, res) => {
 // POST /api/tickets/:id/additional  (vendor; multipart, with the job's first estimate)
 export const createAdditionalJob = asyncHandler(async (req, res) => {
   const parent = await loadTicket(req.params.id);
-  assertVendorOwns(parent, req.user);
+  await assertVendorOwns(parent, req.user);
   if (parent.parentTicket) throw new AppError('An additional job cannot have one of its own. Raise it on the main VSR.', 409, 'INVALID_STATE');
   assertStatus(parent, AT_THE_WORKSHOP, `An additional job can be raised only while the bus is at your workshop (this one is ${parent.status})`);
 
   const { description, serviceType, repairCategory, amount, quotationNumber, daysToComplete, note, noChargeReason } = req.body;
   const bus = await Bus.findById(parent.busId);
-  assertBusTracks(bus, serviceType);
+  const category = serviceType === 'repair' ? repairCategory : undefined;
+  assertBusTracks(bus, { serviceType, repairCategory: category });
   const { additionalCount } = await Ticket.findByIdAndUpdate(parent._id, { $inc: { additionalCount: 1 } }, { new: true }).select('additionalCount');
   // It comes off its parent's LPO line when that line is for this kind of work; it is never refused for room.
   const lpoLine = parent.lpoLine?.item && parent.lpoLine.kind === LINE_FOR_SERVICE[serviceType] ? parent.lpoLine.toObject() : undefined;
@@ -250,11 +256,11 @@ export const createAdditionalJob = asyncHandler(async (req, res) => {
     vendorId: parent.vendorId,
     createdBy: req.user._id,
     serviceType,
-    repairCategory: serviceType === 'repair' ? repairCategory : undefined,
+    repairCategory: category,
     description,
     location: parent.location, // it is done where its parent is
     currentReading: parent.vehicle.receivedKm,
-    intervalUsage: usageWhenRaised(bus, serviceType, parent.vehicle.receivedKm),
+    intervalUsage: usageWhenRaised(bus, intervalServiceOf({ serviceType, repairCategory: category }), parent.vehicle.receivedKm),
     daysToComplete,
     lpoLine,
     status: 'estimateSubmitted',

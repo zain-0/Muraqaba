@@ -10,6 +10,9 @@ const UserSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ROLES, required: true, index: true },
     signatureImage: { type: mongoose.Schema.Types.ObjectId, ref: 'SignatureImage' },
+    // A vendor outside our list, named when an accident VSR went to them (2026-11-11). Nobody can
+    // sign in as one: the service creator records their steps. Never listed with our vendors.
+    outside: { type: Boolean, index: true },
   },
   {
     timestamps: true,

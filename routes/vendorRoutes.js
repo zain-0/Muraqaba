@@ -1,5 +1,5 @@
 import express from 'express';
-import { listVendors, createVendor } from '../controllers/vendorController.js';
+import { listVendors, listOutsideVendors, createVendor } from '../controllers/vendorController.js';
 import { listTickets } from '../controllers/ticketController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import roleMiddleware from '../middleware/roleMiddleware.js';
@@ -11,6 +11,8 @@ router.use(authMiddleware);
 
 // Directory of vendors, for assigning buses.
 router.get('/', roleMiddleware(['serviceCreator', 'supervisor']), listVendors);
+// Names of vendors outside the list, suggested when an accident goes to one.
+router.get('/outside', roleMiddleware(['serviceCreator', 'supervisor']), listOutsideVendors);
 
 // Create a vendor account (service creator only).
 router.post('/', roleMiddleware(['serviceCreator']), validateVendorCreate, createVendor);

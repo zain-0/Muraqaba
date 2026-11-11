@@ -106,8 +106,8 @@ const randomYear = async (seed, fx) => {
   };
 
   const addVsr = async ({ parent, raisedAt, bus, vendor }) => {
-    const serviceType = parent ? pick(['repair', 'other']) : pick(['repair', 'repair', 'repair', 'oil', 'transmission', 'tyre', 'battery', 'brakePads', 'other']);
-    const repairCategory = serviceType === 'repair' ? (chance(0.3) ? 'ACCIDENT' : pick(REPAIR_CATEGORIES)) : undefined;
+    const serviceType = parent ? pick(['repair', 'other']) : pick(['repair', 'repair', 'repair', 'accident', 'oil', 'tyre', 'battery', 'other']);
+    const repairCategory = serviceType === 'repair' ? pick(REPAIR_CATEGORIES) : undefined;
     const state = parent && chance(0.3) ? 'declined' : pick(STATES);
     const approved = ['raised', 'declined'].includes(state) ? undefined : state === 'noCharge' ? 0 : amount();
     const invoiceAmount = approved === undefined ? 0 : chance(0.6) ? approved : amount();
@@ -133,8 +133,9 @@ const randomYear = async (seed, fx) => {
     const daysToComplete = chance(0.8) ? int(1, 7) : undefined;
     const noChargeReason = state === 'noCharge' ? pick(['warranty', 'goodwill', 'insurance', 'freeOfCharge']) : undefined;
     const quotationTotal = state === 'noCharge' && chance(0.6) ? amount() : undefined;
-    const accident = repairCategory === 'ACCIDENT' && chance(0.7) ? { severity: pick(['minor', 'medium', 'major']), fault: pick(['ourDriver', 'otherParty', 'unknown']) } : undefined;
-    const ticket = await fx.addTicket({ bus, vendor: vendor.id, serviceType, repairCategory, created: asDate(raisedAt), status, approved, invoices, vehicle, location, daysToComplete, parent, noChargeReason, quotationTotal, accident, isBreakdown: chance(0.3) });
+    const accident = serviceType === 'accident' && chance(0.7) ? { severity: pick(['minor', 'medium', 'major']), fault: pick(['ourDriver', 'otherParty', 'unknown']) } : undefined;
+    // Only a repair breaks down on the road (2026-11-11).
+    const ticket = await fx.addTicket({ bus, vendor: vendor.id, serviceType, repairCategory, created: asDate(raisedAt), status, approved, invoices, vehicle, location, daysToComplete, parent, noChargeReason, quotationTotal, accident, isBreakdown: serviceType === 'repair' && chance(0.3) });
 
     if (inYear(raisedAt) && state !== 'declined') {
       const current = invoices.at(-1);
@@ -147,7 +148,7 @@ const randomYear = async (seed, fx) => {
       } else if (approved !== undefined) {
         expected.committed += fils(approved);
       }
-      if (serviceType === 'repair' && repairCategory === 'ACCIDENT') expected.accidents += 1;
+      if (serviceType === 'accident') expected.accidents += 1;
       if (noChargeReason) {
         expected.noCharge += 1;
         expected.recorded += fils(quotationTotal ?? 0);

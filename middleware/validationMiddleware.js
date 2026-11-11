@@ -107,7 +107,7 @@ export const validateVendorCreate = [
   handleValidationErrors,
 ];
 
-const KM_INTERVALS = ['oil', 'transmission', 'tyre', 'brakePads'];
+const KM_INTERVALS = ['oil', 'tyre', 'brakePads'];
 
 const isDay = (field, message) => body(field, message).isString().matches(/^\d{4}-\d{2}-\d{2}/).isISO8601({ strict: true }).bail();
 
@@ -159,13 +159,12 @@ const busRules = () => [
     .custom((value) => value === undefined || value === null || value === ''),
   body('expectedLifeYears', 'Enter the expected life in years').not().isArray().isInt({ min: 1, max: 100 }).toInt(),
   number('labourRate', 'Enter the labour charge per hour, above 0', { above: 0, money: true }).optional({ values: 'null' }),
-  ...['oil', 'transmission'].map((service) =>
-    // A rate per km is finer than money: 3,300 for a 40,000 km service is 0.0825 a km.
-    number(`rates.${service}`, 'Enter the rate per km, above 0', { above: 0, rate: true })
-      .custom(priceFits(service))
-      .withMessage('That rate makes the service price too large')
-      .optional({ values: 'null' })
-  ),
+  // A rate per km is finer than money: 3,300 for a 40,000 km service is 0.0825 a km. Only oil has
+  // one since 2026-11-11; a transmission rate sent by an older screen is not read.
+  number('rates.oil', 'Enter the rate per km, above 0', { above: 0, rate: true })
+    .custom(priceFits('oil'))
+    .withMessage('That rate makes the service price too large')
+    .optional({ values: 'null' }),
   ...KM_INTERVALS.flatMap((service) => [
     number(`intervals.${service}.everyKm`, 'Enter the interval in km, above 0', { above: 0, whole: true }),
     number(`intervals.${service}.lastKm`, 'Enter the km at the last service, 0 or more', { whole: true }).optional({ values: 'null' }),
@@ -188,7 +187,7 @@ export const validateBusUpdate = [...busRules(), handleValidationErrors];
 
 const SEVERITY = 'Choose how serious the accident was';
 const FAULT = 'Choose who was at fault';
-const isAccident = (value, { req }) => req.body.serviceType === 'repair' && req.body.repairCategory === 'ACCIDENT';
+const isAccident = (value, { req }) => req.body.serviceType === 'accident';
 
 export const validateTicketCreate = [
   str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),
@@ -200,9 +199,11 @@ export const validateTicketCreate = [
     .withMessage('Choose a repair category for repair VSRs'),
   km('currentReading', 'Enter the current reading as a whole number of kilometres'),
   body('vendorId', 'Choose a vendor').optional({ values: 'falsy' }).isString().isMongoId(),
+  // An accident may go to a vendor outside the list, named here (2026-11-11); the controller refuses it on other work.
+  body('outsideVendorName', 'Enter the vendor\'s name, 2 to 80 characters').optional({ values: 'falsy' }).isString().trim().isLength({ min: 2, max: 80 }),
   body('isBreakdown', 'Breakdown must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
   body('location', 'Choose where the work is done').optional({ values: 'falsy' }).isString().isIn(WORK_LOCATIONS),
-  // For the depot's own records: required on an accident repair, and dropped on anything else.
+  // For the depot's own records: required on an accident, and dropped on anything else.
   body('accident.severity', SEVERITY).if(isAccident).isString().isIn(ACCIDENT_SEVERITIES),
   body('accident.fault', FAULT).if(isAccident).isString().isIn(ACCIDENT_FAULTS),
   body('description')
@@ -459,7 +460,7 @@ export const validateAdditionalJob = [
   noChargeReason(),
   referenceNumber('quotationNumber', 'Quotation number', 'Enter the quotation number'),
   daysToComplete(),
-  str('serviceType', 'Service type').isIn(['repair', 'tyre', 'battery', 'brakePads', 'other']).withMessage('Choose what kind of work this is'),
+  str('serviceType', 'Service type').isIn(['repair', 'tyre', 'battery', 'other']).withMessage('Choose what kind of work this is'),
   body('repairCategory').if(body('serviceType').equals('repair')).isString().isIn(REPAIR_CATEGORIES).withMessage('Choose a repair category for repair VSRs'),
   str('description', 'Description').trim().isLength({ min: 10, max: 1000 }).withMessage('Describe the additional work, in 10 to 1000 characters'),
   roundNote(),
@@ -471,7 +472,7 @@ const reportYear = () => qstr('year').isInt({ min: 2000, max: 2100 }).withMessag
 export const validateReportQuery = [
   reportYear(),
   qstr('brand').isLength({ max: 120 }).withMessage('Choose a valid brand'),
-  qstr('type').isIn(['accident', 'repair', 'maintenance', 'oil', 'transmission', 'tyre', 'battery', 'brakePads', 'other']).withMessage('Choose a valid kind of work'),
+  qstr('type').isIn(['accident', 'repair', 'maintenance', 'oil', 'tyre', 'battery', 'other']).withMessage('Choose a valid kind of work'),
   qstr('vendorId').isMongoId().withMessage('Choose a valid vendor'),
   qstr('busId').isMongoId().withMessage('Choose a valid bus'),
   qstr('isBreakdown').isBoolean().withMessage('Breakdown must be yes or no'),

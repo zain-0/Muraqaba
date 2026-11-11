@@ -12,10 +12,15 @@ import { scrapRequestsOf } from './scrapController.js';
 
 const identityOf = ({ fleetNumber, registrationNumber, chassisNumber }) => ({ fleetNumber, registrationNumber, chassisNumber });
 
-export const assertVendorExists = async (vendorId) => {
+/** A vendor from our list. Only an accident may name one outside it (2026-11-11), with `allowOutside`. */
+export const assertVendorExists = async (vendorId, { allowOutside = false } = {}) => {
   const vendor = await User.findById(vendorId);
   if (!vendor) throw new AppError('Vendor not found', 404, 'NOT_FOUND');
   if (vendor.role !== 'vendor') throw new AppError('Selected user is not a vendor', 400, 'NOT_A_VENDOR');
+  if (vendor.outside && !allowOutside) {
+    const message = 'Choose a vendor from the list';
+    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'vendorId', message }]);
+  }
   return vendor;
 };
 
@@ -56,10 +61,9 @@ const busFields = ({ chassisNumber, fleetNumber, registrationNumber, make, model
   registrationExpiry: present(registrationNumber) ? registrationExpiry : undefined, // a bus not registered yet has no expiry
   expectedLifeYears,
   labourRate,
-  rates: { oil: rates?.oil, transmission: rates?.transmission },
+  rates: { oil: rates?.oil },
   intervals: {
     oil: { everyKm: intervals.oil.everyKm, lastKm: intervals.oil.lastKm ?? 0 },
-    transmission: { everyKm: intervals.transmission.everyKm, lastKm: intervals.transmission.lastKm ?? 0 },
     tyre: { everyKm: intervals.tyre.everyKm, lastKm: intervals.tyre.lastKm ?? 0 },
     brakePads: { everyKm: intervals.brakePads.everyKm, lastKm: intervals.brakePads.lastKm ?? 0 },
     battery: { everyMonths: intervals.battery.everyMonths, lastDate: intervals.battery.lastDate ?? new Date() },

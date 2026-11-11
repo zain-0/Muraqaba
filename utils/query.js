@@ -2,7 +2,8 @@
  * Shared query helpers: pagination and the populate specs that strip sensitive
  * fields from referenced users.
  */
-export const USER_FIELDS = 'name email role';
+// outside: a vendor not on our list, whose steps the service creator records (2026-11-11).
+export const USER_FIELDS = 'name email role outside';
 
 export const TICKET_POPULATE = [
   { path: 'busId' },

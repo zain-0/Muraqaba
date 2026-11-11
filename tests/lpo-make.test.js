@@ -1,6 +1,6 @@
 /**
  * LPO by make (owner's request, 2026-11-09), with the make on each line since 2026-11-10, so one
- * LPO can hold repair and maintenance for several makes. Repairs, brake pads, oil and transmission
+ * LPO can hold repair and maintenance for several makes. Repairs (brake pads and transmission among them) and oil
  * come off the line for the bus's make, in any letter case; tyre and battery lines cover every
  * make. The new VSR form lists the lines a job can come off, and the GRN's automatic choice for a
  * VSR with no line follows the same makes.
@@ -65,16 +65,18 @@ describe('LPO by make', () => {
     assert.equal(listed.make, undefined, 'the LPO itself names none');
   });
 
-  test('repairs, brake pads, oil and transmission are raised against the line for the bus\'s make, in any letter case', async () => {
+  test('repairs and oil are raised against the line for the bus\'s make, in any letter case; an accident against none', async () => {
     const context = await setup('MATCH');
     const lpo = await makeLpo(context.vendor.id, [RM(MAKE_X), RM(MAKE_Y, 3000), TYRES]);
     const [forX, forY] = lpo.items;
     const lower = await createBus(users, 'MKZMATCH', context.vendor.id, { make: MAKE_X.toLowerCase(), rates: undefined });
-    for (const serviceType of ['repair', 'brakePads', 'oil', 'transmission']) {
+    for (const serviceType of ['repair', 'oil']) {
       const onX = ok(await preview({ busId: context.x._id, serviceType }));
       assert.deepEqual([onX.kind, onX.status, onX.make, onX.lines.map((line) => line.item._id)], ['repairMaintenance', 'found', MAKE_X, [forX._id]], serviceType);
       assert.deepEqual(ok(await preview({ busId: context.y._id, serviceType })).lines.map((line) => line.item._id), [forY._id], serviceType);
     }
+    // An accident's vendor may be anyone (2026-11-11), so it is raised against no line; its GRN chooses one.
+    assert.deepEqual(ok(await preview({ busId: context.x._id, serviceType: 'accident' })), { kind: 'repairMaintenance', make: MAKE_X, status: 'notNeeded', lines: [] });
     const cased = ok(await preview({ busId: lower._id, serviceType: 'repair' }));
     assert.deepEqual([cased.make, cased.lines.map((line) => line.item._id)], [MAKE_X.toLowerCase(), [forX._id]], 'a bus spelt in lower case still matches');
 

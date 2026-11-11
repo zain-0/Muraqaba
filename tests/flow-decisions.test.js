@@ -58,7 +58,8 @@ const depotAtWork = async (overrides = {}, onBus = bus) => {
   return ok(await put(ticket._id, 'work/start', users.vendor1.token, { km: ticket.currentReading + 50, date: '2026-10-05' }));
 };
 
-const ACCIDENT = { repairCategory: 'ACCIDENT', accident: { severity: 'minor', fault: 'otherParty' } };
+// An accident is a service type of its own since 2026-11-11, with no repair category.
+const ACCIDENT = { serviceType: 'accident', repairCategory: undefined, accident: { severity: 'minor', fault: 'otherParty' } };
 
 /** Talks to the test database directly, for what the API no longer lets anyone do. */
 const withDatabase = async (uri, work) => {
@@ -285,11 +286,11 @@ describe('client decisions of 2026-11-06', () => {
   });
 
   describe('C. accident details, for our own records', () => {
-    test('an accident repair needs severity and fault; other VSRs carry none', async () => {
-      const post = (body) => api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'repair', currentReading: 5000, ...body } });
-      assert.deepEqual(firstError(await post({ repairCategory: 'ACCIDENT' })), { field: 'accident.severity', message: 'Choose how serious the accident was' });
-      assert.deepEqual(firstError(await post({ repairCategory: 'ACCIDENT', accident: { severity: 'minor' } })), { field: 'accident.fault', message: 'Choose who was at fault' });
-      assert.equal(firstError(await post({ repairCategory: 'ACCIDENT', accident: { severity: 'huge', fault: 'otherParty' } })).field, 'accident.severity');
+    test('an accident needs severity and fault; other VSRs carry none', async () => {
+      const post = (body) => api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'accident', currentReading: 5000, ...body } });
+      assert.deepEqual(firstError(await post({})), { field: 'accident.severity', message: 'Choose how serious the accident was' });
+      assert.deepEqual(firstError(await post({ accident: { severity: 'minor' } })), { field: 'accident.fault', message: 'Choose who was at fault' });
+      assert.equal(firstError(await post({ accident: { severity: 'huge', fault: 'otherParty' } })).field, 'accident.severity');
 
       const raised = await raise(ACCIDENT);
       assert.equal(raised.accident.severity, 'minor');
@@ -300,15 +301,15 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal((await raise({ accident: { severity: 'minor', fault: 'otherParty' } })).accident, undefined, 'an engine repair has no accident');
     });
 
-    test('correcting an accident into another repair clears the details, and the other way needs them', async () => {
+    test('correcting an accident into a repair clears the details, and the other way needs them', async () => {
       const ticket = await raise(ACCIDENT);
       ok(await estimate(ticket._id, users.vendor1.token, { amount: '500' }));
       await fillBreakdown(users, ticket._id, 500);
       ok(await put(ticket._id, 'escalate', users.creator.token));
       ok(await put(ticket._id, 'return', users.supervisor.token, { reason: 'Not an accident' }));
-      const form = { busId: bus._id, serviceType: 'repair', currentReading: 5000 };
-      assert.equal(firstError(await put(ticket._id, 'details', users.creator.token, { ...form, repairCategory: 'ACCIDENT' })).field, 'accident.severity');
-      const corrected = ok(await put(ticket._id, 'details', users.creator.token, { ...form, repairCategory: 'BODY', accident: { severity: 'major', fault: 'ourDriver' } }));
+      const form = { busId: bus._id, currentReading: 5000 };
+      assert.equal(firstError(await put(ticket._id, 'details', users.creator.token, { ...form, serviceType: 'accident' })).field, 'accident.severity');
+      const corrected = ok(await put(ticket._id, 'details', users.creator.token, { ...form, serviceType: 'repair', repairCategory: 'BODY', accident: { severity: 'major', fault: 'ourDriver' } }));
       assert.equal(corrected.accident, undefined);
       assert.equal((await read(ticket._id)).accident, undefined);
     });
@@ -335,7 +336,7 @@ describe('client decisions of 2026-11-06', () => {
       const engine = await raise();
       const refused = await put(engine._id, 'accident', users.creator.token, { severity: 'major', fault: 'ourDriver' });
       assert.equal(refused.status, 409);
-      assert.equal(refused.body.message, 'Only an accident repair has accident details.');
+      assert.equal(refused.body.message, 'Only an accident has accident details.');
     });
 
     test('vendors never receive them, and the details a vendor sends with a job are ignored', async () => {
@@ -354,15 +355,20 @@ describe('client decisions of 2026-11-06', () => {
       await fromAcknowledgedToReturned(users, ticket._id, users.vendor1);
       const completed = asVendor(await api('GET', '/tickets/completed?limit=200', { token: users.vendor1.token }));
       assert.ok(completed.body.data.some((t) => t._id === ticket._id), 'the closed accident is in the vendor\'s list');
-      for (const body of seen) assert.ok(!JSON.stringify(body).includes('otherParty') && !JSON.stringify(body).includes('"accident"'), JSON.stringify(body).slice(0, 300));
+      // The vendor knows the job is an accident (its service type), never the details.
+      for (const body of seen) assert.ok(!JSON.stringify(body).includes('otherParty') && !JSON.stringify(body).includes('"accident":'), JSON.stringify(body).slice(0, 300));
       assert.equal((await read(ticket._id)).accident.fault, 'otherParty', 'staff still see them');
 
       const parent = await atTheWorkshop(await toAcknowledged(users, await raise(), users.vendor1));
-      const job = ok(await multipart(`/tickets/${parent._id}/additional`, users.vendor1.token, { ...JOB, repairCategory: 'ACCIDENT', 'accident[severity]': 'major', 'accident[fault]': 'ourDriver' }));
-      assert.equal((await read(job._id)).accident, undefined, 'a vendor\'s job has none until staff add them');
-      assert.equal(ok(await put(job._id, 'accident', users.creator.token, { severity: 'minor', fault: 'unknown' })).accident.severity, 'minor');
+      // An additional job is never an accident (2026-11-11), and what a vendor sends for one is not read.
+      assert.equal((await multipart(`/tickets/${parent._id}/additional`, users.vendor1.token, { ...JOB, serviceType: 'accident' })).status, 400);
+      const job = ok(await multipart(`/tickets/${parent._id}/additional`, users.vendor1.token, { ...JOB, 'accident[severity]': 'major', 'accident[fault]': 'ourDriver' }));
+      assert.equal((await read(job._id)).accident, undefined, 'a vendor\'s job has none');
     });
   });
+
+  // Brake pads became a repair category on 2026-11-11, still measured against the bus's interval.
+  const PADS = { serviceType: 'repair', repairCategory: 'BRAKE PADS' };
 
   describe('D. brake pads', () => {
     test('a bus needs a brake-pad interval in whole km above 0', async () => {
@@ -381,8 +387,8 @@ describe('client decisions of 2026-11-06', () => {
     });
 
     test('brake pads are priced by estimate, count as a repair on the daily sheet and the LPO, and move their interval on return', async () => {
-      const own = await ownBus('PADS', { rates: { oil: 0.5, transmission: 1 }, intervals: { ...busBody('x', 'x').intervals, brakePads: { everyKm: 40000, lastKm: 1000 } } });
-      const raised = await raise({ serviceType: 'brakePads', repairCategory: undefined, currentReading: 39000 }, own);
+      const own = await ownBus('PADS', { rates: { oil: 0.5 }, intervals: { ...busBody('x', 'x').intervals, brakePads: { everyKm: 40000, lastKm: 1000 } } });
+      const raised = await raise({ ...PADS, currentReading: 39000 }, own);
       assert.equal(raised.status, 'sentToVendor');
       assert.equal(raised.agreedPrice, undefined);
       assert.deepEqual(raised.intervalUsage, { unit: 'km', interval: 40000, actual: 38000, left: 2000, delayed: 0 });
@@ -398,33 +404,34 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal((await api('GET', `/buses/${own._id}`, { token: users.creator.token })).body.data.intervals.brakePads.lastKm, 39500);
       ok(await submitInvoice(raised._id, users.vendor1));
       ok(await put(raised._id, 'invoice/accept', users.supervisor.token));
-      const line = ok(await api('GET', `/lpos/for-vsr?busId=${own._id}&serviceType=brakePads`, { token: users.creator.token }));
+      const line = ok(await api('GET', `/lpos/for-vsr?busId=${own._id}&serviceType=repair`, { token: users.creator.token }));
       assert.equal(line.kind, 'repairMaintenance', 'brake pads come off the repair and maintenance line');
 
-      const next = await raise({ serviceType: 'brakePads', repairCategory: undefined, currentReading: 39600 }, own);
+      const next = await raise({ ...PADS, currentReading: 39600 }, own);
       assert.equal(next.intervalUsage.actual, 100);
     });
 
-    test('purchasing can ask its queries about brake pads', async () => {
+    test('purchasing counts brake pads with the repairs', async () => {
       const own = await ownBus('PADQ');
-      await raise({ serviceType: 'brakePads', repairCategory: undefined }, own);
-      const res = await api('GET', `/reports/query?type=brakePads&busId=${own._id}&year=${new Date().getUTCFullYear()}`, { token: users.purchasing.token });
+      await raise(PADS, own);
+      assert.equal((await api('GET', `/reports/query?type=brakePads`, { token: users.purchasing.token })).status, 400, 'no longer a kind of work of its own');
+      const res = await api('GET', `/reports/query?type=repair&busId=${own._id}&year=${new Date().getUTCFullYear()}`, { token: users.purchasing.token });
       assert.equal(res.status, 200, JSON.stringify(res.body));
       assert.equal(res.body.data.total.count, 1);
     });
 
     test('a vendor can raise brake pads as an additional job', async () => {
       const parent = await atTheWorkshop(await toAcknowledged(users, await raise(), users.vendor1));
-      const job = await addJob(parent._id, { serviceType: 'brakePads', repairCategory: '' });
+      const job = await addJob(parent._id, PADS);
       assert.equal(job.status, 201, JSON.stringify(job.body));
-      assert.equal(job.body.data.serviceType, 'brakePads');
+      assert.deepEqual([job.body.data.serviceType, job.body.data.repairCategory], ['repair', 'BRAKE PADS']);
     });
 
     test('a bus without the interval refuses brake pads and leaves them out of its status', async () => {
       const old = await busWithoutBrakePads('NOPADS');
-      const refused = await api('POST', '/tickets', { token: users.creator.token, body: { busId: old._id, serviceType: 'brakePads', currentReading: 5000 } });
+      const refused = await api('POST', '/tickets', { token: users.creator.token, body: { busId: old._id, ...PADS, currentReading: 5000 } });
       assert.equal(refused.status, 400);
-      assert.deepEqual(firstError(refused), { field: 'serviceType', message: 'This bus has no brake-pad interval. Add it on the bus first.' });
+      assert.deepEqual(firstError(refused), { field: 'repairCategory', message: 'This bus has no brake-pad interval. Add it on the bus first.' });
 
       const detail = await api('GET', `/buses/${old._id}`, { token: users.creator.token });
       assert.equal(detail.status, 200);
@@ -433,7 +440,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal((await api('GET', '/buses', { token: users.supervisor.token })).status, 200);
 
       const parent = await atTheWorkshop(await toAcknowledged(users, await raise({}, old), users.vendor1));
-      assert.deepEqual(firstError(await addJob(parent._id, { serviceType: 'brakePads', repairCategory: '' })), { field: 'serviceType', message: 'This bus has no brake-pad interval. Add it on the bus first.' });
+      assert.deepEqual(firstError(await addJob(parent._id, PADS)), { field: 'repairCategory', message: 'This bus has no brake-pad interval. Add it on the bus first.' });
     });
   });
 
@@ -474,7 +481,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal(notices.status, 200);
       assert.ok(!notices.body.data.some((n) => n.type === 'registrationExpiring' && n.params.fleetNumber === unregistered.fleetNumber));
 
-      const ticket = await raise({ serviceType: 'brakePads', repairCategory: undefined }, unregistered);
+      const ticket = await raise(PADS, unregistered);
       const seen = await api('GET', `/tickets/${ticket._id}`, { token: users.vendor1.token });
       assert.equal(seen.body.data.busId.fleetNumber, unregistered.fleetNumber);
       assert.equal(seen.body.data.busId.registrationNumber, undefined);
@@ -490,7 +497,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal(header[2], 'Side number');
       assert.equal(row[2], unregistered.fleetNumber);
       assert.equal(row[3], undefined, 'no registration to show');
-      assert.equal(row[6], 'Brake pads');
+      assert.equal(row[6], 'Repair: Brake pads');
     });
 
     test('the API replaces the old unique indexes on chassis and registration when it starts', async () => {

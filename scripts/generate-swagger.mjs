@@ -15,8 +15,11 @@ const SCRAP_REASONS = ['totalLoss', 'highRunningCost', 'endOfLife'];
 const SCRAP_REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'];
 const LPO_KINDS = ['repairMaintenance', 'tyre', 'battery', 'other'];
 const LPO_ITEM_CATEGORIES = ['repairMaintenance', 'tyre', 'battery'];
-const SERVICE_TYPES = ['oil', 'transmission', 'tyre', 'battery', 'brakePads', 'repair', 'other'];
-const REPAIR_CATEGORIES = ['ELECTRICAL', 'MECHANICAL', 'AC REPAIR', 'ENGINE', 'BODY', 'ACCIDENT'];
+// Since 2026-11-11 transmission and brake pads are repair categories, and accident a service type.
+const SERVICE_TYPES = ['oil', 'tyre', 'battery', 'repair', 'accident', 'other'];
+const REPAIR_CATEGORIES = ['ELECTRICAL', 'MECHANICAL', 'AC REPAIR', 'ENGINE', 'TRANSMISSION', 'BODY', 'DIAGNOSTIC', 'DRIVETRAIN', 'SUSPENSION', 'BRAKES', 'BRAKE PADS'];
+// The vendor's steps; the service creator records them for a vendor outside the list, who cannot sign in.
+const VENDOR_STEP = ['vendor', 'serviceCreator'];
 const TICKET_STATUSES = ['sentToVendor', 'estimateSubmitted', 'estimateCountered', 'pending', 'returned', 'approved', 'acknowledged', 'vehicleSent', 'vehicleReceived', 'workInProgress', 'readyForDelivery', 'vehicleReleased', 'vehicleReturned', 'invoiceSubmitted', 'invoiceAccepted', 'invoiceRejected', 'invoiceReceived', 'forwardedToPurchase', 'grnCreated', 'completed', 'declined'];
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
@@ -80,14 +83,14 @@ const busInput = {
     registrationExpiry: { type: 'string', format: 'date' },
     expectedLifeYears: { type: 'integer', example: 15 },
     labourRate: { type: 'number', description: 'AED per repair labour hour' },
-    rates: { type: 'object', description: 'AED per km, for the bus vendor', properties: { oil: { type: 'number' }, transmission: { type: 'number' } } },
+    rates: { type: 'object', description: 'AED per km, for the bus vendor', properties: { oil: { type: 'number' } } },
     intervals: {
       type: 'object',
-      required: ['oil', 'transmission', 'tyre', 'battery'],
+      required: ['oil', 'tyre', 'brakePads', 'battery'],
       properties: {
         oil: kmInterval,
-        transmission: kmInterval,
         tyre: kmInterval,
+        brakePads: { ...kmInterval, description: 'A repair in the Brake pads category is measured against it' },
         battery: { type: 'object', required: ['everyMonths'], properties: { everyMonths: { type: 'integer', example: 18 }, lastDate: { type: 'string', format: 'date' } } },
       },
     },
@@ -193,9 +196,10 @@ const ticket = {
     busId: bus, serviceType: { type: 'string', enum: SERVICE_TYPES },
     repairCategory: { type: 'string', enum: REPAIR_CATEGORIES }, description: { type: 'string' },
     currentReading: { type: 'integer', minimum: 0, description: 'Odometer in km when the ticket was raised' },
-    isBreakdown: { type: 'boolean', description: 'Broke down on the road. Never sent to vendors.' },
+    isBreakdown: { type: 'boolean', description: 'A repair that broke down on the road; false on anything else. Never sent to vendors.' },
+    accident: { type: 'object', description: 'Accidents only: severity and fault. Never sent to vendors.', properties: { severity: { type: 'string', enum: ['minor', 'medium', 'major'] }, fault: { type: 'string', enum: ['ourDriver', 'otherParty', 'unknown'] } } },
     daysToComplete: { type: 'integer', description: 'The vendor\'s latest promise' },
-    agreedPrice: { type: 'object', description: 'Fixed at raising, so the VSR goes straight to the supervisor. rate: oil and transmission, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line\'s unit price', properties: { basis: { type: 'string', enum: ['rate', 'lpo'] }, rate: { type: 'number' }, km: { type: 'number' }, unitPrice: { type: 'number' }, quantity: { type: 'integer' }, amount: { type: 'number' } } },
+    agreedPrice: { type: 'object', description: 'Fixed at raising, so the VSR goes straight to the supervisor. rate: oil, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line\'s unit price', properties: { basis: { type: 'string', enum: ['rate', 'lpo'] }, rate: { type: 'number' }, km: { type: 'number' }, unitPrice: { type: 'number' }, quantity: { type: 'integer' }, amount: { type: 'number' } } },
     lpoLine: { type: 'object', description: 'The LPO line chosen at raising or correction; its amount is booked on it until the GRN. Never sent to vendors.', properties: { lpo: objectId, lpoNumber: { type: 'string' }, item: objectId, name: { type: 'string' }, kind: { type: 'string', enum: LPO_KINDS }, unitPrice: { type: 'number' } } },
     quantity: { type: 'integer', description: 'Tyres or batteries the job is for. Vendors see it on tyre and battery jobs only.' },
     estimatedAmount: { type: 'number', description: 'The creator\'s estimate, booked on the LPO line until approval. Never sent to vendors.' },
@@ -227,7 +231,7 @@ const credentials = { type: 'object', required: ['email', 'password'], propertie
 const vsrLpoFields = {
   lpoItemId: { ...objectId, description: 'The LPO line the job comes off; required when GET /api/lpos/for-vsr lists any. Its vendor does the work.' },
   quantity: { type: 'integer', minimum: 1, description: 'Tyres and batteries off a line: priced at its unit price, straight to the supervisor' },
-  estimatedAmount: { type: 'number', description: 'Repairs and brake pads off a line, and oil and transmission off one without a rate on the bus' },
+  estimatedAmount: { type: 'number', description: 'Repairs off a line, and oil off one without a rate on the bus. An accident is raised against no line.' },
 };
 const stepBody = { type: 'object', properties: { date: { type: 'string', format: 'date', description: 'Defaults to now, cannot be in the future' } } };
 
@@ -252,7 +256,7 @@ const spec = {
     description: [
       'Ticketing API for bus fleet maintenance with four roles.',
       '',
-      '**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil and transmission with a rate on the bus start at pending. Screens call a ticket a VSR.',
+      '**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil with a rate on the bus starts at pending. Screens call a ticket a VSR.',
       '',
       '**Roles:** serviceCreator manages vendors and buses, raises tickets, fills in parts and labour, sends buses and forwards invoices; supervisor approves tickets and reviews invoices; vendor sends estimates, works on buses, releases them and invoices; purchaseManager makes GRNs, purchase invoices and LPOs and runs queries.',
       '',
@@ -311,6 +315,7 @@ const spec = {
       put: op('Sheets', 'Change a bus status from a day onward. Scrapping and removed are refused (they come from scrap requests), and so is any day from a scrapped or sold bus\'s scrappedOn (409).', ['serviceCreator'], { body: { type: 'object', required: ['busId', 'date', 'status'], properties: { busId: objectId, date: { type: 'string' }, status: { type: 'string', enum: ['ready', 'repair', 'maintenance', 'tyreChange', 'batteryChange', 'accident'] } } }, response: { type: 'object' }, more: pick(400, 403, 404, 409) }),
     },
     '/api/sheets/repairs': { get: op('Sheets', 'Repair process list with a day-wise summary', ['serviceCreator', 'supervisor'], { query: [{ name: 'month', in: 'query', schema: { type: 'string', example: '2026-11' } }], response: { type: 'object' }, more: pick(400, 403) }) },
+    '/api/vendors/outside': { get: op('Vendors', 'Vendors outside the list that accidents have gone to, by name, to suggest for the next one. Never listed with the vendors.', ['serviceCreator', 'supervisor'], { response: envelope({ type: 'array', items: { type: 'object', properties: { _id: objectId, name: { type: 'string' } } } }), more: pick(403) }) },
     '/api/vendors/tickets': { get: op('Vendors', 'Tickets assigned to the signed-in vendor', ['vendor'], { query: ticketListQuery, response: listEnvelope(ref('Ticket')), more: pick(403) }) },
     '/api/buses': {
       get: op('Buses', 'List the fleet', ['serviceCreator', 'supervisor', 'purchaseManager'], { response: listEnvelope(ref('Bus')) }),
@@ -349,8 +354,10 @@ const spec = {
             repairCategory: { type: 'string', enum: REPAIR_CATEGORIES, description: 'Required when serviceType is repair' },
             currentReading: { type: 'integer', minimum: 0, description: 'Odometer in km' },
             vendorId: { ...objectId, description: 'Defaults to the vendor assigned to the bus' },
+            outsideVendorName: { type: 'string', minLength: 2, maxLength: 80, description: 'Accidents only: a vendor outside the list, kept once per name in any letter case. The service creator records its steps.' },
+            accident: { type: 'object', description: 'Required when serviceType is accident', properties: { severity: { type: 'string', enum: ['minor', 'medium', 'major'] }, fault: { type: 'string', enum: ['ourDriver', 'otherParty', 'unknown'] } } },
             description: { type: 'string', maxLength: 1000 },
-            isBreakdown: { type: 'boolean', description: 'Broke down on the road. Never sent to vendors.' },
+            isBreakdown: { type: 'boolean', description: 'Repairs only: broke down on the road. Never sent to vendors.' },
             ...vsrLpoFields,
           },
         },
@@ -367,19 +374,19 @@ const spec = {
     '/api/tickets/{id}/approve': { put: op('Tickets', 'Approve a pending ticket', ['supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
     '/api/tickets/{id}/return': { put: op('Tickets', 'Return a pending ticket to the creator', ['supervisor'], { params: [idParam], body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', maxLength: 500 } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/details': { put: op('Tickets', 'Correct the details of a returned ticket, with the same fields as raising it. Checked against what its LPO line has left without its own booking.', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/estimate': { post: op('Tickets', 'Vendor sends an estimate (multipart: amount, quotationNumber, daysToComplete, note, attachments)', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/estimate': { post: op('Tickets', 'Vendor sends an estimate (multipart: amount, quotationNumber, daysToComplete, note, attachments)', VENDOR_STEP, { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/estimate/reply': { post: op('Tickets', 'Creator replies to an estimate (multipart: amount, note, attachments)', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/escalate': { put: op('Tickets', 'Send the latest estimate to the supervisor', ['serviceCreator', 'supervisor'], { params: [idParam], response: envelope(ref('Ticket')), more: pick(403, 404, 409) }) },
-    '/api/tickets/{id}/acknowledge': { put: op('Tickets', 'Vendor accepts an approved ticket. Gives daysToComplete when it has an agreed price.', ['vendor'], { params: [idParam], body: { type: 'object', properties: { daysToComplete: { type: 'integer', minimum: 1 } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/acknowledge': { put: op('Tickets', 'Vendor accepts an approved ticket. Gives daysToComplete when it has an agreed price.', VENDOR_STEP, { params: [idParam], body: { type: 'object', properties: { daysToComplete: { type: 'integer', minimum: 1 } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/breakdown': { put: op('Tickets', 'Save the parts, labour hours, consumables and remarks', ['serviceCreator', 'supervisor'], { params: [idParam], body: { type: 'object', properties: { parts: { type: 'array', items: { type: 'object', required: ['name', 'quantity', 'unitPrice'], properties: { name: { type: 'string' }, description: { type: 'string' }, code: { type: 'string' }, partNumber: { type: 'string' }, quantity: { type: 'number' }, unitPrice: { type: 'number' } } } }, labourHours: { type: 'number' }, consumables: { type: 'number' }, remarks: { type: 'string' } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/scan-quotation': { post: op('Tickets', 'Read the vendor\'s quotation file with Claude and return lines to check. Saves nothing. 503 SCAN_NOT_CONFIGURED without ANTHROPIC_API_KEY.', ['serviceCreator', 'supervisor'], { params: [idParam], body: { type: 'object', properties: { attachmentId: objectId } }, response: envelope({ type: 'object', additionalProperties: true }), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/decline': { put: op('Tickets', 'Decline an additional job waiting for approval', ['supervisor'], { params: [idParam], body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', maxLength: 500 } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/additional': { post: op('Workshop', 'Raise an additional job while the bus is at the workshop (multipart: description, serviceType, repairCategory, amount, quotationNumber, daysToComplete, note, attachments)', ['vendor'], { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/additional': { post: op('Workshop', 'Raise an additional job while the bus is at the workshop (multipart: description, serviceType, repairCategory, amount, quotationNumber, daysToComplete, note, attachments)', VENDOR_STEP, { params: [idParam], response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/vehicle/sent': { put: op('Workshop', 'The bus went to the vendor', ['serviceCreator', 'supervisor'], { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/vehicle/received': { put: op('Workshop', 'The vendor has the bus', ['vendor'], { params: [idParam], body: { type: 'object', required: ['km'], properties: { ...stepBody.properties, km: { type: 'integer' } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/work/start': { put: op('Workshop', 'Work in progress', ['vendor'], { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/work/ready': { put: op('Workshop', 'Ready for delivery', ['vendor'], { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
-    '/api/tickets/{id}/vehicle/release': { put: op('Workshop', 'Release the bus, with every linked VSR at the workshop', ['vendor'], { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/vehicle/received': { put: op('Workshop', 'The vendor has the bus', VENDOR_STEP, { params: [idParam], body: { type: 'object', required: ['km'], properties: { ...stepBody.properties, km: { type: 'integer' } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/work/start': { put: op('Workshop', 'Work in progress', VENDOR_STEP, { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/work/ready': { put: op('Workshop', 'Ready for delivery', VENDOR_STEP, { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
+    '/api/tickets/{id}/vehicle/release': { put: op('Workshop', 'Release the bus, with every linked VSR at the workshop', VENDOR_STEP, { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/vehicle/returned': { put: op('Workshop', 'The bus is back, for every linked VSR. Moves the last service on.', ['serviceCreator', 'supervisor'], { params: [idParam], body: { type: 'object', required: ['km'], properties: { ...stepBody.properties, km: { type: 'integer' }, replacedPartsReceived: { type: 'boolean' } } }, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/invoice/received': { put: op('Workshop', 'The creator has the accepted invoice', ['serviceCreator', 'supervisor'], { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
     '/api/tickets/{id}/forward': { put: op('Workshop', 'Forward the invoice to purchasing', ['serviceCreator', 'supervisor'], { params: [idParam], body: stepBody, response: envelope(ref('Ticket')), more: pick(400, 403, 404, 409) }) },
@@ -427,7 +434,7 @@ const spec = {
     '/api/notifications/read-all': { put: op('Notifications', 'Mark all of yours as read', ROLES, { response: { type: 'object', properties: { success: { type: 'boolean' } } } }) },
     '/api/notifications/{id}/read': { put: op('Notifications', 'Mark one of yours as read', ROLES, { params: [idParam], response: envelope({ type: 'object', additionalProperties: true }), more: pick(404) }) },
     '/api/tickets/{id}/invoice': {
-      post: op('Tickets', 'Vendor submits (or resubmits) an invoice (multipart: amount, description, invoiceNumber, attachments; a file is required)', ['vendor'], {
+      post: op('Tickets', 'Vendor submits (or resubmits) an invoice (multipart: amount, description, invoiceNumber, attachments; a file is required)', VENDOR_STEP, {
         params: [idParam],
         response: envelope(ref('Ticket')), status: 201, more: pick(400, 403, 404, 409),
       }),

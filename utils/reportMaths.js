@@ -13,8 +13,8 @@ export const toFils = (aed) => Math.round(Number(aed ?? 0) * 100);
 /** Whole fils back to AED; an integer divided by 100 is the nearest double to the 2-decimal amount. */
 export const toAed = (fils) => fils / 100;
 
-/** The figure a VSR counts under: accidents apart from other repairs. */
-export const kindOf = ({ serviceType, repairCategory }) => (serviceType === 'repair' && repairCategory === 'ACCIDENT' ? 'accident' : serviceType);
+/** The figure a VSR counts under: its service type. Accidents have been one of their own since 2026-11-11. */
+export const kindOf = ({ serviceType }) => serviceType;
 
 /** A brand typed as "hino" on one bus and "Hino" on another is one brand. */
 export const brandKey = (make) => String(make ?? '').trim().toLowerCase();

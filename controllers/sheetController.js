@@ -143,9 +143,9 @@ export const getRepairSheet = asyncHandler(async (req, res) => {
   const month = req.query.month || uaeMonth();
   const days = daysInMonth(month);
   const today = uaeDay();
-  // Oil and transmission services use an agreed price, so they never enter this process.
+  // Oil services use an agreed price, so they never enter this process.
   const tickets = await Ticket.find({
-    serviceType: mongoose.trusted({ $in: ['repair', 'tyre', 'battery', 'brakePads', 'other'] }),
+    serviceType: mongoose.trusted({ $in: ['repair', 'accident', 'tyre', 'battery', 'other'] }),
     createdAt: mongoose.trusted({ $lte: endOfUaeDay(days.at(-1)) }),
   })
     .sort({ createdAt: -1 })

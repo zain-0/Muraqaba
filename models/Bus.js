@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 import { AttachmentSchema } from './shared.js';
 
-// Services charged per km from the rate on the bus.
-export const RATED_SERVICES = ['oil', 'transmission'];
+// Services charged per km from the rate on the bus. Transmission had one until 2026-11-11, when it became a repair category.
+export const RATED_SERVICES = ['oil'];
 
 // In operation → scrap requested → scrapped → sold. A sold bus is the archived bus: kept with
 // all its history and hidden from current lists. Only a scrap request and a sale move it.
@@ -56,11 +56,9 @@ const BusSchema = new mongoose.Schema(
     labourRate: { type: Number, min: 0 }, // AED per repair labour hour
     rates: {
       oil: { type: Number, min: 0 }, // AED per km
-      transmission: { type: Number, min: 0 },
     },
     intervals: {
       oil: { type: KmIntervalSchema, required: true },
-      transmission: { type: KmIntervalSchema, required: true },
       tyre: { type: KmIntervalSchema, required: true },
       brakePads: KmIntervalSchema, // 40,000 km on the depot's sheet; buses added before 2026-11-06 may have none
       battery: { type: MonthIntervalSchema, required: true },
