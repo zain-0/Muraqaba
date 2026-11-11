@@ -44,7 +44,7 @@ describe('signatures', () => {
   test('the key steps refuse someone without a signature and say why', async () => {
     const vendor = await register('vendor', 'sign-none');
     const own = await createBus(users, 'SIGN2', vendor.id, { rates: { oil: 1 } });
-    const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: own._id, serviceType: 'oil', currentReading: 100 } });
+    const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: own._id, serviceType: 'oil', currentReading: 100, supervisorFirst: true } });
     const id = raised.body.data._id;
     assert.equal((await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token })).status, 200);
 

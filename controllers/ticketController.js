@@ -179,7 +179,7 @@ const chosenLine = async ({ bus, serviceType, lpoItemId, vendorId }) => {
 
 /**
  * How the VSR is priced and what it books. With a line, tyres and batteries are the quantity times
- * the line's unit price, an agreed price that goes straight to the supervisor; repairs and brake
+ * the line's unit price, an agreed price that goes to the vendor (or the supervisor first); repairs and brake
  * pads take the creator's estimate; oil and transmission the rate on the bus, or without one the
  * creator's estimate. With no line, as before 2026-11-10: the rate on the bus or the vendor's estimate.
  */
@@ -209,11 +209,11 @@ const assertLineHasRoom = async (ticket, line) => {
   const counted = COUNTED_BY_QUANTITY.includes(line.item.kind);
   const { number } = line.lpo;
   const { name } = line.item;
-  if (counted && ticket.quantity > available.quantity) throw fieldError('quantity', `LPO ${number} has ${Math.max(available.quantity, 0)} left of ${name}.`);
+  if (counted && ticket.quantity > available.quantity) throw fieldError('quantity', `LPO ${number} has ${Math.max(available.quantity, 0)} available for ${name}.`);
   if (toFils(reservedAmount(ticket)) <= toFils(available.amount)) return;
   // The error sits on the field the creator can change; a rate price or an estimate can only go on another LPO.
   const field = counted ? 'quantity' : ticket.estimatedAmount !== undefined ? 'estimatedAmount' : 'lpoItemId';
-  throw fieldError(field, `LPO ${number} has AED ${AED.format(Math.max(available.amount, 0))} left for ${name}. Ask purchasing to add to it, or choose another LPO.`);
+  throw fieldError(field, `LPO ${number} has an available limit of AED ${AED.format(Math.max(available.amount, 0))} for ${name}. Ask purchasing to add to it, or choose another LPO.`);
 };
 
 /** Purchasing hears of a job raised with no LPO to come off. Other work needs none. A failure here must not fail the VSR. */
@@ -299,22 +299,38 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
   return { fields, bus, line };
 };
 
+/**
+ * Where a new VSR goes first. With no price yet, to the vendor for an estimate. An agreed price
+ * leaves nothing to negotiate, so it goes to the vendor to acknowledge at that price, or, when the
+ * creator ticks the box, to a supervisor for approval first (owner's testing notes, 2026-11-11).
+ */
+const firstStep = ({ agreedPrice }, supervisorFirst) => {
+  if (!agreedPrice) return { status: 'sentToVendor', note: 'VSR created', message: 'VSR created and sent to the vendor' };
+  if (supervisorFirst) return { status: 'pending', note: 'VSR created', message: 'VSR created and sent for supervisor approval' };
+  return { status: 'approved', note: 'Sent to the vendor at the agreed price', message: 'VSR created and sent to the vendor at the agreed price' };
+};
+
 // POST /api/tickets
 export const createTicket = asyncHandler(async (req, res) => {
   const { fields, bus, line } = await requestFields(req.body, req.user);
-  // An agreed price leaves nothing to negotiate, so it goes straight to the supervisor.
-  const status = fields.agreedPrice ? 'pending' : 'sentToVendor';
+  const { status, note, message } = firstStep(fields, req.body.supervisorFirst === true);
   const ticket = new Ticket({ ...fields, status, createdBy: req.user._id });
+  if (status === 'pending') stamp(ticket, req.user, 'escalated');
+  if (status === 'approved') {
+    // The agreed price is the approved amount, so it is what stays booked on the LPO line. Nobody
+    // approved it, so it carries no approval stamp and no approver; the vendor's acknowledgement records it.
+    ticket.approvedEstimate = fields.agreedPrice.amount;
+    ticket.approvedAt = new Date();
+  }
   await assertLineHasRoom(ticket, line);
-  if (fields.agreedPrice) stamp(ticket, req.user, 'escalated');
   ticket.vsrNumber = await nextVsrNumber();
-  ticket.history.push({ status, by: req.user._id, note: 'VSR created' });
+  ticket.history.push({ status, by: req.user._id, note });
   await ticket.save();
   // The VSR is real by now, so a problem with the daily sheet must not report it as failed.
   await applyTicketToBusDay(ticket, req.user._id).catch((err) => console.error('Could not update the daily sheet:', err));
   await tellPurchasingNoLpo(ticket, bus);
 
-  await respond(res, ticket, fields.agreedPrice ? 'VSR created and sent for supervisor approval' : 'VSR created and sent to the vendor', 201);
+  await respond(res, ticket, message, 201);
 });
 
 /** One page of the VSRs this user may see, newest VSR number first (sort=oldest reverses it). */

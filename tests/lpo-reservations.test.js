@@ -206,7 +206,7 @@ describe('LPO items, reservations and balances', () => {
       assert.equal(ok(await pads({ vendorId: elsewhere.id })).vendorId._id, elsewhere.id);
     });
 
-    test('tyres and batteries take a quantity, priced at the line, and go straight to the supervisor', async () => {
+    test('tyres and batteries take a quantity, priced at the line, and go to the vendor at that price', async () => {
       const { vendor, bus } = await setup('TYRE');
       const lpo = await makeLpo(vendor.id, [TYRE(10, 800), BATTERY(5, 640)]);
       const tyres = (extra) => raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: lpo.items[0]._id, ...extra });
@@ -215,11 +215,10 @@ describe('LPO items, reservations and balances', () => {
 
       const res = await tyres({ quantity: 2 });
       assert.equal(res.status, 201, JSON.stringify(res.body));
-      assert.equal(res.body.message, 'VSR created and sent for supervisor approval');
+      assert.equal(res.body.message, 'VSR created and sent to the vendor at the agreed price');
       const raised = res.body.data;
-      assert.deepEqual([raised.status, raised.quantity, raised.agreedPrice], ['pending', 2, { basis: 'lpo', unitPrice: 800, quantity: 2, amount: 1600 }]);
+      assert.deepEqual([raised.status, raised.quantity, raised.agreedPrice], ['approved', 2, { basis: 'lpo', unitPrice: 800, quantity: 2, amount: 1600 }]);
       assert.deepEqual([raised.lpoLine.name, raised.lpoLine.kind, raised.lpoLine.unitPrice], [`Tyre size ${SIZE}`, 'tyre', 800]);
-      assert.ok(raised.signatures.some((s) => s.step === 'escalated'));
       assert.deepEqual((await forVsr(bus._id, 'tyre')).lines[0].balance.booked, { amount: 1600, quantity: 2 });
 
       const seen = ok(await api('GET', `/tickets/${raised._id}`, { token: vendor.token }));
@@ -227,7 +226,7 @@ describe('LPO items, reservations and balances', () => {
       assert.ok(!('lpoLine' in seen) && !('estimatedAmount' in seen), 'but not the LPO');
 
       const battery = ok(await raise({ busId: bus._id, serviceType: 'battery', lpoItemId: lpo.items[1]._id, quantity: 1 }));
-      assert.deepEqual([battery.status, battery.agreedPrice.amount], ['pending', 640]);
+      assert.deepEqual([battery.status, battery.agreedPrice.amount], ['approved', 640]);
     });
 
     test('repairs and brake pads take the creator\'s estimate; oil and transmission the rate, or without one the estimate', async () => {
@@ -241,7 +240,7 @@ describe('LPO items, reservations and balances', () => {
       assert.deepEqual([pads.status, pads.estimatedAmount, pads.agreedPrice], ['sentToVendor', 750, undefined]);
 
       const oil = ok(await raise({ busId: rated._id, serviceType: 'oil', lpoItemId: line }));
-      assert.deepEqual([oil.status, oil.agreedPrice, oil.estimatedAmount], ['pending', { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 }, undefined], 'the rate on the bus');
+      assert.deepEqual([oil.status, oil.agreedPrice, oil.estimatedAmount], ['approved', { basis: 'rate', rate: 0.5, km: 10000, amount: 5000 }, undefined], 'the rate on the bus');
       assert.deepEqual(firstError(await raise({ busId: bus._id, serviceType: 'transmission', lpoItemId: line })), { field: 'estimatedAmount', message: 'Enter the estimated amount' });
       const transmission = ok(await raise({ busId: bus._id, serviceType: 'transmission', lpoItemId: line, estimatedAmount: 2000 }));
       assert.deepEqual([transmission.status, transmission.estimatedAmount], ['sentToVendor', 2000]);
@@ -256,13 +255,13 @@ describe('LPO items, reservations and balances', () => {
       ok(await repair(1000000));
       const over = await repair(600000);
       assert.equal(over.status, 400);
-      assert.deepEqual(firstError(over), { field: 'estimatedAmount', message: `LPO ${lpo.number} has AED 500,000.00 left for Repair & Maintenance of ${MAKE} Buses. Ask purchasing to add to it, or choose another LPO.` });
+      assert.deepEqual(firstError(over), { field: 'estimatedAmount', message: `LPO ${lpo.number} has an available limit of AED 500,000.00 for Repair & Maintenance of ${MAKE} Buses. Ask purchasing to add to it, or choose another LPO.` });
       ok(await repair(500000));
-      assert.equal(firstError(await repair(0.01)).message, `LPO ${lpo.number} has AED 0.00 left for Repair & Maintenance of ${MAKE} Buses. Ask purchasing to add to it, or choose another LPO.`);
+      assert.equal(firstError(await repair(0.01)).message, `LPO ${lpo.number} has an available limit of AED 0.00 for Repair & Maintenance of ${MAKE} Buses. Ask purchasing to add to it, or choose another LPO.`);
 
       const tyres = (quantity) => raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: tyreLine, quantity });
       ok(await tyres(3));
-      assert.deepEqual(firstError(await tyres(2)), { field: 'quantity', message: `LPO ${lpo.number} has 1 left of Tyre size ${SIZE}.` });
+      assert.deepEqual(firstError(await tyres(2)), { field: 'quantity', message: `LPO ${lpo.number} has 1 available for Tyre size ${SIZE}.` });
       ok(await tyres(1));
 
       // A rate price cannot be changed, so the refusal is on the LPO.
@@ -275,16 +274,16 @@ describe('LPO items, reservations and balances', () => {
       const { vendor, bus } = await setup('CORR');
       const lpo = await makeLpo(vendor.id, [TYRE(10, 800)]);
       const line = lpo.items[0]._id;
-      const raised = ok(await raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: line, quantity: 6 }));
+      const raised = ok(await raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: line, quantity: 6, supervisorFirst: true }));
       ok(await put(raised._id, 'return', users.supervisor.token, { reason: 'Check the count' }));
       const correction = (quantity, path = `/tickets/${raised._id}/details`) => api('PUT', path, { token: users.creator.token, body: { busId: bus._id, serviceType: 'tyre', currentReading: 1000, lpoItemId: line, quantity } });
 
       assert.equal((await forVsr(bus._id, 'tyre', { ticketId: raised._id })).lines[0].balance.available.quantity, 10, 'the form is shown what is left without this VSR');
       assert.equal((await forVsr(bus._id, 'tyre')).lines[0].balance.available.quantity, 4);
-      assert.deepEqual(firstError(await correction(11)), { field: 'quantity', message: `LPO ${lpo.number} has 10 left of Tyre size ${SIZE}.` });
+      assert.deepEqual(firstError(await correction(11)), { field: 'quantity', message: `LPO ${lpo.number} has 10 available for Tyre size ${SIZE}.` });
       const corrected = ok(await correction(10));
       assert.deepEqual([corrected.status, corrected.quantity, corrected.agreedPrice.amount], ['returned', 10, 8000], 'repriced at the line');
-      assert.equal(firstError(await raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: line, quantity: 1 })).message, `LPO ${lpo.number} has 0 left of Tyre size ${SIZE}.`);
+      assert.equal(firstError(await raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: line, quantity: 1 })).message, `LPO ${lpo.number} has 0 available for Tyre size ${SIZE}.`);
       assert.equal(ok(await correction(9, `/tickets/${raised._id}`)).quantity, 9, 'PUT /tickets/:id corrects too');
     });
   });
@@ -358,7 +357,7 @@ describe('LPO items, reservations and balances', () => {
       // Eight tyres fit the count but not the AED 6,000 left, as the GRN took more than the agreed price.
       assert.deepEqual(firstError(await raise({ busId: bus._id, serviceType: 'tyre', lpoItemId: lpo.items[0]._id, quantity: 8, currentReading: 2000 })), {
         field: 'quantity',
-        message: `LPO ${lpo.number} has AED 6,000.00 left for Tyre size ${SIZE}. Ask purchasing to add to it, or choose another LPO.`,
+        message: `LPO ${lpo.number} has an available limit of AED 6,000.00 for Tyre size ${SIZE}. Ask purchasing to add to it, or choose another LPO.`,
       });
     });
 

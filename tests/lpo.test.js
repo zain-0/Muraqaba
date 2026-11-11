@@ -193,7 +193,7 @@ describe('LPO', () => {
     const pricedBus = (label) => setup(label, { rates: { oil: 0.1, transmission: 0.05 } });
     const service = async ({ vendor, bus }, serviceType, amount, extra = {}) => {
       const raised = ok(await raise(bus, serviceType, extra));
-      assert.equal(raised.status, 'pending', 'priced from the rate on the bus');
+      assert.equal(raised.status, 'approved', 'priced from the rate on the bus, so it goes to the vendor');
       return toForwarded(users, raised, vendor, { invoice: { amount: String(amount) } });
     };
 
