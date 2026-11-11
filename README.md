@@ -18,8 +18,10 @@ Repairs, tyres, batteries and other work, where the price has to be agreed:
 sentToVendor ──estimate (vendor)──▶ estimateSubmitted ──reply (creator)──▶ estimateCountered ──estimate (vendor)──▶ estimateSubmitted
                                             └──parts and labour, then escalate (creator)──▶ pending
 
-Oil and transmission, when the bus has a rate and the VSR uses the bus's vendor: raised straight
-into pending, priced at rate per km × the bus's interval. intervalUsage keeps how much was left or delayed.
+Oil and transmission, when the bus has a rate and the VSR uses the bus's vendor: priced at rate per km × the
+bus's interval. intervalUsage keeps how much was left or delayed. Tyres and batteries off an LPO line: priced at
+quantity × the line's unit price. Such an agreed price is raised straight into approved, for the vendor to
+acknowledge, with no supervisor stamp; with supervisorFirst: true it is raised into pending instead (2026-11-11).
 
 Then, for both:
 pending ──approve (supervisor)──▶ approved ──acknowledge (vendor)──▶ acknowledged
@@ -37,9 +39,9 @@ Releasing or getting back the bus moves every linked ticket. Invoice, GRN and pu
 
 The depot's dates default to now and can be overridden, never into the future.
 
-LPOs (2026-11-10). Purchasing enters a dated LPO whose lines are Repair & Maintenance of one fleet make (one amount), a tyre size (quantity, unit price, optional life in km) or a battery type (quantity, unit price); the API names each line. Repairs, brake pads, oil and transmission come off the repair and maintenance line for the bus's make; tyres and batteries off a line of their kind, for any make.
+LPOs (2026-11-10). Purchasing enters a dated LPO whose lines are Repair & Maintenance of one fleet make (one amount), a tyre size (quantity, unit price, optional life in km) or a battery type (quantity, unit price); the API names each line. Repairs, brake pads, oil and transmission come off the repair and maintenance line for the bus's make; tyres and batteries off a line of their kind, for any make. Tyres only off a line that fits the bus's `tyreSize` (same rim diameter, and the same width and profile when both give them); a bus with no size takes every tyre line.
 
-- Raising or correcting a VSR: when any vendor's lines valid today fit the job, the creator picks one (`lpoItemId`) and its vendor does the work. Tyres and batteries then take a `quantity` and are priced at the line (`agreedPrice.basis: 'lpo'`), straight to the supervisor; repairs and brake pads take an `estimatedAmount`; oil and transmission the rate on the bus, or without one an `estimatedAmount`. With no line the VSR is raised as before and purchasing is notified (`lpoMissing`).
+- Raising or correcting a VSR: when any vendor's lines valid today fit the job, the creator picks one (`lpoItemId`) and its vendor does the work. Tyres and batteries then take a `quantity` and are priced at the line (`agreedPrice.basis: 'lpo'`), straight to the vendor (or the supervisor first, `supervisorFirst`); repairs and brake pads take an `estimatedAmount`; oil and transmission the rate on the bus, or without one an `estimatedAmount`. With no line the VSR is raised as before and purchasing is notified (`lpoMissing`).
 - What a VSR books on its line: the approved amount, else the agreed price, the creator's estimate or the vendor's latest estimate, and for tyres and batteries the units. Only open VSRs not yet on a GRN book anything. Raising or correcting past what is left (value − booked − GRN, the VSR's own booking left out) is refused; an approval or additional job that goes past it only notifies purchasing and the supervisor (`lpoProblem`).
 - The GRN takes each VSR's accepted invoice (and units) off its line, in place of the booking. A VSR with no line gets the automatic choice: its vendor's lines valid today for the make and kind, ending first, the first with room. A short or missing LPO is notified and never blocks the GRN. VSRs charged at invoice acceptance before 2026-11-10 are not charged again.
 - Tyres fitted off a line with a life in km set the bus's tyre interval to it.
