@@ -232,6 +232,28 @@ export const validateSheetMonth = [
   handleValidationErrors,
 ];
 
+// The month that day numbers in an imported sheet's header belong to; left out when it has dates.
+export const validateReadingImport = [
+  body('month').optional({ values: 'falsy' }).isString().matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('Choose a valid month'),
+  handleValidationErrors,
+];
+
+const queryDay = (field) => query(field).isString().withMessage('Choose a valid day').bail().matches(/^\d{4}-\d{2}-\d{2}$/).isISO8601({ strict: true }).withMessage('Choose a valid day');
+
+// The km report: two days, and the buses chosen (left out, the whole fleet).
+export const validateKmRange = [
+  queryDay('from'),
+  queryDay('to'),
+  query('busIds')
+    .optional({ values: 'falsy' })
+    .isString()
+    .withMessage('Choose buses from the list')
+    .bail()
+    .custom((value) => value.split(',').every((id) => /^[a-f\d]{24}$/i.test(id)))
+    .withMessage('Choose buses from the list'),
+  handleValidationErrors,
+];
+
 const sheetDay = () => [
   str('busId', 'Bus').isMongoId().withMessage('Choose a bus'),
   str('date', 'Day').matches(/^\d{4}-\d{2}-\d{2}$/).isISO8601({ strict: true }).withMessage('Choose a valid day'),

@@ -52,12 +52,19 @@ Documents are stored in `uploads/` (or `UPLOAD_DIR`), outside git, and served on
 
 Vendors never receive: `breakdown`, `isBreakdown`, `intervalUsage`, `returnReason`, `lpoLine`, `estimatedAmount`, `lpoDeduction`, `grn`, `purchaseInvoice`, bus rates and intervals. They do see `quantity` and `agreedPrice` on tyre and battery jobs, which are the job itself.
 
-Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed; raising a ticket picks it. Scrapping and Removed are never set by hand: approving a scrap request writes Scrapping on the day (source `scrap`), and the sale writes Removed on the sale day. From a bus's `scrappedOn` the sheet refuses changes; days before can still be corrected. A bus already removed before a month (or year) and unchanged in it is left off that period's sheets and reports.
+Month sheets, on UAE time (`/api/sheets`): daily km readings, daily bus status with a day-wise summary, and a repair process list with a day-wise summary. Service creators edit, supervisors read. A status holds until it is next changed. VSRs keep it (2026-11-11): raising one marks the bus out from that day, and the bus being back (`vehicle/returned`, also the depot's work-done step) makes it Ready from that day, or the status of another open VSR on the bus raised by then. Additional jobs travel with their parent. A day set by hand keeps its status, and a VSR's change on that day starts the next day. Daily km can be imported from an .xlsx (`POST /api/sheets/readings/import/preview`, then `/import`): the client's grid or a Side number, Date, Km list, each reading checked as if typed. `GET /api/sheets/readings/report?from=&to=&busIds=` gives the km each bus ran between two days. Scrapping and Removed are never set by hand: approving a scrap request writes Scrapping on the day (source `scrap`), and the sale writes Removed on the sale day. From a bus's `scrappedOn` the sheet refuses changes; days before can still be corrected. A bus already removed before a month (or year) and unchanged in it is left off that period's sheets and reports.
 
 Databases from before 2026-11-09 are brought over by `scripts/migrate-fleet-lifecycle.js`, which sets each bus's lifecycle from its latest status and merges each LPO's repair and maintenance lines, taking the make most of the vendor's buses have. It can run any number of times; `--dry-run` writes nothing, and `--uri` (or `MONGO_URI`) chooses the database:
 
 ```bash
 node scripts/migrate-fleet-lifecycle.js --dry-run --uri mongodb://localhost:27017/muraqaba_next
+```
+
+Buses whose VSR came back before 2026-11-11 still show the VSR's status. `scripts/sync-bus-status.js` gives each bus whose latest status came from a VSR that is now back the status the rule would have given on its return day. It is a dry run unless given `--apply`, and prints what it would change:
+
+```bash
+node scripts/sync-bus-status.js --uri mongodb://localhost:27017/muraqaba_next
+node scripts/sync-bus-status.js --uri mongodb://localhost:27017/muraqaba_next --apply
 ```
 
 Then `scripts/migrate-lpo-items.js` brings LPOs and open VSRs into the 2026-11-10 shape: it dates each LPO by its first day, moves the LPO's make onto its repair and maintenance lines, names every line by the rule, and gives each open VSR with no line the one its GRN would take it off, so it is booked. Past deductions are left alone. The same `--dry-run` and `--uri`:
@@ -178,6 +185,8 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET, PUT | /api/sheets/readings | read: creator, supervisor; write: creator | Daily km (`?month=YYYY-MM`) |
 | GET, PUT | /api/sheets/status | read: creator, supervisor; write: creator | Daily status (`?month=YYYY-MM`) |
 | GET | /api/sheets/repairs | creator, supervisor | Repair process (`?month=YYYY-MM`) |
+| GET | /api/sheets/readings/report | creator, supervisor | Km run between two days (`?from=&to=&busIds=`) |
+| POST | /api/sheets/readings/import/preview, /api/sheets/readings/import | creator | Daily km from an .xlsx: preview, then save |
 
 ## Adding email
 

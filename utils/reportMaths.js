@@ -74,6 +74,22 @@ export const kmInMonth = (readings, month) => {
   return Math.max(inMonth.at(-1).km - before.km, 0);
 };
 
+/**
+ * A bus's km between two days (owner's testing notes, 2026-11-11): its last reading on or before
+ * `to`, less its last reading on or before `from`; with none by `from`, its first reading in the
+ * range (`startsLater`). Null km when it has no reading in the range. Never negative.
+ */
+export const kmInRange = (readings, from, to) => {
+  const sorted = [...readings].sort((a, b) => a.date.localeCompare(b.date)).map(({ date, km }) => ({ date, km }));
+  const upTo = (day) => sorted.filter((r) => r.date <= day).at(-1) ?? null;
+  const inRange = sorted.filter((r) => r.date >= from && r.date <= to);
+  const before = upTo(from);
+  const end = upTo(to);
+  if (!inRange.length) return { start: before, end, km: null, startsLater: false };
+  const start = before ?? inRange[0];
+  return { start, end, km: Math.max(end.km - start.km, 0), startsLater: !before };
+};
+
 /** Km bands for a month's driving; 0 km is "not operated" and sits outside them. */
 export const BANDS = [
   { from: 1, to: 5000 },
