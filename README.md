@@ -123,6 +123,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET | /api/buses | creator, supervisor, purchasing | Fleet, with `intervalStatus`, `lifecycle`, `scrappedOn` and `sale`. Sold buses are included; screens hide them by default |
 | POST | /api/buses | creator, supervisor | Add a bus |
 | GET | /api/buses/:id | creator, supervisor, purchasing | Details with `openTickets` and `scrapRequests`, newest first |
+| GET | /api/buses/:id/costs | creator, supervisor, purchasing | Whole-life costs for the scrap request form: accepted invoices by repair, maintenance (oil, and transmission as a service), tyre, battery, accident and other; `grandTotal`, `repairs`, `accidents`, `currentKm` (latest daily reading, else the furthest last service; `kmSource`) and `costPerKm` (null with no km). Declined VSRs never count; no-charge jobs count 0 |
 | PUT | /api/buses/:id | creator | Edit a bus. New tickets use the changes; the vendor stays. A sold bus cannot be edited |
 | PUT | /api/buses/:id/sale | supervisor | Multipart: `date` (on or after `scrappedOn`, not in the future), `buyer`, `price`, `note`, `attachments`. scrapped → sold |
 | GET | /api/buses/:id/sale/attachments/:attachmentId | creator, supervisor, purchasing | Download a sale document |
