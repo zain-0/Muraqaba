@@ -147,6 +147,12 @@
             "type": "integer",
             "example": 15
           },
+          "tyreSize": {
+            "type": "string",
+            "maxLength": 30,
+            "example": "295/80 R22.5",
+            "description": "Optional. A tyre change is offered only the tyre LPO lines that fit it. Empty clears it."
+          },
           "labourRate": {
             "type": "number",
             "description": "AED per repair labour hour"
@@ -436,6 +442,12 @@
             "type": "integer",
             "example": 15
           },
+          "tyreSize": {
+            "type": "string",
+            "maxLength": 30,
+            "example": "295/80 R22.5",
+            "description": "Optional. A tyre change is offered only the tyre LPO lines that fit it. Empty clears it."
+          },
           "labourRate": {
             "type": "number",
             "description": "AED per repair labour hour"
@@ -597,6 +609,12 @@
               "expectedLifeYears": {
                 "type": "integer",
                 "example": 15
+              },
+              "tyreSize": {
+                "type": "string",
+                "maxLength": 30,
+                "example": "295/80 R22.5",
+                "description": "Optional. A tyre change is offered only the tyre LPO lines that fit it. Empty clears it."
               },
               "labourRate": {
                 "type": "number",
@@ -882,7 +900,7 @@
           },
           "agreedPrice": {
             "type": "object",
-            "description": "Fixed at raising, so the VSR goes straight to the supervisor. rate: oil and transmission, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
+            "description": "Fixed at raising, so the VSR goes straight to the vendor to acknowledge (to the supervisor first with supervisorFirst). rate: oil and transmission, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
             "properties": {
               "basis": {
                 "type": "string",
@@ -1627,6 +1645,11 @@
           "make": {
             "type": "string",
             "description": "The bus's make"
+          },
+          "tyreSize": {
+            "type": "string",
+            "nullable": true,
+            "description": "Tyre changes only: the bus's tyre size, which the tyre lines fit; null when the bus has none, and every tyre line is listed"
           },
           "status": {
             "type": "string",
@@ -3177,7 +3200,24 @@
               "type": "string",
               "maxLength": 60
             },
-            "description": "Search, case-blind and literal: part of the VSR number, the bus's side number or plate, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see."
+            "description": "Search, case-blind and literal: part of the VSR number, the bus's side number, plate, brand and type, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see."
+          },
+          {
+            "name": "searchIn",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "vsr",
+                "side",
+                "plate",
+                "brandType",
+                "vendor"
+              ],
+              "default": "all"
+            },
+            "description": "Where q looks: everywhere, or only the VSR number, side number, plate, brand and type, or vendor name. A vendor searching by vendor finds nothing: every VSR they see is their own."
           },
           {
             "name": "page",
@@ -3209,7 +3249,7 @@
               ],
               "default": "newest"
             },
-            "description": "Order by creation date"
+            "description": "Order by VSR number, compared as numbers: newest is the highest number first"
           }
         ],
         "responses": {
@@ -3609,6 +3649,156 @@
           },
           "409": {
             "description": "Duplicate or invalid state transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/buses/{id}/costs": {
+      "get": {
+        "tags": [
+          "Buses"
+        ],
+        "summary": "What the bus has cost over its whole life: accepted invoices by kind of work, repairs and accidents counted, current km and cost per km",
+        "description": "Roles: serviceCreator, supervisor, purchaseManager. A VSR costs its current invoice once accepted (as in the cost reports); declined VSRs never count and a no-charge job counts 0. Maintenance is oil (and transmission services), repair is repairs (and brake pads), accident is accident VSRs (and repairs in the Accident category). The current km is the latest daily reading, else the furthest last service. costPerKm = grandTotal / currentKm with four decimals, null with no km.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "64b7f0c2e1d2a9b1c8a4f123"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "busId": {
+                          "type": "string"
+                        },
+                        "fleetNumber": {
+                          "type": "string"
+                        },
+                        "costs": {
+                          "type": "object",
+                          "properties": {
+                            "repair": {
+                              "type": "number",
+                              "example": 0
+                            },
+                            "maintenance": {
+                              "type": "number",
+                              "example": 0
+                            },
+                            "tyre": {
+                              "type": "number",
+                              "example": 0
+                            },
+                            "battery": {
+                              "type": "number",
+                              "example": 0
+                            },
+                            "accident": {
+                              "type": "number",
+                              "example": 0
+                            },
+                            "other": {
+                              "type": "number",
+                              "example": 0
+                            }
+                          }
+                        },
+                        "grandTotal": {
+                          "type": "number",
+                          "example": 0
+                        },
+                        "repairs": {
+                          "type": "integer"
+                        },
+                        "accidents": {
+                          "type": "integer"
+                        },
+                        "vsrs": {
+                          "type": "integer"
+                        },
+                        "currentKm": {
+                          "type": "number"
+                        },
+                        "kmSource": {
+                          "type": "string",
+                          "enum": [
+                            "reading",
+                            "lastService"
+                          ]
+                        },
+                        "costPerKm": {
+                          "type": "number",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bus not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -4651,7 +4841,24 @@
               "type": "string",
               "maxLength": 60
             },
-            "description": "Search, case-blind and literal: part of the VSR number, the bus's side number or plate, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see."
+            "description": "Search, case-blind and literal: part of the VSR number, the bus's side number, plate, brand and type, or (not for vendors) the vendor's name. Trimmed, cut to 60 characters, and only narrows what the caller may see."
+          },
+          {
+            "name": "searchIn",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "vsr",
+                "side",
+                "plate",
+                "brandType",
+                "vendor"
+              ],
+              "default": "all"
+            },
+            "description": "Where q looks: everywhere, or only the VSR number, side number, plate, brand and type, or vendor name. A vendor searching by vendor finds nothing: every VSR they see is their own."
           },
           {
             "name": "page",
@@ -4683,7 +4890,7 @@
               ],
               "default": "newest"
             },
-            "description": "Order by creation date"
+            "description": "Order by VSR number, compared as numbers: newest is the highest number first"
           }
         ],
         "responses": {
@@ -4824,7 +5031,11 @@
                   "quantity": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Tyres and batteries off a line: priced at its unit price, straight to the supervisor"
+                    "description": "Tyres and batteries off a line: priced at its unit price, an agreed price"
+                  },
+                  "supervisorFirst": {
+                    "type": "boolean",
+                    "description": "Raising only. An agreed price goes to the vendor to acknowledge; true sends it to a supervisor for approval first"
                   },
                   "estimatedAmount": {
                     "type": "number",
@@ -4954,7 +5165,7 @@
               ],
               "default": "newest"
             },
-            "description": "Order by creation date"
+            "description": "Order by VSR number, compared as numbers: newest is the highest number first"
           }
         ],
         "responses": {
@@ -5061,7 +5272,7 @@
               ],
               "default": "newest"
             },
-            "description": "Order by creation date"
+            "description": "Order by VSR number, compared as numbers: newest is the highest number first"
           }
         ],
         "responses": {
@@ -5168,7 +5379,7 @@
               ],
               "default": "newest"
             },
-            "description": "Order by creation date"
+            "description": "Order by VSR number, compared as numbers: newest is the highest number first"
           }
         ],
         "responses": {

@@ -192,7 +192,7 @@ describe('browser testing findings', () => {
 
     test('an agreed price stays as raised when only the details change', async () => {
       const rated = await createBus(users, 'PRICE', users.vendor1.id, { rates: { oil: 0.15, transmission: 1 } });
-      const raisedRes = await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000 } });
+      const raisedRes = await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000, supervisorFirst: true } });
       const raised = raisedRes.body.data;
       assert.equal(raised.agreedPrice.amount, 1500);
       const edit = { ...busBody('PRICE', users.vendor1.id), rates: { oil: 0.25, transmission: 1 }, intervals: { ...busBody('PRICE', users.vendor1.id).intervals, oil: { everyKm: 12000, lastKm: 0 } } };
@@ -215,7 +215,7 @@ describe('browser testing findings', () => {
       assert.equal(toOil.status, 409);
       assert.match(toOil.body.message, /how the VSR is priced/);
 
-      const oil = (await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000 } })).body.data;
+      const oil = (await api('POST', '/tickets', { token: users.creator.token, body: { busId: rated._id, serviceType: 'oil', currentReading: 5000, supervisorFirst: true } })).body.data;
       const other = await newVendor('qa-switch');
       const toOtherVendor = await correct(await returned(oil), { vendorId: other.id });
       assert.equal(toOtherVendor.status, 409);

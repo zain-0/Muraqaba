@@ -74,8 +74,7 @@ describe('VSR numbers and estimates', () => {
 
   test('an agreed-price VSR gets its days when the vendor acknowledges', async () => {
     const ticket = await raised({ serviceType: 'oil', repairCategory: undefined, currentReading: 9000 });
-    assert.equal(ticket.status, 'pending');
-    await api('PUT', `/tickets/${ticket._id}/approve`, { token: users.supervisor.token });
+    assert.equal(ticket.status, 'approved', 'an agreed price goes to the vendor to acknowledge');
 
     const none = await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor1.token });
     assert.equal(none.status, 400);
