@@ -295,7 +295,7 @@ describe('client decisions of 2026-11-06', () => {
       const raised = await raise(ACCIDENT);
       assert.equal(raised.accident.severity, 'minor');
       assert.equal(raised.accident.fault, 'otherParty');
-      assert.equal(raised.accident.updatedBy, users.creator.id);
+      assert.equal(raised.accident.updatedBy._id, users.creator.id);
       assert.ok(raised.accident.updatedAt);
 
       assert.equal((await raise({ accident: { severity: 'minor', fault: 'otherParty' } })).accident, undefined, 'an engine repair has no accident');
@@ -330,8 +330,8 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal(updated.body.message, 'Accident details saved');
       assert.equal(updated.body.data.status, 'vehicleReturned', 'the stage stays as it was');
       assert.deepEqual([updated.body.data.accident.severity, updated.body.data.accident.fault], ['major', 'ourDriver']);
-      assert.equal(updated.body.data.accident.updatedBy, users.supervisor.id);
-      assert.equal(ok(await put(ticket._id, 'accident', users.creator.token, { severity: 'medium', fault: 'unknown' })).accident.updatedBy, users.creator.id);
+      assert.equal(updated.body.data.accident.updatedBy._id, users.supervisor.id);
+      assert.equal(ok(await put(ticket._id, 'accident', users.creator.token, { severity: 'medium', fault: 'unknown' })).accident.updatedBy._id, users.creator.id);
 
       const engine = await raise();
       const refused = await put(engine._id, 'accident', users.creator.token, { severity: 'major', fault: 'ourDriver' });

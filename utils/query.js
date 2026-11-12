@@ -18,6 +18,8 @@ export const TICKET_POPULATE = [
   { path: 'purchaseInvoice', select: 'number date amount notes attachments' },
   { path: 'history.by', select: USER_FIELDS },
   { path: 'negotiation.by', select: USER_FIELDS },
+  // Who last changed the accident details; forViewer strips the details from vendors whole.
+  { path: 'accident.updatedBy', select: USER_FIELDS },
 ];
 
 export const BUS_POPULATE = [
