@@ -116,7 +116,7 @@ describe('who may open them, and what they accept', () => {
     assert.equal(uaeMonth(t.t2.createdAt), '2025-02', 'but 1 February in the UAE');
   });
 
-  test('only purchasing opens them; vendors, creators and supervisors are refused', async () => {
+  test('only purchasing opens them; vendors, creators and directors are refused', async () => {
     for (const path of PATHS) {
       for (const who of [users.vendor1, users.creator, users.supervisor]) {
         assert.equal((await api('GET', `/reports/${path}?year=${YEAR}`, { token: who.token })).status, 403, `${path} for ${who.email}`);
@@ -565,17 +565,17 @@ describe('brake pads', () => {
     assert.ok(Array.isArray(res.body.data.due.brakePads));
   });
 
-  test('brake pads due are listed only for buses that have the interval', async () => {
+  test('brake pads are never listed as due; only oil and tyres are (2026-11-16)', async () => {
     const today = uaeDay();
     const withPads = await fx.addBus('BP2', { make: 'Hino', created: new Date(), vendor: A.id, brakePads: { everyKm: 40000, lastKm: 0 } });
     const without = await fx.addBus('BP3', { make: 'Hino', created: new Date(), vendor: A.id });
     await fx.addReading(withPads, today, 39500);
     await fx.addReading(without, today, 39500);
     const { due } = (await api('GET', '/reports/weekly', { token: users.supervisor.token })).body.data;
-    assert.ok(!due.brakePads.some((row) => row.fleetNumber === without.fleetNumber), 'a bus added before brake pads had an interval is left out');
-    const row = due.brakePads.find((r) => r.fleetNumber === withPads.fleetNumber);
-    assert.ok(row, 'needs intervalStatus to measure brake pads (utils/intervals.js, backend-flow)');
-    assert.deepEqual([row.state, row.left, row.unit, row.interval, row.lastService, row.currentKm], ['soon', 500, 'km', 40000, 0, 39500]);
+    assert.deepEqual(due.brakePads, []);
+    assert.deepEqual(due.battery, []);
+    const status = (await api('GET', `/buses/${withPads._id}`, { token: users.supervisor.token })).body.data.intervalStatus;
+    assert.deepEqual(status.brakePads, { unit: 'km', interval: 40000, used: 39500, left: 500, delayed: 0 }, 'the figures stay, with no state');
   });
 
   test('the repair process sheet follows brake-pad VSRs', async () => {
@@ -605,7 +605,7 @@ describe('VSRs made through the API this year', () => {
     ok(await estimate(free._id, vendor.token, { amount: '0', noChargeReason: 'goodwill' }));
     ok(await put(free._id, 'escalate', users.creator.token));
     ok(await put(free._id, 'approve', users.supervisor.token));
-    ok(await put(free._id, 'acknowledge', vendor.token, { daysToComplete: 2 }));
+    ok(await api('GET', `/tickets/${free._id}`, { token: vendor.token }));
     ok(await put(free._id, 'work/start', vendor.token, { km: 550 }));
     ok(await put(free._id, 'work/ready', vendor.token));
     assert.equal(ok(await put(free._id, 'vehicle/returned', users.creator.token, { km: 560 })).status, 'completed');

@@ -4,7 +4,11 @@
  */
 import { BusDailyReading } from '../models/BusDaily.js';
 
-const DUE_SOON = { km: 1000, months: 1 };
+// Only oil services and tyre changes are flagged as due soon or overdue (owner, 2026-11-16): an oil
+// service with 1,000 km or less left is due soon, a tyre change with 5,000 km or less. Brake pads and
+// the battery keep their figures but carry no state, so no list, alert or report calls them due.
+export const DUE_SOON_KM = { oil: 1000, tyre: 5000 };
+export const ALERTED_SERVICES = Object.keys(DUE_SOON_KM);
 
 export const INTERVAL_SERVICES = ['oil', 'tyre', 'brakePads', 'battery'];
 
@@ -55,7 +59,8 @@ export const intervalStatus = (bus, latestKm, now = new Date()) => {
     // A reading older than the last service says nothing about how far the bus has gone since.
     const km = service === 'battery' ? currentKm : Math.max(currentKm, bus.intervals[service].lastKm);
     const { unit, interval, actual, left, delayed } = measure(bus, service, km, now);
-    const state = left === 0 ? 'overdue' : left <= DUE_SOON[unit] ? 'soon' : 'ok';
+    const soon = DUE_SOON_KM[service];
+    const state = soon === undefined ? undefined : left === 0 ? 'overdue' : left <= soon ? 'soon' : 'ok';
     status[service] = { unit, interval, used: Math.max(actual, 0), left, delayed, state };
   });
   return status;

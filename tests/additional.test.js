@@ -107,7 +107,7 @@ describe('additional jobs', () => {
     assert.equal(started.body.data.status, 'workInProgress');
   });
 
-  test('a job still waiting blocks the release, and the supervisor can decline it', async () => {
+  test('a job still waiting blocks the release, and the director can decline it', async () => {
     const parent = await parentAtWork();
     await put(parent._id, 'work/ready', users.vendor1.token);
     const job = (await addJob(parent._id)).body.data;

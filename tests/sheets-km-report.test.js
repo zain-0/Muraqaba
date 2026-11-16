@@ -29,7 +29,7 @@ describe('km run between two days', () => {
     await setReading(c, '2026-06-01', 100);
   });
 
-  test('the creator and the supervisor read it; nobody else does, and the dates are checked', async () => {
+  test('the creator and the director read it; nobody else does, and the dates are checked', async () => {
     assert.equal((await report('?from=2026-07-01&to=2026-07-31', users.creator.token)).status, 200);
     assert.equal((await report('?from=2026-07-01&to=2026-07-31', users.purchasing.token)).status, 403);
     assert.equal((await report('?from=2026-07-01&to=2026-07-31', users.vendor1.token)).status, 403);

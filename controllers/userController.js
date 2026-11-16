@@ -5,7 +5,7 @@ import ScrapRequest from '../models/ScrapRequest.js';
 import { SignatureImage } from '../models/User.js';
 import Invoice from '../models/Invoice.js';
 import { asyncHandler, AppError } from '../middleware/errorMiddleware.js';
-import { intervalStatus, latestKmByBus } from '../utils/intervals.js';
+import { ALERTED_SERVICES, intervalStatus, latestKmByBus } from '../utils/intervals.js';
 import { offFleetBusIds } from '../utils/busDay.js';
 
 // GET /api/users/signature  (your own)
@@ -53,7 +53,7 @@ const busesNeedingService = async (filter) => {
     if (offFleet.has(String(bus._id))) return false; // scrapped or removed
     const status = intervalStatus(bus, latest.get(String(bus._id)));
     // Brake pads only on buses that have the interval; older buses have none.
-    return ['oil', 'tyre', 'battery', 'brakePads'].some((service) => status[service]?.state === 'overdue');
+    return ALERTED_SERVICES.some((service) => status[service]?.state === 'overdue');
   }).length;
 };
 

@@ -406,7 +406,7 @@ describe('LPO items, reservations and balances', () => {
       ok(await put(raised._id, 'escalate', users.creator.token));
       ok(await put(raised._id, 'approve', users.supervisor.token));
       assert.equal((await balanceOn(lpo)).booked.amount, 0, 'approved at AED 0');
-      ok(await put(raised._id, 'acknowledge', vendor.token, { daysToComplete: 2 }));
+      ok(await api('GET', `/tickets/${raised._id}`, { token: vendor.token }));
       const back = await fromAcknowledgedToReturned(users, raised._id, vendor);
       assert.equal(back.status, 'completed');
       const closed = await balanceOn(lpo);

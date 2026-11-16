@@ -48,23 +48,19 @@ describe('signatures', () => {
     const id = raised.body.data._id;
     assert.equal((await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token })).status, 200);
 
-    const refused = await api('PUT', `/tickets/${id}/acknowledge`, { token: vendor.token, body: { daysToComplete: 2 } });
-    assert.equal(refused.status, 409);
-    assert.equal(refused.body.code, 'SIGNATURE_REQUIRED');
-    const still = await api('GET', `/tickets/${id}`, { token: users.creator.token });
-    assert.equal(still.body.data.status, 'approved', 'nothing moved');
-
-    await api('PUT', '/users/signature', { token: vendor.token, body: { image: signatureOf('vendor') } });
-    const ok = await api('PUT', `/tickets/${id}/acknowledge`, { token: vendor.token, body: { daysToComplete: 2 } });
-    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    // Opening the approved VSR is a read, not a signature, so it needs none (2026-11-16).
+    const read = await api('GET', `/tickets/${id}`, { token: vendor.token });
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.equal(read.body.data.status, 'acknowledged');
+    assert.ok(!read.body.data.signatures.some((s) => s.step === 'acknowledged'));
   });
 
   test('every key step is stamped with who and when, and the VSR shows the drawing', async () => {
     const ticket = await raise();
     const forwarded = await toForwarded(users, ticket, users.vendor1);
-    assert.deepEqual(steps(forwarded), ['escalated', 'approved', 'acknowledged', 'vehicleReleased', 'invoiceAccepted']);
+    assert.deepEqual(steps(forwarded), ['escalated', 'approved', 'vehicleReleased', 'invoiceAccepted']);
     const approved = forwarded.signatures[1];
-    assert.equal(approved.name, 'Test Supervisor');
+    assert.equal(approved.name, 'Test Director');
     assert.equal(approved.role, 'supervisor');
     assert.ok(approved.at);
 

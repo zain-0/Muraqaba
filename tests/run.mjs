@@ -53,7 +53,7 @@ const STAFF_PASSWORD = 'TestPass123!';
 const hashed = await bcrypt.hash(STAFF_PASSWORD, 4);
 await User.create([
   { name: 'Test Creator', email: 'test-creator@muraqaba.test', role: 'serviceCreator', password: hashed },
-  { name: 'Test Supervisor', email: 'test-supervisor@muraqaba.test', role: 'supervisor', password: hashed },
+  { name: 'Test Director', email: 'test-supervisor@muraqaba.test', role: 'supervisor', password: hashed },
   { name: 'Test Purchasing', email: 'test-purchasing@muraqaba.test', role: 'purchaseManager', password: hashed },
 ]);
 

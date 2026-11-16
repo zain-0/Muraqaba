@@ -42,7 +42,7 @@ const noChargeAcknowledged = async (reason, overrides = {}, onBus = bus) => {
   ok(await estimate(ticket._id, users.vendor1.token, { amount: '0', noChargeReason: reason }));
   ok(await put(ticket._id, 'escalate', users.creator.token));
   ok(await put(ticket._id, 'approve', users.supervisor.token));
-  return ok(await put(ticket._id, 'acknowledge', users.vendor1.token, { daysToComplete: 3 }));
+  return ok(await api('GET', `/tickets/${ticket._id}`, { token: users.vendor1.token }));
 };
 
 /** At the vendor's workshop with work under way, received on 5 October at 5050 km. */
@@ -123,7 +123,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal(approved.approvedEstimate, 0);
       assert.equal(approved.noChargeReason, 'warranty');
 
-      ok(await put(ticket._id, 'acknowledge', users.vendor1.token, { daysToComplete: 3 }));
+      ok(await api('GET', `/tickets/${ticket._id}`, { token: users.vendor1.token }));
       const back = await fromAcknowledgedToReturned(users, ticket._id, users.vendor1);
       assert.equal(back.status, 'completed');
       const [returned, closed] = back.history.slice(-2);
@@ -225,8 +225,8 @@ describe('client decisions of 2026-11-06', () => {
       await fillBreakdown(users, ticket._id, 500);
       ok(await put(ticket._id, 'escalate', users.creator.token));
       ok(await put(ticket._id, 'approve', users.supervisor.token));
-      const acknowledged = await put(ticket._id, 'acknowledge', users.vendor1.token, { daysToComplete: 3 });
-      assert.equal(acknowledged.body.message, 'VSR acknowledged. Start the work at the depot and enter the reading.');
+      const acknowledged = await api('GET', `/tickets/${ticket._id}`, { token: users.vendor1.token });
+      assert.equal(acknowledged.body.data.status, 'acknowledged');
       assert.equal((await put(ticket._id, 'work/start', users.vendor1.token, { km: 5010 })).body.message, 'Work in progress');
       assert.equal((await put(ticket._id, 'work/ready', users.vendor1.token)).body.message, 'Work is ready. The service creator confirms when it is done.');
       assert.equal((await put(ticket._id, 'vehicle/returned', users.creator.token, { km: 5020 })).body.message, 'Work done. The vendor can now send the invoice.');
@@ -236,7 +236,9 @@ describe('client decisions of 2026-11-06', () => {
       await fillBreakdown(users, other._id, 500);
       ok(await put(other._id, 'escalate', users.creator.token));
       ok(await put(other._id, 'approve', users.supervisor.token));
-      assert.equal((await put(other._id, 'acknowledge', users.vendor1.token, { daysToComplete: 3 })).body.message, 'VSR acknowledged. The service creator sends the bus.', 'a trip reads as before');
+      assert.equal((await put(other._id, 'vehicle/sent', users.creator.token)).status, 409, 'the bus waits until the vendor has opened the VSR');
+      assert.equal((await api('GET', `/tickets/${other._id}`, { token: users.vendor1.token })).body.data.status, 'acknowledged');
+      assert.equal((await put(other._id, 'vehicle/sent', users.creator.token)).status, 200);
     });
 
     test('an additional job waits as it would for a release, then moves with its parent', async () => {
@@ -314,7 +316,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal((await read(ticket._id)).accident, undefined);
     });
 
-    test('the creator and the supervisor update them at any stage; nobody else can', async () => {
+    test('the creator and the director update them at any stage; nobody else can', async () => {
       const ticket = await raise(ACCIDENT);
       await toAcknowledged(users, ticket, users.vendor1);
       await fromAcknowledgedToReturned(users, ticket._id, users.vendor1);
@@ -351,7 +353,7 @@ describe('client decisions of 2026-11-06', () => {
       asVendor(await estimate(ticket._id, users.vendor1.token, { amount: '0', noChargeReason: 'insurance' }));
       ok(await put(ticket._id, 'escalate', users.creator.token));
       ok(await put(ticket._id, 'approve', users.supervisor.token));
-      asVendor(await put(ticket._id, 'acknowledge', users.vendor1.token, { daysToComplete: 3 }));
+      asVendor(await api('GET', `/tickets/${ticket._id}`, { token: users.vendor1.token }));
       await fromAcknowledgedToReturned(users, ticket._id, users.vendor1);
       const completed = asVendor(await api('GET', '/tickets/completed?limit=200', { token: users.vendor1.token }));
       assert.ok(completed.body.data.some((t) => t._id === ticket._id), 'the closed accident is in the vendor\'s list');
@@ -397,7 +399,7 @@ describe('client decisions of 2026-11-06', () => {
       assert.equal(sheet.buses.find((b) => b._id === own._id).cells[sheet.days.indexOf(sheet.today)].status, 'repair');
 
       const status = (await api('GET', `/buses/${own._id}`, { token: users.creator.token })).body.data.intervalStatus;
-      assert.deepEqual(status.brakePads, { unit: 'km', interval: 40000, used: 38000, left: 2000, delayed: 0, state: 'ok' });
+      assert.deepEqual(status.brakePads, { unit: 'km', interval: 40000, used: 38000, left: 2000, delayed: 0 });
 
       await toAcknowledged(users, raised, users.vendor1);
       await fromAcknowledgedToReturned(users, raised._id, users.vendor1, { km: 39500 });

@@ -21,7 +21,7 @@ export const handleValidationErrors = (req, res, next) => {
 };
 
 // express-validator runs standard validators on each element of an array, so a scalar
-// field must be pinned to a string first or `role: ["supervisor"]` would pass `isIn`.
+// field must be pinned to a string first or `role: ["director"]` would pass `isIn`.
 const str = (field, label = field) => body(field).isString().withMessage(`${label} must be text`);
 const qstr = (field) => query(field).optional().isString().withMessage(`${field} must appear once`);
 
@@ -204,7 +204,7 @@ export const validateTicketCreate = [
   body('outsideVendorName', 'Enter the vendor\'s name, 2 to 80 characters').optional({ values: 'falsy' }).isString().trim().isLength({ min: 2, max: 80 }),
   body('isBreakdown', 'Breakdown must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
   // An agreed price goes to the vendor unless the creator asks for a supervisor's approval first (2026-11-11).
-  body('supervisorFirst', 'Sending to the supervisor first must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
+  body('supervisorFirst', 'Sending to the director first must be yes or no').optional({ values: 'null' }).isBoolean().toBoolean(),
   body('location', 'Choose where the work is done').optional({ values: 'falsy' }).isString().isIn(WORK_LOCATIONS),
   // For the depot's own records: required on an accident, and dropped on anything else.
   body('accident.severity', SEVERITY).if(isAccident).isString().isIn(ACCIDENT_SEVERITIES),
@@ -435,7 +435,6 @@ export const validateSignature = [
   handleValidationErrors,
 ];
 
-export const validateAcknowledge = [note(), daysToComplete().optional({ values: 'null' }), handleValidationErrors];
 
 export const validateBreakdown = [
   body('parts', 'Parts must be a list').optional({ values: 'null' }).isArray({ max: 200 }),

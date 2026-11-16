@@ -2,7 +2,7 @@
  * Owner's testing notes of 2026-11-11, pricing on the Raise VSR form.
  *
  * - A VSR with an agreed price (oil at the bus rate; a tyre or battery off an LPO line) goes to the
- *   vendor to acknowledge, unless the creator ticks "Send to the supervisor for approval first".
+ *   vendor to acknowledge, unless the creator ticks "Send to the director for approval first".
  * - A bus has a tyre size, and a tyre change only comes off the tyre LPO lines that fit it.
  */
 import { test, before, beforeEach, after, describe } from 'node:test';
@@ -85,8 +85,8 @@ describe('pricing on the Raise VSR form', () => {
 
       const assigned = ok(await api('GET', '/tickets?status=approved&limit=100', { token: users.vendor1.token }));
       assert.ok(assigned.some((ticket) => ticket._id === raised._id), 'the vendor has it to acknowledge');
-      assert.equal((await put(raised._id, 'approve', users.supervisor.token)).status, 409, 'there is nothing for a supervisor to approve');
-      const acknowledged = ok(await put(raised._id, 'acknowledge', users.vendor1.token, { daysToComplete: 2 }));
+      assert.equal((await put(raised._id, 'approve', users.supervisor.token)).status, 409, 'there is nothing for a director to approve');
+      const acknowledged = ok(await api('GET', `/tickets/${raised._id}`, { token: users.vendor1.token }));
       assert.equal(acknowledged.status, 'acknowledged');
     });
 
@@ -101,11 +101,11 @@ describe('pricing on the Raise VSR form', () => {
       assert.deepEqual([battery.status, battery.approvedEstimate], ['approved', 1280]);
     });
 
-    test('ticked, it goes to the supervisor for approval first, as before', async () => {
+    test('ticked, it goes to the director for approval first, as before', async () => {
       const bus = await createBus(users, 'VPFIRST', users.vendor1.id);
       const res = await raise({ busId: bus._id, serviceType: 'oil', currentReading: 9000, supervisorFirst: true });
       assert.equal(res.status, 201, JSON.stringify(res.body));
-      assert.equal(res.body.message, 'VSR created and sent for supervisor approval');
+      assert.equal(res.body.message, 'VSR created and sent for director approval');
       const raised = res.body.data;
       assert.deepEqual([raised.status, raised.approvedEstimate], ['pending', undefined]);
       assert.deepEqual(raised.signatures.map((s) => s.step), ['escalated']);
@@ -125,7 +125,7 @@ describe('pricing on the Raise VSR form', () => {
       assert.equal(repair.status, 'sentToVendor');
       assert.deepEqual(firstError(await raise({ busId: bus._id, serviceType: 'oil', supervisorFirst: 'maybe' })), {
         field: 'supervisorFirst',
-        message: 'Sending to the supervisor first must be yes or no',
+        message: 'Sending to the director first must be yes or no',
       });
     });
   });

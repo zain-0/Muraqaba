@@ -20,11 +20,15 @@ sentToVendor ──estimate (vendor)──▶ estimateSubmitted ──reply (cre
 
 Oil, when the bus has a rate and the VSR uses the bus's vendor: priced at rate per km × the bus's interval.
 intervalUsage keeps how much was left or delayed. Tyres and batteries off an LPO line: priced at
-quantity × the line's unit price. Such an agreed price is raised straight into approved, for the vendor to
-acknowledge, with no supervisor stamp; with supervisorFirst: true it is raised into pending instead (2026-11-11).
+quantity × the line's unit price. Such an agreed price is raised straight into approved, with no supervisor
+stamp; with supervisorFirst: true it is raised into pending instead (2026-11-11).
+
+There is no acknowledge step since 2026-11-16: the vendor opening an approved VSR (GET /api/tickets/:id)
+moves it to acknowledged and keeps the time, which screens show as "Read by vendor". For a vendor outside
+the list the service creator opening it does the same. Screens call the supervisor role Director.
 
 Then, for both:
-pending ──approve (supervisor)──▶ approved ──acknowledge (vendor)──▶ acknowledged
+pending ──approve (supervisor)──▶ approved ──the vendor opens it──▶ acknowledged
 pending ──return (supervisor, reason required)──▶ returned ──correct, reply or escalate (creator)
 acknowledged ──(creator)──▶ vehicleSent ──km (vendor)──▶ vehicleReceived ──▶ workInProgress ──▶ readyForDelivery ──▶ vehicleReleased
 vehicleReleased ──km, replaced parts (creator)──▶ vehicleReturned ──invoice with file (vendor)──▶ invoiceSubmitted
@@ -173,7 +177,6 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/tickets/:id/details, /api/tickets/:id | creator, supervisor | Correct a returned ticket, with the same fields as raising it |
 | PUT | /api/tickets/:id/accident | creator, supervisor | Accidents only, any status: `severity` (minor, medium, major), `fault` (ourDriver, otherParty, unknown). Never shown to vendors |
 | GET | /api/tickets/:id/attachments/:attachmentId | anyone who can see the ticket | Download a document |
-| PUT | /api/tickets/:id/acknowledge | vendor (owner); creator for an outside vendor | approved → acknowledged; `daysToComplete` when it has an agreed price |
 | POST | /api/tickets/:id/additional | vendor (owner); creator for an outside vendor | Multipart: additional job with its first estimate |
 | PUT | /api/tickets/:id/vehicle/sent | creator, supervisor | acknowledged → vehicleSent |
 | PUT | /api/tickets/:id/vehicle/received | vendor (owner); creator for an outside vendor | vehicleSent → vehicleReceived (`km`) |

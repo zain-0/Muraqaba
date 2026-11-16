@@ -16,7 +16,6 @@ import {
   replyToEstimate,
   escalateTicket,
   downloadAttachment,
-  acknowledgeTicket,
   submitInvoice,
   acceptInvoice,
   rejectInvoice,
@@ -47,7 +46,6 @@ import {
   validateEstimateReply,
   validateBreakdown,
   validateScan,
-  validateAcknowledge,
   validateAttachmentParams,
   validateObjectId,
   validateTicketListQuery,
@@ -97,7 +95,6 @@ router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, p
 router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
 router.post('/:id/scan-quotation', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateScan, scanQuotationFile);
 router.put('/:id/breakdown', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateBreakdown, saveBreakdown);
-router.put('/:id/acknowledge', roleMiddleware(VENDOR), validateObjectId, validateAcknowledge, acknowledgeTicket);
 router.put('/:id/vehicle/sent', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateStepDate, markVehicleSent);
 router.put('/:id/vehicle/received', roleMiddleware(VENDOR), validateObjectId, validateVehicleReceived, markVehicleReceived);
 router.put('/:id/work/start', roleMiddleware(VENDOR), validateObjectId, validateWorkStart, startWork);

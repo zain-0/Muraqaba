@@ -245,7 +245,7 @@ export default async function seedClient(folder, { password, staff }) {
         step('estimateSubmitted', vendor, minutesIn(25 + i * 10), { note: `Estimate ${i + 1}`, estimate: { ...estimate, number: i + 1 } });
       });
     }
-    if (!vsr.agreedPrice && reached('pending') && vsr.estimates.length) step('pending', creator, sameDay('09:00'), { note: 'Sent to the supervisor for approval', sign: 'escalated', breakdown: true });
+    if (!vsr.agreedPrice && reached('pending') && vsr.estimates.length) step('pending', creator, sameDay('09:00'), { note: 'Sent to the director for approval', sign: 'escalated', breakdown: true });
     if (reached('approved')) step('approved', supervisor, sameDay('09:30'), { sign: 'approved', approve: true });
     if (reached('acknowledged')) step('acknowledged', vendor, sameDay('10:00'), { sign: 'acknowledged' });
     if (depot) {

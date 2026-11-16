@@ -3,7 +3,7 @@
   "info": {
     "title": "Muraqaba Fleet Maintenance API",
     "version": "1.1.0",
-    "description": "Ticketing API for bus fleet maintenance with four roles.\n\n**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil with a rate on the bus starts at pending. Screens call a ticket a VSR.\n\n**Roles:** serviceCreator manages vendors and buses, raises tickets, fills in parts and labour, sends buses and forwards invoices; supervisor approves tickets and reviews invoices; vendor sends estimates, works on buses, releases them and invoices; purchaseManager makes GRNs, purchase invoices and LPOs and runs queries.\n\nAll list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`."
+    "description": "Ticketing API for bus fleet maintenance with four roles.\n\n**Lifecycle:** sentToVendor → estimateSubmitted ⇄ estimateCountered → pending (with parts and labour filled in) → approved or returned → acknowledged → vehicleSent → vehicleReceived → workInProgress → readyForDelivery → vehicleReleased → vehicleReturned → invoiceSubmitted → invoiceAccepted or invoiceRejected → invoiceReceived → forwardedToPurchase → grnCreated → completed. Oil with a rate on the bus starts at pending. Screens call a ticket a VSR.\n\n**Roles:** serviceCreator manages vendors and buses, raises tickets, fills in parts and labour, sends buses and forwards invoices; director approves tickets and reviews invoices; vendor sends estimates, works on buses, releases them and invoices; purchaseManager makes GRNs, purchase invoices and LPOs and runs queries.\n\nAll list endpoints are scoped to what the caller may see. Errors always carry `success: false`, a stable `code` and a human readable `message`."
   },
   "servers": [
     {
@@ -299,7 +299,7 @@
           },
           "sale": {
             "type": "object",
-            "description": "Recorded by the supervisor. A bus migrated from the daily sheet has a date only.",
+            "description": "Recorded by the director. A bus migrated from the daily sheet has a date only.",
             "properties": {
               "date": {
                 "type": "string",
@@ -758,7 +758,7 @@
               },
               "sale": {
                 "type": "object",
-                "description": "Recorded by the supervisor. A bus migrated from the daily sheet has a date only.",
+                "description": "Recorded by the director. A bus migrated from the daily sheet has a date only.",
                 "properties": {
                   "date": {
                     "type": "string",
@@ -920,7 +920,7 @@
           },
           "agreedPrice": {
             "type": "object",
-            "description": "Fixed at raising, so the VSR goes straight to the vendor to acknowledge (to the supervisor first with supervisorFirst). rate: oil, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
+            "description": "Fixed at raising, so the VSR goes straight to the vendor (to the director first with supervisorFirst). rate: oil, the rate on the bus times its interval. lpo: tyres and batteries, the quantity times the LPO line's unit price",
             "properties": {
               "basis": {
                 "type": "string",
@@ -1634,7 +1634,7 @@
           },
           "decisionNote": {
             "type": "string",
-            "description": "The supervisor's note; the reason when turned down"
+            "description": "The director's note; the reason when turned down"
           },
           "cancelledAt": {
             "type": "string",
@@ -2280,7 +2280,7 @@
         "tags": [
           "Users"
         ],
-        "summary": "Role specific counters, including actionRequired. The supervisor's has scrapRequestsToDecide, counted in actionRequired.",
+        "summary": "Role specific counters, including actionRequired. The director's has scrapRequestsToDecide, counted in actionRequired.",
         "description": "Roles: vendor, serviceCreator, supervisor, purchaseManager",
         "security": [
           {
@@ -3757,7 +3757,7 @@
           "Buses"
         ],
         "summary": "What the bus has cost over its whole life: accepted invoices by kind of work, repairs and accidents counted, current km and cost per km",
-        "description": "Roles: serviceCreator, supervisor, purchaseManager. A VSR costs its current invoice once accepted (as in the cost reports); declined VSRs never count and a no-charge job counts 0. Maintenance is oil, repair is repairs (transmission and brake pads among them), accident is accident VSRs; records from before 2026-11-11 (transmission and brake-pad services, repairs in the Accident category) count the same way. The current km is the latest daily reading, else the furthest last service. costPerKm = grandTotal / currentKm with four decimals, null with no km.",
+        "description": "Roles: serviceCreator, director, purchaseManager. A VSR costs its current invoice once accepted (as in the cost reports); declined VSRs never count and a no-charge job counts 0. Maintenance is oil, repair is repairs (transmission and brake pads among them), accident is accident VSRs; records from before 2026-11-11 (transmission and brake-pad services, repairs in the Accident category) count the same way. The current km is the latest daily reading, else the furthest last service. costPerKm = grandTotal / currentKm with four decimals, null with no km.",
         "security": [
           {
             "bearerAuth": []
@@ -4259,7 +4259,7 @@
         "tags": [
           "Scrapping"
         ],
-        "summary": "Ask the supervisor to scrap a bus in operation with no open VSR. Multipart form: busId, reason, note (up to 1000), attachments. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each). Every supervisor is notified.",
+        "summary": "Ask the director to scrap a bus in operation with no open VSR. Multipart form: busId, reason, note (up to 1000), attachments. Files go in attachments (PDF, image, Word or Excel; up to 5, 10 MB each). Every director is notified.",
         "description": "Roles: serviceCreator",
         "security": [
           {
@@ -5161,7 +5161,7 @@
                   },
                   "supervisorFirst": {
                     "type": "boolean",
-                    "description": "Raising only. An agreed price goes to the vendor to acknowledge; true sends it to a supervisor for approval first"
+                    "description": "Raising only. An agreed price goes straight to the vendor; true sends it to a director for approval first"
                   },
                   "estimatedAmount": {
                     "type": "number",
@@ -5253,7 +5253,7 @@
         "tags": [
           "Tickets"
         ],
-        "summary": "Tickets awaiting supervisor approval",
+        "summary": "Tickets awaiting director approval",
         "description": "Roles: serviceCreator, supervisor",
         "security": [
           {
@@ -6244,7 +6244,7 @@
         "tags": [
           "Tickets"
         ],
-        "summary": "Send the latest estimate to the supervisor",
+        "summary": "Send the latest estimate to the director",
         "description": "Roles: serviceCreator, supervisor",
         "security": [
           {
@@ -6281,121 +6281,6 @@
                       "$ref": "#/components/schemas/Ticket"
                     }
                   }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, invalid or expired token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Role not allowed or resource owned by someone else",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Duplicate or invalid state transition",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tickets/{id}/acknowledge": {
-      "put": {
-        "tags": [
-          "Tickets"
-        ],
-        "summary": "Vendor accepts an approved ticket. Gives daysToComplete when it has an agreed price.",
-        "description": "Roles: vendor, serviceCreator",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "example": "64b7f0c2e1d2a9b1c8a4f123"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "daysToComplete": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "example": true
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/Ticket"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -9072,7 +8957,7 @@
         "tags": [
           "Reports"
         ],
-        "summary": "How many of what, for which brand, vendor, bus or year",
+        "summary": "How many of what, for which brand, vendor, bus and year, or custom dates (from and to, YYYY-MM-DD, at most 1,100 days, which win over the year)",
         "description": "Roles: purchaseManager",
         "security": [
           {
@@ -9096,6 +8981,20 @@
           },
           {
             "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
             "in": "query",
             "schema": {
               "type": "string"
@@ -9192,7 +9091,7 @@
         "tags": [
           "Reports"
         ],
-        "summary": "Month figures for repairs, tyres, batteries and maintenance, by brand or for the fleet",
+        "summary": "Month figures for repairs, tyres, batteries and maintenance, by brand or for the fleet, for a year or custom dates (from and to, YYYY-MM-DD, at most 1,100 days, which win over the year)",
         "description": "Roles: serviceCreator, supervisor, purchaseManager",
         "security": [
           {
@@ -9202,6 +9101,20 @@
         "parameters": [
           {
             "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
             "in": "query",
             "schema": {
               "type": "string"

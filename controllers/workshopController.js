@@ -74,7 +74,7 @@ const assertReading = (km, lastKnown = 0) => {
 export const markVehicleSent = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   if (atDepot(ticket)) throw new AppError('This job is done at the depot, so the bus is not sent.', 409, 'INVALID_STATE');
-  assertStatus(ticket, 'acknowledged', `The bus can be sent once the vendor has acknowledged the job (this one is ${ticket.status})`);
+  assertStatus(ticket, 'acknowledged', `The bus can be sent once the vendor has opened the VSR (this one is ${ticket.status})`);
   assertAfterPreviousStep(ticket, req.body.date);
   step(ticket, 'vehicleSent', req.user, { date: req.body.date, fields: { sentAt: WHEN } });
   await ticket.save();
@@ -94,14 +94,14 @@ export const markVehicleReceived = asyncHandler(async (req, res) => {
   await respond(res, ticket, 'Bus marked as received');
 });
 
-// PUT /api/tickets/:id/work/start  (vendor; at the depot, straight after acknowledging, with the reading)
+// PUT /api/tickets/:id/work/start  (vendor; at the depot, once they have opened the approved VSR, with the reading)
 export const startWork = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
   await assertVendorOwns(ticket, req.user);
   const { date, km } = req.body;
   if (atDepot(ticket) && ticket.status !== 'vehicleReceived') {
     // An additional job on a depot VSR is approved into vehicleReceived and starts like any other.
-    assertStatus(ticket, 'acknowledged', `Work starts after the vendor acknowledges the job (this one is ${ticket.status})`);
+    assertStatus(ticket, 'acknowledged', `Work starts once the vendor has opened the approved VSR (this one is ${ticket.status})`);
     assertAfterPreviousStep(ticket, date);
     if (km === undefined) throw fieldError('km', 'Enter the reading as a whole number of kilometres');
     assertReading(km, ticket.currentReading);

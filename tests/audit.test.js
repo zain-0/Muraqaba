@@ -44,7 +44,7 @@ describe('after the review', () => {
   after(() => mongoose.connection.close());
 
   describe('who can do and see what', () => {
-    test('only the service creator does the steps the owner gave the creator, not a supervisor through the API', async () => {
+    test('only the service creator does the steps the owner gave the creator, not a director through the API', async () => {
       const { _id: id } = await toAcknowledged(users, await raise(), users.vendor1);
       assert.equal((await put(id, 'vehicle/sent', users.supervisor.token)).status, 403);
       assert.equal((await put(id, 'breakdown', users.supervisor.token, { consumables: 1 })).status, 403);

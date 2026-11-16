@@ -143,7 +143,7 @@ export const toAcknowledged = async (users, ticket, vendor) => {
     ok(await api('PUT', `/tickets/${id}/escalate`, { token: users.creator.token }));
   }
   if (ticket.status !== 'approved') ok(await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token }));
-  return ok(await api('PUT', `/tickets/${id}/acknowledge`, { token: vendor.token, body: { daysToComplete: 3 } }));
+  return ok(await api('GET', `/tickets/${id}`, { token: vendor.token }));
 };
 
 /** From acknowledged to the bus being back with the creator. */

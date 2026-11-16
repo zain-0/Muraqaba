@@ -234,7 +234,7 @@ describe('VSR types, 2026-11-11', () => {
       const id = ticket._id;
       const creator = users.creator.token;
       assert.equal((await estimate(id, users.vendor1.token, { amount: '1200' })).status, 403, 'a listed vendor cannot');
-      assert.equal((await estimate(id, users.supervisor.token, { amount: '1200' })).status, 403, 'nor a supervisor');
+      assert.equal((await estimate(id, users.supervisor.token, { amount: '1200' })).status, 403, 'nor a director');
 
       const quoted = await estimate(id, creator, { amount: '1200' });
       assert.equal(quoted.status, 201, JSON.stringify(quoted.body));
@@ -242,7 +242,7 @@ describe('VSR types, 2026-11-11', () => {
       await fillBreakdown(users, id, 1200);
       ok(await put(id, 'escalate', creator));
       ok(await put(id, 'approve', users.supervisor.token));
-      const acknowledged = ok(await put(id, 'acknowledge', creator, { daysToComplete: 4 }));
+      const acknowledged = ok(await api('GET', `/tickets/${id}`, { token: creator }));
       assert.equal(acknowledged.history.at(-1).by._id, users.creator.id);
 
       ok(await put(id, 'vehicle/sent', creator));

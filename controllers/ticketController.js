@@ -282,7 +282,7 @@ const vendorFor = async ({ serviceType, line, vendorId, outsideVendorName, bus }
 
 // Work is raised only on a bus in operation; a bus on its way out of the fleet says where it is.
 const NO_VSR_WHILE = {
-  scrapRequested: 'A scrap request for this bus is waiting for the supervisor.',
+  scrapRequested: 'A scrap request for this bus is waiting for the director.',
   scrapped: 'This bus is scrapped. No VSR can be raised on it.',
   sold: 'This bus is sold and archived. No VSR can be raised on it.',
 };
@@ -326,12 +326,12 @@ const requestFields = async ({ busId, serviceType, repairCategory, description, 
 
 /**
  * Where a new VSR goes first. With no price yet, to the vendor for an estimate. An agreed price
- * leaves nothing to negotiate, so it goes to the vendor to acknowledge at that price, or, when the
+ * leaves nothing to negotiate, so it goes to the vendor at that price, or, when the
  * creator ticks the box, to a supervisor for approval first (owner's testing notes, 2026-11-11).
  */
 const firstStep = ({ agreedPrice }, supervisorFirst) => {
   if (!agreedPrice) return { status: 'sentToVendor', note: 'VSR created', message: 'VSR created and sent to the vendor' };
-  if (supervisorFirst) return { status: 'pending', note: 'VSR created', message: 'VSR created and sent for supervisor approval' };
+  if (supervisorFirst) return { status: 'pending', note: 'VSR created', message: 'VSR created and sent for director approval' };
   return { status: 'approved', note: 'Sent to the vendor at the agreed price', message: 'VSR created and sent to the vendor at the agreed price' };
 };
 
@@ -343,7 +343,7 @@ export const createTicket = asyncHandler(async (req, res) => {
   if (status === 'pending') stamp(ticket, req.user, 'escalated');
   if (status === 'approved') {
     // The agreed price is the approved amount, so it is what stays booked on the LPO line. Nobody
-    // approved it, so it carries no approval stamp and no approver; the vendor's acknowledgement records it.
+    // approved it, so it carries no approval stamp and no approver.
     ticket.approvedEstimate = fields.agreedPrice.amount;
     ticket.approvedAt = new Date();
   }
@@ -421,9 +421,30 @@ const sameInvoiceNumber = async (ticket) => {
   return tickets.map(({ _id, vsrNumber }) => ({ _id, vsrNumber }));
 };
 
+/**
+ * There is no Acknowledge button any more (owner, 2026-11-16): the vendor opening an approved VSR
+ * is the acknowledgement, and the time is kept as when they read it. A vendor outside the list
+ * cannot sign in, so the service creator opening it stands in for them, as with their other steps.
+ * A read is not a signature, so nothing is stamped.
+ */
+const readByVendor = async (req, ticket) => {
+  if (ticket.status !== 'approved') return ticket;
+  const reads = req.user.role === 'vendor' || (req.user.role === 'serviceCreator' && ticket.vendorId?.outside);
+  if (!reads) return ticket;
+  const fresh = await loadTicket(ticket._id);
+  if (fresh.status === 'approved') {
+    fresh.transition('acknowledged', req.user._id);
+    // Two tabs opening it at once: the first one recorded the read.
+    await fresh.save().catch((err) => {
+      if (err.name !== 'VersionError') throw err;
+    });
+  }
+  return loadVisibleTicket(req);
+};
+
 // GET /api/tickets/:id
 export const getTicketById = asyncHandler(async (req, res) => {
-  const ticket = await loadVisibleTicket(req);
+  const ticket = await readByVendor(req, await loadVisibleTicket(req));
 
   // Every invoice ever submitted for this ticket, oldest first, so the UI can show rejections and resubmissions.
   const invoices = await Invoice.find({ ticketId: ticket._id }).sort({ createdAt: 1 });
@@ -453,7 +474,7 @@ export const approveTicket = asyncHandler(async (req, res) => {
   }
   await ticket.save();
   await flagIfOverbooked(ticket);
-  await respond(res, ticket, ticket.parentTicket ? 'Additional job approved. The vendor can work on it.' : 'VSR approved. The vendor has been asked to acknowledge it.');
+  await respond(res, ticket, ticket.parentTicket ? 'Additional job approved. The vendor can work on it.' : 'VSR approved and sent to the vendor.');
 });
 
 // PUT /api/tickets/:id/accident  (creator, supervisor; any stage, and never shown to vendors)
@@ -578,12 +599,12 @@ const compareWithEstimate = (ticket) => {
 const checkBreakdownAgainstEstimate = (ticket) => {
   const latest = ticket.latestEstimate();
   if (!latest) {
-    throw new AppError('The vendor has to send an estimate before this can go to the supervisor.', 409, 'NOT_READY');
+    throw new AppError('The vendor has to send an estimate before this can go to the director.', 409, 'NOT_READY');
   }
   // Work at no charge has no price to check, but parts and labour, once saved, are still compared.
   if (latest.noChargeReason && !ticket.breakdown) return;
   if (!ticket.breakdown) {
-    throw new AppError('Fill in the parts and labour before sending this to the supervisor.', 409, 'NOT_READY');
+    throw new AppError('Fill in the parts and labour before sending this to the director.', 409, 'NOT_READY');
   }
   compareWithEstimate(ticket);
   if (ticket.breakdown.discount < 0) {
@@ -650,13 +671,13 @@ export const scanQuotationFile = asyncHandler(async (req, res) => {
 // PUT /api/tickets/:id/escalate  (creator)
 export const escalateTicket = asyncHandler(async (req, res) => {
   const ticket = await loadTicket(req.params.id);
-  assertStatus(ticket, ['estimateSubmitted', 'returned'], `Only a VSR with an estimate to review can be sent to the supervisor (this one is ${ticket.status})`);
+  assertStatus(ticket, ['estimateSubmitted', 'returned'], `Only a VSR with an estimate to review can be sent to the director (this one is ${ticket.status})`);
   if (!ticket.agreedPrice) checkBreakdownAgainstEstimate(ticket);
   stamp(ticket, req.user, 'escalated');
   ticket.returnReason = undefined;
-  ticket.transition('pending', req.user._id, req.body?.note || 'Sent to the supervisor for approval');
+  ticket.transition('pending', req.user._id, req.body?.note || 'Sent to the director for approval');
   await ticket.save();
-  await respond(res, ticket, 'VSR sent to the supervisor for approval');
+  await respond(res, ticket, 'VSR sent to the director for approval');
 });
 
 // GET /api/tickets/:id/attachments/:attachmentId
@@ -667,23 +688,6 @@ export const downloadAttachment = asyncHandler(async (req, res) => {
   const purchasing = req.user.role === 'vendor' ? [] : [ticket.grn, ticket.purchaseInvoice].filter(Boolean);
   const attachment = [...ticket.negotiation, ...invoices, ...purchasing].flatMap((holder) => holder.attachments).find((a) => a._id.equals(req.params.attachmentId));
   await sendStored(res, attachment);
-});
-
-// PUT /api/tickets/:id/acknowledge  (vendor who owns the ticket)
-export const acknowledgeTicket = asyncHandler(async (req, res) => {
-  const ticket = await loadTicket(req.params.id);
-  await assertVendorOwns(ticket, req.user);
-  assertStatus(ticket, 'approved', `A VSR must be approved before it can be acknowledged (this one is ${ticket.status})`);
-  if (req.body?.daysToComplete) ticket.daysToComplete = req.body.daysToComplete;
-  if (!ticket.daysToComplete) {
-    const message = 'Enter the number of days to complete the work';
-    throw new AppError(message, 400, 'VALIDATION_ERROR', [{ field: 'daysToComplete', message }]);
-  }
-  stamp(ticket, req.user, 'acknowledged');
-  ticket.transition('acknowledged', req.user._id, req.body?.note);
-  await ticket.save();
-  // At the depot the bus is never sent: the vendor comes to it.
-  await respond(res, ticket, ticket.location === 'depot' ? 'VSR acknowledged. Start the work at the depot and enter the reading.' : 'VSR acknowledged. The service creator sends the bus.');
 });
 
 // POST /api/tickets/:id/invoice  (vendor who owns the ticket)
@@ -711,7 +715,7 @@ export const submitInvoice = asyncHandler(async (req, res) => {
     await ticket.save();
     await invoice.save();
   });
-  await respond(res, ticket, 'Invoice submitted for supervisor review', 201);
+  await respond(res, ticket, 'Invoice submitted for director review', 201);
 });
 
 // PUT /api/tickets/:id/invoice/accept  (supervisor)

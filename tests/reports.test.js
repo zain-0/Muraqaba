@@ -134,8 +134,8 @@ describe('purchasing queries', () => {
   });
 });
 
-describe('weekly supervisor report', () => {
-  test('it lists this week\'s work and what is due, and it is for supervisors', async () => {
+describe('weekly director report', () => {
+  test('it lists this week\'s work and what is due, and it is for directors', async () => {
     const vendor = await newVendor('weekly');
     const bus = await createBus(users, 'WK', vendor.id, { rates: undefined });
     const { today } = (await api('GET', '/sheets/readings', { token: users.creator.token })).body.data;
@@ -198,24 +198,28 @@ describe('notifications', () => {
     assert.equal(open.length, 1, 'the old one stays in history, nothing new');
   });
 
-  test('supervisors hear about brake pads due, like the others, and never about transmission', async () => {
+  test('directors hear about oil and tyres due only: an oil service 1,000 km out, a tyre change 5,000 km out', async () => {
     const vendor = await newVendor('due-t');
     const bus = await createBus(users, 'DUET', vendor.id, { rates: undefined });
     const { today } = (await api('GET', '/sheets/readings', { token: users.creator.token })).body.data;
     await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: bus._id, date: today, km: 39500 } });
 
     const supervisor = await inbox(users.supervisor.token);
-    const notice = supervisor.data.find((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber && n.params.service === 'brakePads');
-    assert.ok(notice, 'brake pads are due soon');
-    assert.equal(notice.params.state, 'soon');
-    assert.equal(notice.params.left, 500);
-    assert.ok(!supervisor.data.some((n) => n.type === 'serviceDue' && n.params.service === 'transmission'));
+    const mine = supervisor.data.filter((n) => n.type === 'serviceDue' && n.params.fleetNumber === bus.fleetNumber);
+    assert.ok(!mine.some((n) => ['brakePads', 'battery', 'transmission'].includes(n.params.service)), 'brake pads and the battery are never announced');
 
-    const report = (await api('GET', '/reports/weekly', { token: users.supervisor.token })).body.data;
-    assert.equal(report.due.brakePads.find((row) => row.fleetNumber === bus.fleetNumber).left, 500);
+    const status = (await api('GET', `/buses/${bus._id}`, { token: users.supervisor.token })).body.data.intervalStatus;
+    for (const service of ['oil', 'tyre']) {
+      const { left, state } = status[service];
+      const margin = service === 'oil' ? 1000 : 5000;
+      assert.equal(state, left === 0 ? 'overdue' : left <= margin ? 'soon' : 'ok', `${service} with ${left} km left`);
+      assert.equal(mine.some((n) => n.params.service === service), state !== 'ok');
+    }
+    assert.equal(status.brakePads.state, undefined);
+    assert.equal(status.battery.state, undefined);
   });
 
-  test('supervisors hear about tyres, batteries and oil due, and vendors hear nothing', async () => {
+  test('directors hear about tyres, batteries and oil due, and vendors hear nothing', async () => {
     const vendor = await newVendor('due');
     const bus = await createBus(users, 'DUEN', vendor.id, { rates: undefined });
     const { today } = (await api('GET', '/sheets/readings', { token: users.creator.token })).body.data;
@@ -232,14 +236,14 @@ describe('notifications', () => {
     assert.equal(vendorInbox.data.length, 0);
   });
 
-  test('supervisors get a weekly report notice, once a week', async () => {
+  test('directors get a weekly report notice, once a week', async () => {
     const supervisor = await inbox(users.supervisor.token);
     const notices = supervisor.data.filter((n) => n.type === 'weeklyReport');
     assert.equal(notices.length, 1);
     assert.equal(notices[0].link, '/reports/weekly');
   });
 
-  test('a short or missing LPO tells purchasing and the supervisor', async () => {
+  test('a short or missing LPO tells purchasing and the director', async () => {
     const vendor = await newVendor('short');
     const bus = await createBus(users, 'LPOS', vendor.id, { rates: undefined });
     const ticket = await toForwarded(users, await repair(bus._id), vendor);

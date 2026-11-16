@@ -9,4 +9,10 @@ export const nextVsrNumber = async () => {
   return `VSR-${String(seq).padStart(4, '0')}`;
 };
 
+/** The next scrap request number (owner, 2026-11-16): SCR-0001, SCR-0002 and so on. */
+export const nextScrapNumber = async () => {
+  const { seq } = await Counter.findByIdAndUpdate('scrap', { $inc: { seq: 1 } }, { new: true, upsert: true });
+  return `SCR-${String(seq).padStart(4, '0')}`;
+};
+
 export default Counter;

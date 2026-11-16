@@ -179,9 +179,9 @@ describe('Muraqaba API', () => {
     });
 
     test('transitions enforce order and role', async () => {
-      const early = await api('PUT', `/tickets/${ctx.ticket._id}/acknowledge`, { token: users.vendor1.token });
-      assert.equal(early.status, 409);
-      assert.equal(early.body.code, 'INVALID_STATE');
+      const early = await api('GET', `/tickets/${ctx.ticket._id}`, { token: users.vendor1.token });
+      assert.equal(early.status, 200);
+      assert.equal(early.body.data.status, 'sentToVendor', 'opening a VSR that is not approved yet moves nothing');
 
       const creatorApprove = await api('PUT', `/tickets/${ctx.ticket._id}/approve`, { token: users.creator.token });
       assert.equal(creatorApprove.status, 403);
@@ -224,12 +224,16 @@ describe('Muraqaba API', () => {
       const twice = await api('PUT', `/tickets/${ctx.ticket._id}/approve`, { token: users.supervisor.token });
       assert.equal(twice.status, 409);
 
-      const wrongVendor = await api('PUT', `/tickets/${ctx.ticket._id}/acknowledge`, { token: users.vendor2.token });
-      assert.equal(wrongVendor.status, 403);
+      const wrongVendor = await api('GET', `/tickets/${ctx.ticket._id}`, { token: users.vendor2.token });
+      assert.equal(wrongVendor.status, 404);
+      const depot = await api('GET', `/tickets/${ctx.ticket._id}`, { token: users.creator.token });
+      assert.equal(depot.body.data.status, 'approved', 'only the vendor opening it counts as read');
 
-      const ack = await api('PUT', `/tickets/${ctx.ticket._id}/acknowledge`, { token: users.vendor1.token });
+      const ack = await api('GET', `/tickets/${ctx.ticket._id}`, { token: users.vendor1.token });
       assert.equal(ack.status, 200);
-      assert.equal(ack.body.data.status, 'acknowledged');
+      assert.equal(ack.body.data.status, 'acknowledged', 'the vendor opening the approved VSR is the acknowledgement');
+      assert.ok(ack.body.data.acknowledgedAt, 'with the time they read it');
+      assert.equal(ack.body.data.acknowledgedBy._id, users.vendor1.id);
     });
 
     test('invoice submit, reject, resubmit, accept', async () => {
@@ -386,7 +390,7 @@ describe('Muraqaba API', () => {
       assert.equal(approved.body.data.status, 'approved');
     });
 
-    test('daily km sheet: creators fill it, supervisors read it, nobody else sees it', async () => {
+    test('daily km sheet: creators fill it, directors read it, nobody else sees it', async () => {
       const bus = await newBus('KM', users.vendor1.id);
       const sheet = (token, query = '') => api('GET', `/sheets/readings${query}`, { token });
       assert.equal((await sheet(users.vendor1.token)).status, 403);
@@ -500,7 +504,7 @@ describe('Muraqaba API', () => {
       assert.equal(await stage(), 'waitingApproval');
       await api('PUT', `/tickets/${id}/approve`, { token: users.supervisor.token });
       assert.equal(await stage(), 'estimateApproved');
-      await api('PUT', `/tickets/${id}/acknowledge`, { token: users.vendor1.token });
+      await api('GET', `/tickets/${id}`, { token: users.vendor1.token });
       assert.equal(await stage(), 'estimateApproved');
       await api('PUT', `/tickets/${id}/vehicle/sent`, { token: users.creator.token });
       assert.equal(await stage(), 'goneForRepair');
@@ -554,7 +558,7 @@ describe('Muraqaba API', () => {
       assert.equal((await estimate(ticket._id, users.creator.token, { note: 'See this' }, '/reply', [tooBig])).status, 400);
     });
 
-    test('a supervisor returns an escalated ticket with a reason and the creator takes it back', async () => {
+    test('a director returns an escalated ticket with a reason and the creator takes it back', async () => {
       const ticket = await toApproval(await newTicket(ctx.bus1._id), users.vendor1);
       const path = `/tickets/${ticket._id}`;
       const send = (token, reason) => api('PUT', `${path}/return`, { token, body: { reason } });
@@ -680,7 +684,7 @@ describe('Muraqaba API', () => {
       const bus = await newBus('RACE', users.vendor2.id);
       const ticket = await toApproval(await newTicket(bus._id), users.vendor2);
       await api('PUT', `/tickets/${ticket._id}/approve`, { token: users.supervisor.token });
-      await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor2.token });
+      await api('GET', `/tickets/${ticket._id}`, { token: users.vendor2.token });
       await fromAcknowledgedToReturned(users, ticket._id, users.vendor2);
 
       const attempts = await Promise.all([1, 2, 3].map((n) => submitInvoice(ticket._id, users.vendor2, { amount: String(100 * n), description: `Invoice attempt ${n}` })));

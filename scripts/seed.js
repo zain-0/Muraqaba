@@ -283,7 +283,7 @@ async function main() {
       }
       ticket.breakdown = breakdownFor(bus, estimate, parts);
       sign(creator, 'escalated');
-      step('pending', creator, 'Sent to the supervisor for approval');
+      step('pending', creator, 'Sent to the director for approval');
     }
     if (stage === 'returned') {
       ticket.returnReason = 'The reading looks low for this bus. Please check the odometer and send it again.';

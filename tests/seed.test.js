@@ -84,7 +84,7 @@ describe('demo data', () => {
         else if (ticket.lpoDeduction.status === 'deducted') assert.equal(String(ticket.lpoDeduction.item), String(ticket.lpoLine?.item), `${ticket.vsrNumber} came off the line it was raised against`);
       }
       assert.ok(all.some((t) => t.lpoLine && !t.lpoDeduction && !['completed', 'declined'].includes(t.status)), 'a VSR booked but not yet on a GRN');
-      assert.ok(all.some((t) => t.serviceType === 'tyre' && t.agreedPrice?.basis === 'lpo' && t.history[0].status === 'pending'), 'tyres off a line went straight to the supervisor');
+      assert.ok(all.some((t) => t.serviceType === 'tyre' && t.agreedPrice?.basis === 'lpo' && t.history[0].status === 'pending'), 'tyres off a line went straight to the director');
       const balances = allLpos.flatMap((lpo) => lpo.items.map((item) => balanceOf(item, all)));
       assert.ok(balances.some((balance) => balance.available.quantity === 1), 'one line nearly used up, so a VSR for two is refused');
 
@@ -92,7 +92,7 @@ describe('demo data', () => {
       const requests = await connection.collection('scraprequests').find().toArray();
       const open = async (busId) => tickets.countDocuments({ busId, status: { $nin: ['completed', 'declined'] } });
       const pending = requests.filter((r) => r.status === 'pending');
-      assert.equal(pending.length, 1, 'one scrap request for the supervisor');
+      assert.equal(pending.length, 1, 'one scrap request for the director');
       const waitingBus = fleet.find((bus) => String(bus._id) === String(pending[0].bus));
       assert.equal(waitingBus.lifecycle, 'scrapRequested');
       assert.equal(await open(waitingBus._id), 0);
@@ -109,7 +109,7 @@ describe('demo data', () => {
       assert.equal(await connection.collection('busstatuschanges').countDocuments({ status: { $in: ['scrapping', 'removed'] }, source: { $ne: 'scrap' } }), 0, 'never set by hand');
       assert.ok(fleet.filter((bus) => !['sold', 'scrapRequested'].includes(bus.lifecycle)).every((bus) => bus.lifecycle === 'inOperation'));
       const supervisor = await connection.collection('users').findOne({ role: 'supervisor' });
-      assert.ok(await connection.collection('notifications').findOne({ user: supervisor._id, type: 'scrapRequested' }), 'the supervisor has been told');
+      assert.ok(await connection.collection('notifications').findOne({ user: supervisor._id, type: 'scrapRequested' }), 'the director has been told');
 
       const completed = await tickets.findOne({ status: 'completed' });
       assert.ok(completed.grn && completed.purchaseInvoice && completed.signatures.some((s) => s.step === 'purchaseInvoice'));

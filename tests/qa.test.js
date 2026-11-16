@@ -170,7 +170,7 @@ describe('browser testing findings', () => {
       assert.ok(row.some((value) => value instanceof Date), 'the invoice date is an Excel date');
     });
 
-    test('a vendor never reads what the creator wrote to the supervisor', async () => {
+    test('a vendor never reads what the creator wrote to the director', async () => {
       const ticket = await raise();
       await estimate(ticket._id, users.vendor1.token, { amount: '100' });
       await api('PUT', `/tickets/${ticket._id}/breakdown`, { token: users.creator.token, body: { consumables: 100 } });

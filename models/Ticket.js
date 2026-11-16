@@ -49,8 +49,8 @@ export const TICKET_STATUSES = [
   'estimateCountered', // creator replied; waiting for the vendor's updated estimate
   'pending', // creator escalated the estimate, waiting for supervisor approval
   'returned', // supervisor sent it back with a reason; the creator corrects, replies or escalates again
-  'approved', // supervisor approved, waiting for the vendor to acknowledge
-  'acknowledged', // vendor accepted the job; the creator sends the bus
+  'approved', // supervisor approved (or an agreed price), waiting for the vendor to open it
+  'acknowledged', // the vendor opened the approved VSR (a button until 2026-11-16); the creator sends the bus
   'vehicleSent', // the creator sent the bus; the vendor confirms it arrived
   'vehicleReceived', // the bus is at the vendor
   'workInProgress',

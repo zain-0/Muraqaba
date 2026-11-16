@@ -40,6 +40,9 @@ export const daysBetween = (from, to) => Math.round((Date.parse(to) - Date.parse
 /** Every day of a year as 'YYYY-MM-DD'. */
 export const daysOfYear = (year) => Array.from({ length: 12 }, (_, i) => daysInMonth(`${year}-${String(i + 1).padStart(2, '0')}`)).flat();
 
+/** Every day from one 'YYYY-MM-DD' day to another, both included. */
+export const daysInRange = (from, to) => Array.from({ length: daysBetween(from, to) + 1 }, (_, i) => new Date(Date.parse(from) + i * DAY_MS).toISOString().slice(0, 10));
+
 /**
  * UAE days the bus spent away on this VSR: from sent (or, at the depot, from the day work started)
  * to back. Null for an additional job, which rides in its parent's trip, and for a bus not back yet.

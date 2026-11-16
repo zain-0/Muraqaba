@@ -32,7 +32,7 @@ describe('who changed the accident details', () => {
 
     ok(await api('PUT', `/tickets/${raised._id}/accident`, { token: users.supervisor.token, body: { severity: 'major', fault: 'otherParty' } }));
     const changed = await read();
-    assert.equal(changed.accident.updatedBy?.name, 'Test Supervisor');
+    assert.equal(changed.accident.updatedBy?.name, 'Test Director');
     assert.equal(changed.accident.updatedBy?.password, undefined, 'only the name, email and role come with it');
   });
 

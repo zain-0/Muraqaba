@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { AttachmentSchema } from './shared.js';
+import { nextScrapNumber } from './Counter.js';
 
 const { ObjectId } = mongoose.Schema.Types;
 
@@ -11,6 +12,8 @@ export const SCRAP_REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'cance
 /** A service creator asks the supervisor to scrap a bus. Only one can wait per bus: the bus's lifecycle holds it. */
 const ScrapRequestSchema = new mongoose.Schema(
   {
+    // SCR-0001: what people call the request by (2026-11-16). Requests from before were numbered by scripts/migrate-scrap-numbers.js.
+    number: { type: String, unique: true, sparse: true },
     bus: { type: ObjectId, ref: 'Bus', required: true, index: true },
     reason: { type: String, enum: SCRAP_REASONS, required: true },
     note: { type: String, trim: true, maxlength: 1000 },
@@ -25,6 +28,10 @@ const ScrapRequestSchema = new mongoose.Schema(
   // Approve, turn down and cancel at the same moment cannot all win; the second gets a 409.
   { timestamps: true, optimisticConcurrency: true }
 );
+
+ScrapRequestSchema.pre('validate', async function numberIt() {
+  if (this.isNew && !this.number) this.number = await nextScrapNumber();
+});
 
 const ScrapRequest = mongoose.model('ScrapRequest', ScrapRequestSchema);
 export default ScrapRequest;

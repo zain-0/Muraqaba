@@ -45,7 +45,7 @@ describe('importing daily km readings from Excel', () => {
 
   test('only the service creator imports, and only one .xlsx file', async () => {
     const file = await workbook({ Km: [['Bus', excelDate(d(-1))]] });
-    assert.equal((await preview(file, {}, users.supervisor.token)).status, 403, 'the supervisor only reads the sheets');
+    assert.equal((await preview(file, {}, users.supervisor.token)).status, 403, 'the director only reads the sheets');
     assert.equal((await preview(file, {}, users.vendor1.token)).status, 403);
 
     const none = await preview(null);

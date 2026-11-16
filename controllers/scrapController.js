@@ -17,9 +17,9 @@ import { BUS_POPULATE, SCRAP_REQUEST_POPULATE, paginate } from '../utils/query.j
 import { uaeDay } from '../utils/uaeTime.js';
 import { sendStored, withStoredAttachments } from '../utils/uploads.js';
 
-const WAITING = 'A scrap request for this bus is waiting for the supervisor.';
+const WAITING = 'A scrap request for this bus is waiting for the director.';
 const SOLD = 'A sold bus is archived and cannot be changed.';
-const NOT_PENDING = 'This scrap request is no longer waiting for the supervisor.';
+const NOT_PENDING = 'This scrap request is no longer waiting for the director.';
 // Buses added before lifecycles existed have none stored, and are in operation.
 const IN_OPERATION = mongoose.trusted({ $in: ['inOperation', null] });
 
@@ -90,7 +90,7 @@ export const createScrapRequest = asyncHandler(async (req, res) => {
     throw err;
   }
   await quietly(notifyRoles(['supervisor'], { type: 'scrapRequested', params: { fleetNumber: bus.fleetNumber, reason }, link: busLink(bus._id), dedupeKey: `scrap:${request._id}:requested` }));
-  await respond(res, request, 'Scrap request sent to the supervisor', 201);
+  await respond(res, request, `Scrap request ${request.number} sent to the director`, 201);
 });
 
 // PUT /api/scrap-requests/:id/approve  (supervisor; optional note)

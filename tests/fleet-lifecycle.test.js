@@ -61,7 +61,7 @@ before(async () => {
 after(() => mongoose.connection.close());
 
 describe('scrap requests', () => {
-  test('raising one: the bus must be in operation with no open VSR, and every supervisor hears of it', async () => {
+  test('raising one: the bus must be in operation with no open VSR, and every director hears of it', async () => {
     const busy = await bus('BUSY');
     const vsr = ok(await raiseVsr(busy._id));
     const refused = await requestScrap(users, busy._id);
@@ -82,7 +82,8 @@ describe('scrap requests', () => {
     const decideBefore = ok(await api('GET', '/users/dashboard', { token: users.supervisor.token }));
     const sent = await requestScrap(users, free._id, { reason: 'highRunningCost', note: 'Costs more than it earns.' }, [fileOf('costs.pdf', '%PDF-1.4 costs')]);
     assert.equal(sent.status, 201, JSON.stringify(sent.body));
-    assert.equal(sent.body.message, 'Scrap request sent to the supervisor');
+    assert.match(sent.body.data.number, /^SCR-\d{4}$/, 'a scrap request has its own number');
+    assert.equal(sent.body.message, `Scrap request ${sent.body.data.number} sent to the director`);
     const request = sent.body.data;
     assert.deepEqual([request.status, request.reason, request.note, request.attachments.length], ['pending', 'highRunningCost', 'Costs more than it earns.', 1]);
     assert.deepEqual([request.bus.fleetNumber, request.bus.lifecycle, request.bus.make, request.bus.year], [free.fleetNumber, 'scrapRequested', 'Hino', 2020]);
@@ -102,10 +103,10 @@ describe('scrap requests', () => {
 
     // While it waits: no second request and no VSR.
     const again = await requestScrap(users, free._id);
-    assert.deepEqual([again.status, again.body.message], [409, 'A scrap request for this bus is waiting for the supervisor.']);
+    assert.deepEqual([again.status, again.body.message], [409, 'A scrap request for this bus is waiting for the director.']);
     const vsrRefused = await raiseVsr(free._id);
-    assert.deepEqual([vsrRefused.status, vsrRefused.body.code, vsrRefused.body.message], [409, 'INVALID_STATE', 'A scrap request for this bus is waiting for the supervisor.']);
-    assert.equal((await raiseVsr(free._id, users.supervisor.token)).status, 409, 'nor by the supervisor');
+    assert.deepEqual([vsrRefused.status, vsrRefused.body.code, vsrRefused.body.message], [409, 'INVALID_STATE', 'A scrap request for this bus is waiting for the director.']);
+    assert.equal((await raiseVsr(free._id, users.supervisor.token)).status, 409, 'nor by the director');
 
     // The depot reads it and its file; vendors get nothing.
     for (const token of [users.creator.token, users.supervisor.token, users.purchasing.token]) {
@@ -139,7 +140,7 @@ describe('scrap requests', () => {
     for (const action of ['cancel', 'approve', 'reject']) {
       const token = action === 'cancel' ? users.creator.token : users.supervisor.token;
       const late = await put(`/scrap-requests/${request._id}/${action}`, token, { note: 'Too late' });
-      assert.deepEqual([late.status, late.body.code, late.body.message], [409, 'INVALID_STATE', 'This scrap request is no longer waiting for the supervisor.'], action);
+      assert.deepEqual([late.status, late.body.code, late.body.message], [409, 'INVALID_STATE', 'This scrap request is no longer waiting for the director.'], action);
     }
     assert.equal((await raiseVsr(own._id)).status, 201, 'work can be raised again');
   });
@@ -148,7 +149,7 @@ describe('scrap requests', () => {
     const own = await bus('REJECT');
     const request = (await requestScrap(users, own._id, { reason: 'totalLoss' })).body.data;
     assert.deepEqual((await put(`/scrap-requests/${request._id}/reject`, users.supervisor.token, {})).body.errors[0], { field: 'note', message: 'Enter why the scrap request is turned down' });
-    assert.equal((await put(`/scrap-requests/${request._id}/reject`, users.creator.token, { note: 'No' })).status, 403, 'the supervisor decides');
+    assert.equal((await put(`/scrap-requests/${request._id}/reject`, users.creator.token, { note: 'No' })).status, 403, 'the director decides');
 
     const rejected = await put(`/scrap-requests/${request._id}/reject`, users.supervisor.token, { note: 'The body shop can repair it.' });
     assert.equal(rejected.status, 200, JSON.stringify(rejected.body));
@@ -212,7 +213,7 @@ describe('scrap requests', () => {
 });
 
 describe('recording the sale', () => {
-  test('the supervisor records date, buyer and price for a scrapped bus, which is then archived', async () => {
+  test('the director records date, buyer and price for a scrapped bus, which is then archived', async () => {
     const own = await bus('SALE');
     const request = await scrapBus(users, own._id);
     const scrappedOn = daysAgo(10);
@@ -273,7 +274,7 @@ describe('recording the sale', () => {
     const valid = { date: uaeDay(), buyer: 'Someone', price: '100' };
     assert.deepEqual([(await sale(own._id, valid)).status, (await sale(own._id, valid)).body.message], [409, 'Only a scrapped bus can be sold.']);
     await requestScrap(users, own._id);
-    assert.deepEqual((await sale(own._id, valid)).body.message, 'Only a scrapped bus can be sold.', 'nor one waiting for the supervisor');
+    assert.deepEqual((await sale(own._id, valid)).body.message, 'Only a scrapped bus can be sold.', 'nor one waiting for the director');
     assert.equal((await sale('64b7f0c2e1d2a9b1c8a4f123', valid)).status, 404);
   });
 
@@ -403,7 +404,7 @@ describe('migration of a database from before', () => {
       const straight = await bus('straight');
       assert.deepEqual([straight.lifecycle, straight.scrappedOn, straight.sale.date], ['sold', '2026-01-02', '2026-01-02']);
       assert.deepEqual([(await bus('back')).lifecycle, (await bus('none')).lifecycle], ['inOperation', 'inOperation']);
-      assert.equal((await bus('waiting')).lifecycle, 'scrapRequested', 'a request waiting for the supervisor is left to them');
+      assert.equal((await bus('waiting')).lifecycle, 'scrapRequested', 'a request waiting for the director is left to them');
       assert.deepEqual((await bus('sale')).sale.buyer, 'Kept Buyer', 'a sale recorded in the app is kept');
 
       const lpoNow = async (key) => db('lpos').findOne({ _id: lpos[key]._id });

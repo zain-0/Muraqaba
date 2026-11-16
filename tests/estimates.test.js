@@ -72,16 +72,15 @@ describe('VSR numbers and estimates', () => {
     assert.equal(second.body.data.daysToComplete, 6, 'the latest estimate is the promise that counts');
   });
 
-  test('an agreed-price VSR gets its days when the vendor acknowledges', async () => {
+  test('an agreed-price VSR is read by the vendor opening it, with no days asked for', async () => {
     const ticket = await raised({ serviceType: 'oil', repairCategory: undefined, currentReading: 9000 });
     assert.equal(ticket.status, 'approved', 'an agreed price goes to the vendor to acknowledge');
 
-    const none = await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor1.token });
-    assert.equal(none.status, 400);
-    assert.equal(none.body.errors[0].field, 'daysToComplete');
-    const ok = await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor1.token, body: { daysToComplete: 2 } });
+    const ok = await api('GET', `/tickets/${ticket._id}`, { token: users.vendor1.token });
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
-    assert.equal(ok.body.data.daysToComplete, 2);
+    assert.equal(ok.body.data.status, 'acknowledged');
+    assert.equal(ok.body.data.daysToComplete, undefined);
+    assert.equal((await api('PUT', `/tickets/${ticket._id}/acknowledge`, { token: users.vendor1.token })).status, 404, 'there is no acknowledge step any more');
   });
 
   test('the breakdown flag is for the depot only', async () => {
@@ -122,7 +121,7 @@ describe('parts, labour and the check against the estimate', () => {
     assert.equal(breakdown.remarks, 'Pump seized, gasket worn.');
   });
 
-  test('it has to be filled in before going to the supervisor, and vendors never see it', async () => {
+  test('it has to be filled in before going to the director, and vendors never see it', async () => {
     const ticket = await raised();
     await estimate(ticket._id, users.vendor1.token, FULL_ESTIMATE);
     const early = await api('PUT', `/tickets/${ticket._id}/escalate`, { token: users.creator.token });
