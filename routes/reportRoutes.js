@@ -2,6 +2,7 @@ import express from 'express';
 import {
   accidentsReport,
   availabilityReport,
+  busStatsReport,
   categoriesReport,
   costsReport,
   downtimeReport,
@@ -28,6 +29,8 @@ reportRoutes.use(authMiddleware);
 reportRoutes.get('/query', PURCHASING, validateRange, validateReportQuery, runQuery);
 reportRoutes.get('/fleet', roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), validateRange, validateFleetFigures, fleetFigures);
 reportRoutes.get('/weekly', roleMiddleware(['supervisor', 'purchaseManager']), weeklyReport);
+// The director's statistical report (2026-11-16); purchasing reads it too, as it does the weekly one.
+reportRoutes.get('/bus-stats', roleMiddleware(['supervisor', 'purchaseManager']), validateYearBrand, busStatsReport);
 reportRoutes.get('/availability', PURCHASING, validateYearMonth, availabilityReport);
 reportRoutes.get('/downtime', PURCHASING, validateYearMonthBrand, downtimeReport);
 reportRoutes.get('/costs', PURCHASING, validateCosts, costsReport);

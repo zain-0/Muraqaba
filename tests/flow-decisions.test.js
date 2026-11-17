@@ -47,7 +47,7 @@ const noChargeAcknowledged = async (reason, overrides = {}, onBus = bus) => {
 
 /** At the vendor's workshop with work under way, received on 5 October at 5050 km. */
 const atTheWorkshop = async (ticket) => {
-  await put(ticket._id, 'vehicle/sent', users.creator.token, { date: '2026-10-04' });
+  await put(ticket._id, 'vehicle/sent', users.creator.token, { km: 5050, date: '2026-10-04' });
   ok(await put(ticket._id, 'vehicle/received', users.vendor1.token, { km: 5050, date: '2026-10-05' }));
   return ok(await put(ticket._id, 'work/start', users.vendor1.token, { date: '2026-10-06' }));
 };
@@ -180,7 +180,7 @@ describe('client decisions of 2026-11-06', () => {
       const ticket = await toAcknowledged(users, await raise({ serviceType: 'tyre', repairCategory: undefined, location: 'depot' }, own), users.vendor1);
       const id = ticket._id;
 
-      const sent = await put(id, 'vehicle/sent', users.creator.token);
+      const sent = await put(id, 'vehicle/sent', users.creator.token, { km: 5050 });
       assert.equal(sent.status, 409);
       assert.equal(sent.body.message, 'This job is done at the depot, so the bus is not sent.');
 
@@ -236,9 +236,20 @@ describe('client decisions of 2026-11-06', () => {
       await fillBreakdown(users, other._id, 500);
       ok(await put(other._id, 'escalate', users.creator.token));
       ok(await put(other._id, 'approve', users.supervisor.token));
-      assert.equal((await put(other._id, 'vehicle/sent', users.creator.token)).status, 409, 'the bus waits until the vendor has opened the VSR');
-      assert.equal((await api('GET', `/tickets/${other._id}`, { token: users.vendor1.token })).body.data.status, 'acknowledged');
-      assert.equal((await put(other._id, 'vehicle/sent', users.creator.token)).status, 200);
+      // The bus no longer waits for the vendor to open the VSR (owner, 2026-11-16); the reading is asked for.
+      assert.equal((await put(other._id, 'vehicle/sent', users.creator.token)).status, 400, 'the reading as the bus leaves');
+      const sent = await put(other._id, 'vehicle/sent', users.creator.token, { km: 5050 });
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      assert.equal(sent.body.data.vehicle.sentKm, 5050);
+      assert.equal(sent.body.data.acknowledgedAt, undefined, 'not read yet');
+      assert.equal((await api('GET', `/tickets/${other._id}`, { token: users.creator.token })).body.data.acknowledgedAt, undefined, 'staff opening it is not the vendor reading it');
+      const opened = (await api('GET', `/tickets/${other._id}`, { token: users.vendor1.token })).body.data;
+      assert.equal(opened.status, 'vehicleSent', 'a late read does not move the VSR');
+      assert.ok(opened.acknowledgedAt, 'the read time is still kept');
+      const again = (await api('GET', `/tickets/${other._id}`, { token: users.vendor1.token })).body.data;
+      assert.equal(again.acknowledgedAt, opened.acknowledgedAt, 'only the first read counts');
+      assert.equal((await put(other._id, 'vehicle/received', users.vendor1.token, { km: 5040 })).status, 400, 'not below the reading it left with');
+      assert.equal((await put(other._id, 'vehicle/received', users.vendor1.token, { km: 5060 })).status, 200);
     });
 
     test('an additional job waits as it would for a release, then moves with its parent', async () => {

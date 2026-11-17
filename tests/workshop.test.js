@@ -25,9 +25,9 @@ describe('vehicle flow', () => {
   test('each step belongs to one role, in one order, and moves the status on', async () => {
     const { _id: id } = await toAcknowledged(users, await raiseRepair(), users.vendor1);
 
-    assert.equal((await put(id, 'vehicle/sent', users.vendor1.token)).status, 403);
+    assert.equal((await put(id, 'vehicle/sent', users.vendor1.token, { km: 5100 })).status, 403);
     assert.equal((await put(id, 'vehicle/received', users.vendor1.token, { km: 5100 })).status, 409, 'not sent yet');
-    const sent = await put(id, 'vehicle/sent', users.creator.token);
+    const sent = await put(id, 'vehicle/sent', users.creator.token, { km: 5100 });
     assert.equal(sent.status, 200, JSON.stringify(sent.body));
     assert.equal(sent.body.data.status, 'vehicleSent');
     assert.ok(sent.body.data.vehicle.sentAt, 'the date defaults to now');
@@ -65,12 +65,12 @@ describe('vehicle flow', () => {
 
   test('a date can be overridden, but never into the future', async () => {
     const { _id: id } = await toAcknowledged(users, await raiseRepair(), users.vendor1);
-    const future = await put(id, 'vehicle/sent', users.creator.token, { date: '2099-01-01' });
+    const future = await put(id, 'vehicle/sent', users.creator.token, { km: 5100, date: '2099-01-01' });
     assert.equal(future.status, 400);
     assert.equal(future.body.errors[0].field, 'date');
-    assert.equal((await put(id, 'vehicle/sent', users.creator.token, { date: 'yesterday' })).status, 400);
+    assert.equal((await put(id, 'vehicle/sent', users.creator.token, { km: 5100, date: 'yesterday' })).status, 400);
 
-    const sent = await put(id, 'vehicle/sent', users.creator.token, { date: '2026-10-01' });
+    const sent = await put(id, 'vehicle/sent', users.creator.token, { km: 5100, date: '2026-10-01' });
     assert.equal(sent.status, 200, JSON.stringify(sent.body));
     assert.equal(sent.body.data.vehicle.sentAt.slice(0, 10), '2026-10-01');
     const entry = sent.body.data.history.at(-1);

@@ -39,12 +39,12 @@ const countByStatus = async (filter) => {
 };
 
 /**
- * At the depot the bus makes no trip: after acknowledging, the vendor starts the work, and once
- * it is ready the creator confirms it is done. These counts move those two steps to the right person.
+ * At the depot the bus makes no trip: once the VSR is approved the vendor starts the work, and once
+ * it is ready the creator confirms it is done. These counts move those steps to the right person.
  */
 const depotTurns = async (filter) => {
   const counts = await countByStatus({ ...filter, location: 'depot' });
-  return { acknowledged: counts.acknowledged, readyForDelivery: counts.readyForDelivery };
+  return { approved: counts.approved, acknowledged: counts.acknowledged, readyForDelivery: counts.readyForDelivery };
 };
 
 const busesNeedingService = async (filter) => {
@@ -71,7 +71,7 @@ const serviceCreatorDashboard = async (user) => {
     myTickets: mine,
     fleet: { buses, busesNeedingService: busesDue },
     // Things only this role can move forward.
-    actionRequired: all.estimateSubmitted + all.returned + (all.acknowledged - depot.acknowledged) + all.vehicleReleased + depot.readyForDelivery + all.invoiceAccepted + all.invoiceReceived + busesDue,
+    actionRequired: all.estimateSubmitted + all.returned + (all.approved - depot.approved) + (all.acknowledged - depot.acknowledged) + all.vehicleReleased + depot.readyForDelivery + all.invoiceAccepted + all.invoiceReceived + busesDue,
   };
 };
 

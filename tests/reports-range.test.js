@@ -299,3 +299,49 @@ function assertCostsAddUp(data) {
   data.months.forEach((month, i) => assert.equal(data.totals.spend[i], add(data.rows.map((row) => row.spend[i])), month));
   assert.equal(data.totals.totalSpend, add(data.totals.spend));
 }
+
+describe('the statistical report: each bus by kind of work, with its km and cost per km', () => {
+  const stats = (params) => report(users.supervisor.token, 'bus-stats', params);
+  const rowOf = (data, which) => data.rows.find((row) => row.busId === id(which));
+
+  test('the director and purchasing read it; the service creator and vendors do not', async () => {
+    for (const [who, status] of [['supervisor', 200], ['purchasing', 200], ['creator', 403], ['vendor1', 403]]) {
+      assert.equal((await api('GET', '/reports/bus-stats?year=2020', { token: users[who].token })).status, status, who);
+    }
+  });
+
+  test('a year: every bus on the fleet, its costs under their kinds, the year\'s km', async () => {
+    const data = await stats({ year: 2020 });
+    assert.deepEqual(data.groups, ['repair', 'maintenance', 'tyre', 'battery', 'accident', 'other']);
+    const r1 = rowOf(data, bus.r1);
+    assert.deepEqual(r1.costs, { repair: 0, maintenance: 0, tyre: 300.1, battery: 0, accident: 1000, other: 0 });
+    assert.deepEqual([r1.totalCost, r1.vsrs, r1.accidents, r1.km, r1.costPerKm, r1.make], [1300.1, 3, 1, 3000, 0.4334, 'Hino']);
+    const r2 = rowOf(data, bus.r2);
+    assert.deepEqual([r2.costs.maintenance, r2.totalCost, r2.committed, r2.vsrs, r2.trips, r2.workshopDays, r2.km, r2.costPerKm], [50, 50, 80, 2, 1, 2, null, null]);
+    // The same accepted invoices and km as Cost per bus.
+    const costs = await get('costs', { year: 2020 });
+    for (const which of [bus.r1, bus.r2]) {
+      const cost = costs.rows.find((row) => row.busId === id(which));
+      assert.deepEqual([rowOf(data, which).totalCost, rowOf(data, which).km], [cost.totalSpend, cost.km]);
+    }
+    const fils = (aed) => Math.round(aed * 100);
+    assert.equal(fils(data.totals.totalCost), data.rows.reduce((total, row) => total + fils(row.totalCost), 0), 'the total is the sum of its rows');
+    assert.equal(data.totals.vsrs, data.rows.reduce((total, row) => total + row.vsrs, 0));
+  });
+
+  test('custom dates: the VSRs raised between them, and the km run between them', async () => {
+    const data = await stats(NEW_YEAR);
+    const r1 = rowOf(data, bus.r1);
+    assert.deepEqual([r1.costs.repair, r1.costs.tyre, r1.totalCost, r1.vsrs, r1.km, r1.costPerKm], [200, 300.1, 500.1, 2, 2500, 0.2]);
+    assert.deepEqual([data.from, data.to, data.year], [NEW_YEAR.from, NEW_YEAR.to, null]);
+    assert.equal(rowOf(data, bus.r2).totalCost, 50);
+  });
+
+  test('one brand leaves the others out, and a bus with no VSR in the period still has its line', async () => {
+    const hino = await stats({ ...NEW_YEAR, brand: 'hino' });
+    assert.ok(rowOf(hino, bus.r1));
+    assert.equal(rowOf(hino, bus.r2), undefined);
+    const quiet = rowOf(await stats({ from: '2020-03-01', to: '2020-03-31' }), bus.r2);
+    assert.deepEqual([quiet.vsrs, quiet.totalCost, quiet.costPerKm], [0, 0, null]);
+  });
+});

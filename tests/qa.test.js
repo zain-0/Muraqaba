@@ -271,7 +271,7 @@ describe('browser testing findings', () => {
     test('pressing Release twice releases once and answers the second press plainly', async () => {
       const ticket = await toAcknowledged(users, await raise(), users.vendor1);
       const put = (path, token, body) => api('PUT', `/tickets/${ticket._id}/${path}`, { token, body });
-      await put('vehicle/sent', users.creator.token);
+      await put('vehicle/sent', users.creator.token, { km: 5000 });
       await put('vehicle/received', users.vendor1.token, { km: 5000 });
       await put('work/start', users.vendor1.token);
       await put('work/ready', users.vendor1.token);
@@ -284,7 +284,7 @@ describe('browser testing findings', () => {
     test('a parent waiting on several jobs names all of them', async () => {
       const ticket = await toAcknowledged(users, await raise(), users.vendor1);
       const put = (path, token, body) => api('PUT', `/tickets/${ticket._id}/${path}`, { token, body });
-      await put('vehicle/sent', users.creator.token);
+      await put('vehicle/sent', users.creator.token, { km: 5000 });
       await put('vehicle/received', users.vendor1.token, { km: 5000 });
       const job = (n) => multipart(`/tickets/${ticket._id}/additional`, users.vendor1.token, { amount: '100', quotationNumber: `Q-${n}`, daysToComplete: '1', serviceType: 'other', description: 'Something else found' });
       const [b, c] = [(await job(1)).body.data, (await job(2)).body.data];

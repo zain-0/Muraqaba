@@ -311,7 +311,7 @@ describe('LPO items, reservations and balances', () => {
       const lpo = await makeLpo(vendor.id, [RM(1000)]);
       const parent = ok(await raise({ busId: bus._id, serviceType: 'repair', repairCategory: 'ENGINE', lpoItemId: lpo.items[0]._id, estimatedAmount: 900 }));
       await toAcknowledged(users, parent, vendor);
-      ok(await put(parent._id, 'vehicle/sent', users.creator.token));
+      ok(await put(parent._id, 'vehicle/sent', users.creator.token, { km: 1050 }));
       ok(await put(parent._id, 'vehicle/received', vendor.token, { km: 1050 }));
       const job = { description: 'Found a cracked exhaust while fixing the engine.', serviceType: 'repair', repairCategory: 'MECHANICAL', amount: '400', quotationNumber: 'Q-X', daysToComplete: '2' };
       const added = await multipart(`/tickets/${parent._id}/additional`, vendor.token, job);
@@ -415,7 +415,7 @@ describe('LPO items, reservations and balances', () => {
       // An additional job turned down by the supervisor counts for nothing.
       const parent = ok(await raise({ busId: bus._id, serviceType: 'repair', repairCategory: 'ENGINE', lpoItemId: lpo.items[0]._id, estimatedAmount: 500, currentReading: 2000 }));
       await toAcknowledged(users, parent, vendor);
-      ok(await put(parent._id, 'vehicle/sent', users.creator.token));
+      ok(await put(parent._id, 'vehicle/sent', users.creator.token, { km: 2050 }));
       ok(await put(parent._id, 'vehicle/received', vendor.token, { km: 2050 }));
       const job = ok(await multipart(`/tickets/${parent._id}/additional`, vendor.token, { description: 'Found worn mounts while on the lift.', serviceType: 'repair', repairCategory: 'MECHANICAL', amount: '400', quotationNumber: 'Q-D', daysToComplete: '2' }));
       assert.equal((await balanceOn(lpo)).booked.amount, 900 + 400);

@@ -25,12 +25,14 @@ stamp; with supervisorFirst: true it is raised into pending instead (2026-11-11)
 
 There is no acknowledge step since 2026-11-16: the vendor opening an approved VSR (GET /api/tickets/:id)
 moves it to acknowledged and keeps the time, which screens show as "Read by vendor". For a vendor outside
-the list the service creator opening it does the same. Screens call the supervisor role Director.
+the list the service creator opening it does the same. The read is optional: the bus can be sent from
+approved, and a vendor who first opens the VSR after that (up to the bus's return) has the time kept
+without the VSR moving. Screens call the supervisor role Director.
 
 Then, for both:
-pending ──approve (supervisor)──▶ approved ──the vendor opens it──▶ acknowledged
+pending ──approve (supervisor)──▶ approved ──the vendor opens it (optional)──▶ acknowledged
 pending ──return (supervisor, reason required)──▶ returned ──correct, reply or escalate (creator)
-acknowledged ──(creator)──▶ vehicleSent ──km (vendor)──▶ vehicleReceived ──▶ workInProgress ──▶ readyForDelivery ──▶ vehicleReleased
+approved or acknowledged ──km (creator)──▶ vehicleSent ──km (vendor)──▶ vehicleReceived ──▶ workInProgress ──▶ readyForDelivery ──▶ vehicleReleased
 vehicleReleased ──km, replaced parts (creator)──▶ vehicleReturned ──invoice with file (vendor)──▶ invoiceSubmitted
 invoiceSubmitted ──accept (supervisor)──▶ invoiceAccepted ──(creator)──▶ invoiceReceived ──(creator)──▶ forwardedToPurchase
 invoiceSubmitted ──reject (supervisor)──▶ invoiceRejected ──resubmit (vendor)──▶ invoiceSubmitted
@@ -178,9 +180,9 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | PUT | /api/tickets/:id/accident | creator, supervisor | Accidents only, any status: `severity` (minor, medium, major), `fault` (ourDriver, otherParty, unknown). Never shown to vendors |
 | GET | /api/tickets/:id/attachments/:attachmentId | anyone who can see the ticket | Download a document |
 | POST | /api/tickets/:id/additional | vendor (owner); creator for an outside vendor | Multipart: additional job with its first estimate |
-| PUT | /api/tickets/:id/vehicle/sent | creator, supervisor | acknowledged → vehicleSent |
+| PUT | /api/tickets/:id/vehicle/sent | creator, supervisor | approved or acknowledged → vehicleSent (`km`, kept as `vehicle.sentKm`) |
 | PUT | /api/tickets/:id/vehicle/received | vendor (owner); creator for an outside vendor | vehicleSent → vehicleReceived (`km`) |
-| PUT | /api/tickets/:id/work/start | vendor (owner); creator for an outside vendor | vehicleReceived → workInProgress. At the depot: acknowledged → workInProgress (`km`) |
+| PUT | /api/tickets/:id/work/start | vendor (owner); creator for an outside vendor | vehicleReceived → workInProgress. At the depot: approved or acknowledged → workInProgress (`km`) |
 | PUT | /api/tickets/:id/work/ready | vendor (owner); creator for an outside vendor | workInProgress → readyForDelivery |
 | PUT | /api/tickets/:id/vehicle/release | vendor (owner); creator for an outside vendor | readyForDelivery → vehicleReleased, with linked tickets |
 | PUT | /api/tickets/:id/vehicle/returned | creator, supervisor | vehicleReleased → vehicleReturned (`km`, `replacedPartsReceived`), with linked tickets. At the depot it confirms the work is done: readyForDelivery → vehicleReturned. A no-charge VSR (approved at AED 0 with a reason) then closes with no invoice |
@@ -201,6 +203,7 @@ All responses are JSON with `success`. Errors carry a stable `code` (`VALIDATION
 | GET | /api/reports/query | purchasing | `?brand=&type=&year=&vendorId=&busId=&isBreakdown=&groupBy=` |
 | GET | /api/reports/fleet | creator, supervisor, purchasing | Month figures, `?year=&brand=` |
 | GET | /api/reports/weekly | supervisor | Last seven days and what is due |
+| GET | /api/reports/bus-stats | supervisor, purchasing | The statistical report: each bus's accepted invoices by kind of work, VSRs, accidents, breakdowns, days at the workshop, km run and cost per km. `year`, or `from` and `to`; `brand` |
 | GET | /api/reports/lpo-balances | purchasing, supervisor, creator | `?vendorId=&kind=&inDate=true\|false`: each LPO line's value, booked, GRN, available and after-GRN figures with VSRs issued, per-LPO subtotals and a total |
 | GET | /api/notifications | any | Your own, with `unread`. Runs the alert checks at most every few minutes |
 | PUT | /api/notifications/:id/read, /api/notifications/read-all | any | Mark read |

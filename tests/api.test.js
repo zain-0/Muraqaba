@@ -506,7 +506,7 @@ describe('Muraqaba API', () => {
       assert.equal(await stage(), 'estimateApproved');
       await api('GET', `/tickets/${id}`, { token: users.vendor1.token });
       assert.equal(await stage(), 'estimateApproved');
-      await api('PUT', `/tickets/${id}/vehicle/sent`, { token: users.creator.token });
+      await api('PUT', `/tickets/${id}/vehicle/sent`, { token: users.creator.token, body: { km: 110 } });
       assert.equal(await stage(), 'goneForRepair');
       await api('PUT', `/tickets/${id}/vehicle/received`, { token: users.vendor1.token, body: { km: 110 } });
       await api('PUT', `/tickets/${id}/work/start`, { token: users.vendor1.token });

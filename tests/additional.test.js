@@ -17,7 +17,7 @@ const addJob = (parentId, fields = JOB, token = users.vendor1.token, files = [])
 const parentAtWork = async () => {
   const raised = await api('POST', '/tickets', { token: users.creator.token, body: { busId: bus._id, serviceType: 'repair', repairCategory: 'ENGINE', currentReading: 5000 } });
   const { _id: id } = await toAcknowledged(users, raised.body.data, users.vendor1);
-  await put(id, 'vehicle/sent', users.creator.token, { date: '2026-10-04' });
+  await put(id, 'vehicle/sent', users.creator.token, { km: 5050, date: '2026-10-04' });
   await put(id, 'vehicle/received', users.vendor1.token, { km: 5050, date: '2026-10-05' });
   return (await put(id, 'work/start', users.vendor1.token, { date: '2026-10-06' })).body.data;
 };

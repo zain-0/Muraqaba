@@ -22,7 +22,7 @@ const JOB = { description: 'Found a cracked exhaust while fixing the engine.', s
 /** A VSR with the bus at the vendor and a job approved on it. */
 const parentWithJob = async () => {
   const { _id: id } = await toAcknowledged(users, await raise(), users.vendor1);
-  await put(id, 'vehicle/sent', users.creator.token);
+  await put(id, 'vehicle/sent', users.creator.token, { km: 5050 });
   await put(id, 'vehicle/received', users.vendor1.token, { km: 5050 });
   await put(id, 'work/start', users.vendor1.token);
   const job = (await multipart(`/tickets/${id}/additional`, users.vendor1.token, JOB)).body.data;
@@ -46,7 +46,7 @@ describe('after the review', () => {
   describe('who can do and see what', () => {
     test('only the service creator does the steps the owner gave the creator, not a director through the API', async () => {
       const { _id: id } = await toAcknowledged(users, await raise(), users.vendor1);
-      assert.equal((await put(id, 'vehicle/sent', users.supervisor.token)).status, 403);
+      assert.equal((await put(id, 'vehicle/sent', users.supervisor.token, { km: 5050 })).status, 403);
       assert.equal((await put(id, 'breakdown', users.supervisor.token, { consumables: 1 })).status, 403);
       const back = await fetch(`${process.env.API_URL}/api/tickets/${id}/scan-quotation`, { method: 'POST', headers: { Authorization: `Bearer ${users.supervisor.token}` } });
       assert.equal(back.status, 403);
@@ -90,7 +90,7 @@ describe('after the review', () => {
 
     test('a returned additional job cannot be moved to another bus or kind', async () => {
       const { _id: id } = await toAcknowledged(users, await raise(), users.vendor1);
-      await put(id, 'vehicle/sent', users.creator.token);
+      await put(id, 'vehicle/sent', users.creator.token, { km: 5050 });
       await put(id, 'vehicle/received', users.vendor1.token, { km: 5050 });
       const job = (await multipart(`/tickets/${id}/additional`, users.vendor1.token, JOB)).body.data;
       await fillBreakdown(users, job._id, 400);
@@ -196,7 +196,7 @@ describe('after the review', () => {
   describe('readings and dates', () => {
     const atVendor = async (extra) => {
       const { _id: id } = await toAcknowledged(users, await raise(extra), users.vendor1);
-      await put(id, 'vehicle/sent', users.creator.token, { date: '2026-10-05' });
+      await put(id, 'vehicle/sent', users.creator.token, { km: 5100, date: '2026-10-05' });
       return id;
     };
 
@@ -229,7 +229,7 @@ describe('after the review', () => {
 
     test('an empty date means today, on every step', async () => {
       const { _id: id } = await toAcknowledged(users, await raise(), users.vendor1);
-      const sent = await put(id, 'vehicle/sent', users.creator.token, { date: '' });
+      const sent = await put(id, 'vehicle/sent', users.creator.token, { km: 5050, date: '' });
       assert.equal(sent.status, 200, JSON.stringify(sent.body));
       assert.ok(sent.body.data.vehicle.sentAt);
     });
@@ -262,7 +262,7 @@ describe('after the review', () => {
       await api('PUT', '/sheets/readings', { token: users.creator.token, body: { busId: own._id, date: today, km: 100000 } });
       const oil = await raise({ serviceType: 'oil', repairCategory: undefined, currentReading: 100000 }, own._id);
       await toAcknowledged(users, oil, users.vendor1);
-      await put(oil._id, 'vehicle/sent', users.creator.token);
+      await put(oil._id, 'vehicle/sent', users.creator.token, { km: 100020 });
       await put(oil._id, 'vehicle/received', users.vendor1.token, { km: 100020 });
       await put(oil._id, 'work/start', users.vendor1.token);
       await put(oil._id, 'work/ready', users.vendor1.token);
@@ -342,7 +342,7 @@ describe('after the review', () => {
       const brand = `Declined${run}`;
       const own = await createBus(users, 'AUDD', users.vendor1.id, { make: brand, rates: undefined });
       const { _id: id } = await toAcknowledged(users, await raise({}, own._id), users.vendor1);
-      await put(id, 'vehicle/sent', users.creator.token);
+      await put(id, 'vehicle/sent', users.creator.token, { km: 5050 });
       await put(id, 'vehicle/received', users.vendor1.token, { km: 5050 });
       const job = (await multipart(`/tickets/${id}/additional`, users.vendor1.token, JOB)).body.data;
       await fillBreakdown(users, job._id, 400);

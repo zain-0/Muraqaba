@@ -151,7 +151,7 @@ export const fromAcknowledgedToReturned = async (users, id, vendor, { km, date }
   const put = (path, token, body) => api('PUT', `/tickets/${id}/${path}`, { token, body });
   const { currentReading = 0 } = ok(await api('GET', `/tickets/${id}`, { token: users.creator.token }));
   const back = km ?? currentReading + 200;
-  ok(await put('vehicle/sent', users.creator.token, { date }));
+  ok(await put('vehicle/sent', users.creator.token, { km: Math.min(back, currentReading + 100), date }));
   ok(await put('vehicle/received', vendor.token, { km: Math.min(back, currentReading + 100), date }));
   ok(await put('work/start', vendor.token, { date }));
   ok(await put('work/ready', vendor.token, { date }));

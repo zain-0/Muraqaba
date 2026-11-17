@@ -51,6 +51,7 @@ import {
   validateTicketListQuery,
   validateStepDate,
   validateVehicleReceived,
+  validateVehicleSent,
   validateVehicleReturned,
   validateWorkStart,
   validateAccident,
@@ -95,7 +96,7 @@ router.post('/:id/estimate/reply', roleMiddleware(CREATORS), validateObjectId, p
 router.put('/:id/escalate', roleMiddleware(CREATORS), validateObjectId, validateTransitionNote, escalateTicket);
 router.post('/:id/scan-quotation', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateScan, scanQuotationFile);
 router.put('/:id/breakdown', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateBreakdown, saveBreakdown);
-router.put('/:id/vehicle/sent', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateStepDate, markVehicleSent);
+router.put('/:id/vehicle/sent', roleMiddleware(SERVICE_CREATOR), validateObjectId, validateVehicleSent, markVehicleSent);
 router.put('/:id/vehicle/received', roleMiddleware(VENDOR), validateObjectId, validateVehicleReceived, markVehicleReceived);
 router.put('/:id/work/start', roleMiddleware(VENDOR), validateObjectId, validateWorkStart, startWork);
 router.put('/:id/work/ready', roleMiddleware(VENDOR), validateObjectId, validateStepDate, markReady);

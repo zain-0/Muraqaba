@@ -25,6 +25,7 @@ import { intervalServiceOf, intervalStatus, latestKmByBus } from '../utils/inter
 import { offFleetBusIds } from '../utils/busDay.js';
 import { USER_FIELDS } from '../utils/query.js';
 import { amountTotals, balancesFor } from '../utils/lpoBalance.js';
+import { COST_GROUPS, costGroupOf } from '../utils/busCosts.js';
 import { isInDate } from '../utils/lpoDeduction.js';
 import { BANDS, averageDays, bandIndex, brandKey, committedFils, daysInRange, daysOfYear, isLate, kindOf, kmInMonth, kmInRange, ratio, spendFils, spendPerKm, toAed, toFils, workshopDays } from '../utils/reportMaths.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
@@ -100,7 +101,7 @@ const ticketsRaised = (period, extra = {}) =>
     .populate('invoice', 'amount status invoiceNumber');
 
 // Buses are looked up rather than populated, so a VSR whose bus was deleted keeps its bus id.
-const busLookup = async () => new Map((await Bus.find().select('fleetNumber make')).map((bus) => [String(bus._id), bus]));
+const busLookup = async () => new Map((await Bus.find().select('fleetNumber make model')).map((bus) => [String(bus._id), bus]));
 
 const vendorNames = async (tickets) => {
   const ids = [...new Set(tickets.map((ticket) => String(ticket.vendorId)))];
@@ -397,6 +398,64 @@ export const costsReport = asyncHandler(async (req, res) => {
   const totals = { spend: monthFils.map(toAed), totalSpend: toAed(sum(monthFils)), committed: toAed(sum(groups.map((group) => group.committed))), vsrs: sum(groups.map((group) => group.vsrs)), km: sum(rows.map((row) => row.km)) };
 
   res.json({ success: true, data: { year, from, to, months, rows, totals, filters: { year, ...rangeOf(period), brand, type, vendorId }, options } });
+});
+
+/**
+ * GET /api/reports/bus-stats?year=&from=&to=&brand=  (director, purchasing)
+ * The statistical report (owner, 2026-11-16): every bus on the fleet in the period with what it
+ * cost by kind of work, its VSRs, accidents, breakdowns and days at the workshop, the km it ran and
+ * the cost per km. Costs follow the bus's whole-life costs on a scrap request (utils/busCosts.js),
+ * km follow Cost per bus, so the three agree for the same bus and period.
+ */
+export const busStatsReport = asyncHandler(async (req, res) => {
+  const period = periodOf(req.query);
+  const { year, from, to, days } = period;
+  const brand = req.query.brand || null;
+  const today = uaeDay();
+  const lastDay = days.at(-1) < today ? days.at(-1) : today;
+  const [tickets, fleet, known, yearKm, options] = await Promise.all([ticketsRaised(period), fleetBuses(lastDay, days[0]), busLookup(), from ? [] : kmRows(year, today), filterOptions()]);
+
+  const rowsByBus = new Map();
+  const rowFor = (id, bus) => {
+    if (!rowsByBus.has(id)) {
+      rowsByBus.set(id, { busId: id, fleetNumber: bus?.fleetNumber ?? null, make: bus?.make ?? null, model: bus?.model ?? null, fils: Object.fromEntries(COST_GROUPS.map((group) => [group, 0])), committed: 0, vsrs: 0, accidents: 0, breakdowns: 0, trips: 0, workshopDays: 0 });
+    }
+    return rowsByBus.get(id);
+  };
+  fleet.forEach((bus) => rowFor(String(bus._id), bus));
+  tickets.forEach((ticket) => {
+    const id = String(ticket.busId);
+    // A VSR whose bus left the fleet before the period, or was deleted, still shows what it cost.
+    const row = rowFor(id, known.get(id));
+    const group = costGroupOf(ticket);
+    row.fils[group] += spendFils(ticket);
+    row.committed += committedFils(ticket);
+    row.vsrs += 1;
+    if (group === 'accident') row.accidents += 1;
+    if (ticket.isBreakdown) row.breakdowns += 1;
+    const away = workshopDays(ticket);
+    if (away !== null) {
+      row.trips += 1;
+      row.workshopDays += away;
+    }
+  });
+
+  const kept = [...rowsByBus.values()].filter((row) => !brand || sameBrand(row.make, brand));
+  // A year adds up the Km report's months; custom dates take the km run between the two days.
+  const kmByBus = from ? await kmBetween(kept.map((row) => new mongoose.Types.ObjectId(row.busId)), from, to) : new Map(yearKm.map((row) => [row.busId, row.total]));
+  const figures = ({ fils, committed, ...row }, km) => {
+    const total = sum(Object.values(fils));
+    return { ...row, costs: Object.fromEntries(COST_GROUPS.map((group) => [group, toAed(fils[group])])), totalCost: toAed(total), committed: toAed(committed), km, costPerKm: spendPerKm(total, km) };
+  };
+  const rows = kept.map((row) => figures(row, kmByBus.get(row.busId) ?? null)).sort(byFleetNumber);
+  const totalFils = Object.fromEntries(COST_GROUPS.map((group) => [group, sum(kept.map((row) => row.fils[group]))]));
+  const count = (field) => sum(kept.map((row) => row[field]));
+  const { busId: _id, fleetNumber: _number, make: _make, model: _model, ...totals } = figures(
+    { fils: totalFils, committed: count('committed'), vsrs: count('vsrs'), accidents: count('accidents'), breakdowns: count('breakdowns'), trips: count('trips'), workshopDays: count('workshopDays') },
+    sum(rows.map((row) => row.km)) || null
+  );
+
+  res.json({ success: true, data: { year, from, to, groups: COST_GROUPS, rows, totals, filters: { year, ...rangeOf(period), brand }, options } });
 });
 
 const kindOrder = (kind) => (WORK_KINDS.includes(kind) ? WORK_KINDS.indexOf(kind) : WORK_KINDS.length);

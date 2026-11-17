@@ -245,7 +245,7 @@ describe('VSR types, 2026-11-11', () => {
       const acknowledged = ok(await api('GET', `/tickets/${id}`, { token: creator }));
       assert.equal(acknowledged.history.at(-1).by._id, users.creator.id);
 
-      ok(await put(id, 'vehicle/sent', creator));
+      ok(await put(id, 'vehicle/sent', creator, { km: 5050 }));
       ok(await put(id, 'vehicle/received', creator, { km: 5050 }));
       ok(await put(id, 'work/start', creator));
       const job = await multipart(`/tickets/${id}/additional`, creator, { description: 'The bumper bracket is cracked as well.', serviceType: 'repair', repairCategory: 'BODY', amount: '300', quotationNumber: 'Q-OUT', daysToComplete: '1' });
@@ -269,7 +269,7 @@ describe('VSR types, 2026-11-11', () => {
       assert.equal(refused.status, 403);
       assert.equal(refused.body.message, 'This step is for the vendor. The service creator records it only for a vendor outside the list.');
       const acknowledged = await toAcknowledged(users, ticket, users.vendor1);
-      assert.equal((await put(acknowledged._id, 'vehicle/sent', users.creator.token)).status, 200);
+      assert.equal((await put(acknowledged._id, 'vehicle/sent', users.creator.token, { km: 5050 })).status, 200);
       assert.equal((await put(acknowledged._id, 'vehicle/received', users.creator.token, { km: 5050 })).status, 403);
     });
   });

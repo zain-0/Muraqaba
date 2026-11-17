@@ -6817,7 +6817,7 @@
         "tags": [
           "Workshop"
         ],
-        "summary": "The bus went to the vendor",
+        "summary": "The bus went to the vendor, with its km reading. From approved or acknowledged: the vendor need not have opened the VSR",
         "description": "Roles: serviceCreator, supervisor",
         "security": [
           {
@@ -6841,11 +6841,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": [
+                  "km"
+                ],
                 "properties": {
                   "date": {
                     "type": "string",
                     "format": "date",
                     "description": "Defaults to now, cannot be in the future"
+                  },
+                  "km": {
+                    "type": "integer"
                   }
                 }
               }
@@ -9093,6 +9099,105 @@
         ],
         "summary": "Month figures for repairs, tyres, batteries and maintenance, by brand or for the fleet, for a year or custom dates (from and to, YYYY-MM-DD, at most 1,100 days, which win over the year)",
         "description": "Roles: serviceCreator, supervisor, purchaseManager",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "brand",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role not allowed or resource owned by someone else",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/bus-stats": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "The statistical report: each bus with its accepted invoices by kind of work, VSRs, accidents, breakdowns, days at the workshop, km run and cost per km, for a year or custom dates (from and to, YYYY-MM-DD, at most 1,100 days, which win over the year)",
+        "description": "Roles: supervisor, purchaseManager",
         "security": [
           {
             "bearerAuth": []

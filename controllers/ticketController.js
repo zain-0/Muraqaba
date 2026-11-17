@@ -427,10 +427,18 @@ const sameInvoiceNumber = async (ticket) => {
  * cannot sign in, so the service creator opening it stands in for them, as with their other steps.
  * A read is not a signature, so nothing is stamped.
  */
+// The bus can leave before the vendor has opened the VSR (owner, 2026-11-16); a first read up to the
+// bus's return is still kept, without moving the VSR.
+const READ_AFTER_SENDING = ['vehicleSent', 'vehicleReceived', 'workInProgress', 'readyForDelivery', 'vehicleReleased', 'vehicleReturned'];
+
 const readByVendor = async (req, ticket) => {
-  if (ticket.status !== 'approved') return ticket;
   const reads = req.user.role === 'vendor' || (req.user.role === 'serviceCreator' && ticket.vendorId?.outside);
   if (!reads) return ticket;
+  if (READ_AFTER_SENDING.includes(ticket.status) && !ticket.acknowledgedAt) {
+    await Ticket.updateOne({ _id: ticket._id, acknowledgedAt: mongoose.trusted({ $exists: false }) }, { $set: { acknowledgedAt: new Date(), acknowledgedBy: req.user._id } });
+    return loadVisibleTicket(req);
+  }
+  if (ticket.status !== 'approved') return ticket;
   const fresh = await loadTicket(ticket._id);
   if (fresh.status === 'approved') {
     fresh.transition('acknowledged', req.user._id);

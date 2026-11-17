@@ -50,7 +50,7 @@ export const TICKET_STATUSES = [
   'pending', // creator escalated the estimate, waiting for supervisor approval
   'returned', // supervisor sent it back with a reason; the creator corrects, replies or escalates again
   'approved', // supervisor approved (or an agreed price), waiting for the vendor to open it
-  'acknowledged', // the vendor opened the approved VSR (a button until 2026-11-16); the creator sends the bus
+  'acknowledged', // the vendor opened the approved VSR before the bus was sent; the bus can be sent without it
   'vehicleSent', // the creator sent the bus; the vendor confirms it arrived
   'vehicleReceived', // the bus is at the vendor
   'workInProgress',
@@ -250,6 +250,7 @@ const TicketSchema = new mongoose.Schema(
     breakdown: BreakdownSchema,
     vehicle: {
       sentAt: Date,
+      sentKm: { type: Number, min: 0 }, // the reading as the bus left the depot (since 2026-11-16)
       receivedAt: Date,
       receivedKm: { type: Number, min: 0 },
       workStartedAt: Date,

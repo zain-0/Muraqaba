@@ -114,7 +114,7 @@ describe('the daily status follows the VSRs', () => {
     const bus = await newBus('JOB');
     const parent = await raise(bus);
     const { _id: id } = await toAcknowledged(users, parent, users.vendor1);
-    await put(id, 'vehicle/sent', users.creator.token);
+    await put(id, 'vehicle/sent', users.creator.token, { km: 5050 });
     await put(id, 'vehicle/received', users.vendor1.token, { km: 5050 });
     await put(id, 'work/start', users.vendor1.token);
     const added = await multipart(`/tickets/${id}/additional`, users.vendor1.token, { description: 'Cracked exhaust found during the work.', serviceType: 'repair', repairCategory: 'MECHANICAL', amount: '400', quotationNumber: 'Q-JOB', daysToComplete: '2' });

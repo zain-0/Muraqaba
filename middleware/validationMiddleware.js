@@ -340,6 +340,9 @@ export const validateStepDate = [stepDate(), handleValidationErrors];
 
 export const validateVehicleReceived = [stepDate(), reading(), handleValidationErrors];
 
+// The reading as the bus leaves the depot (owner, 2026-11-16).
+export const validateVehicleSent = [stepDate(), reading(), handleValidationErrors];
+
 // At the depot the vendor gives the reading when starting, since the bus was never received.
 export const validateWorkStart = [stepDate(), reading().optional({ values: 'null' }), handleValidationErrors];
 
