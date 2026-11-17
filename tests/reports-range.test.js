@@ -345,3 +345,45 @@ describe('the statistical report: each bus by kind of work, with its km and cost
     assert.deepEqual([quiet.vsrs, quiet.totalCost, quiet.costPerKm], [0, 0, null]);
   });
 });
+
+describe('custom dates on the km report, the weekly report and the LPO balances (owner, 2026-11-17)', () => {
+  test('km: a column for each month the dates touch, each counting only its days between them', async () => {
+    const data = await get('km', NEW_YEAR);
+    assert.deepEqual(data.months, ['2019-12', '2020-01']);
+    assert.deepEqual(data.filters, { year: null, ...NEW_YEAR });
+    const r1 = data.rows.find((row) => row.busId === id(bus.r1));
+    assert.deepEqual(r1.km, [2000, 1500], '3000 on 31 December less 1000 on 30 November; 4500 on 10 January less 3000');
+    assert.equal(r1.total, 3500);
+    const r2 = data.rows.find((row) => row.busId === id(bus.r2));
+    assert.deepEqual([r2.km, r2.total], [[null, null], null], 'no readings at all');
+    assert.equal(data.summary.length, 2);
+  });
+
+  test('km: the whole of 2020 as dates is the year 2020, and a year still has no dates among its filters', async () => {
+    const [dates, year] = await Promise.all([get('km', ALL_2020), get('km', { year: 2020 })]);
+    for (const field of ['months', 'rows', 'summary', 'total']) assert.deepEqual(dates[field], year[field], field);
+    assert.deepEqual(year.filters, { year: 2020 });
+    assert.equal((await api('GET', '/reports/km?from=2020-02-01&to=2020-01-01', { token: users.purchasing.token })).status, 400);
+  });
+
+  test('weekly: the interval services raised between the dates, by UAE day; without dates, the last seven days', async () => {
+    const weekly = async (query = '') => (await api('GET', `/reports/weekly${query}`, { token: users.supervisor.token })).body.data;
+    const january = await weekly('?from=2020-01-01&to=2020-01-31');
+    assert.equal(january.custom, true);
+    assert.deepEqual([january.raised.tyre.length, january.raised.oil.length, january.raised.battery.length], [1, 1, 0], 'the tyre change at 00:30 on 1 January, the oil service of 15 January');
+    const december = await weekly('?from=2019-12-01&to=2019-12-31');
+    assert.equal(december.raised.tyre.length, 0, '00:30 on 1 January is not December in the UAE');
+    assert.equal((await weekly()).custom, false);
+    assert.equal((await api('GET', '/reports/weekly?from=2020-01-01', { token: users.supervisor.token })).status, 400);
+  });
+
+  test('LPO balances: dates keep the LPOs dated between them', async () => {
+    const balances = (query) => api('GET', `/reports/lpo-balances${query}`, { token: users.purchasing.token });
+    const none = await balances('?from=2000-01-01&to=2000-12-31');
+    assert.equal(none.status, 200);
+    assert.deepEqual(none.body.data.rows, []);
+    const all = (await balances('')).body.data.rows.length;
+    assert.equal((await balances('?from=2000-01-01&to=2002-12-31')).body.data.rows.length <= all, true);
+    assert.equal((await balances('?from=2020-13-01&to=2020-12-31')).status, 400);
+  });
+});

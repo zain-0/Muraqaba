@@ -27,7 +27,7 @@ import { USER_FIELDS } from '../utils/query.js';
 import { amountTotals, balancesFor } from '../utils/lpoBalance.js';
 import { COST_GROUPS, costGroupOf } from '../utils/busCosts.js';
 import { isInDate } from '../utils/lpoDeduction.js';
-import { BANDS, averageDays, bandIndex, brandKey, committedFils, daysInRange, daysOfYear, isLate, kindOf, kmInMonth, kmInRange, ratio, spendFils, spendPerKm, toAed, toFils, workshopDays } from '../utils/reportMaths.js';
+import { BANDS, averageDays, bandIndex, brandKey, committedFils, daysInRange, daysOfYear, isLate, kindOf, kmInDays, kmInRange, ratio, spendFils, spendPerKm, toAed, toFils, workshopDays } from '../utils/reportMaths.js';
 import { daysInMonth, endOfUaeDay, startOfUaeDay, uaeDay, uaeMonth } from '../utils/uaeTime.js';
 
 // Maintenance is the oil service alone since 2026-11-11, when transmission became a repair category.
@@ -295,13 +295,13 @@ export const downtimeReport = asyncHandler(async (req, res) => {
  * Each bus on the fleet in the year with its km for each month (null with no reading that month,
  * before it joined the fleet and for months still to come) and the year's known km added up.
  */
-const kmRows = async (year, today) => {
-  const first = `${year}-01-01`;
-  const last = `${year}-12-31`;
+const kmRows = async (parts, today) => {
+  const first = parts[0].first;
+  const last = parts.at(-1).last;
   const [buses, inYear, before] = await Promise.all([
     fleetBuses(last, first),
     BusDailyReading.find({ date: mongoose.trusted({ $gte: first, $lte: last }) }).select('bus date km'),
-    // A bus's last reading before the year starts its January.
+    // A bus's last reading before the period starts its first month.
     BusDailyReading.aggregate([{ $match: { date: { $lt: first } } }, { $sort: { date: -1 } }, { $group: { _id: '$bus', date: { $first: '$date' }, km: { $first: '$km' } } }]),
   ]);
   const readings = new Map();
@@ -315,23 +315,31 @@ const kmRows = async (year, today) => {
 
   return buses.map((bus) => {
     const own = readings.get(String(bus._id)) ?? [];
-    const km = monthsOf(year).map((month) => {
-      const days = daysInMonth(month);
-      if (days[0] > today || days.at(-1) < bus.firstDay) return null;
-      return kmInMonth(own, month);
+    const km = parts.map((part) => {
+      if (part.first > today || part.last < bus.firstDay) return null;
+      return kmInDays(own, part.first, part.last);
     });
     const known = km.filter((value) => value !== null);
     return { busId: String(bus._id), fleetNumber: bus.fleetNumber, make: bus.make, firstDay: bus.firstDay, km, total: known.length ? sum(known) : null };
   });
 };
 
-// GET /api/reports/km?year=
+/** The period month by month: each month's days that the period covers, so custom dates may start and end part-way through one. */
+const monthParts = (period) =>
+  period.months.map((month) => {
+    const days = daysInMonth(month).filter((day) => day >= period.days[0] && day <= period.days.at(-1));
+    return { month, first: days[0], last: days.at(-1) };
+  });
+
+// GET /api/reports/km?year=&from=&to=
 export const kmReport = asyncHandler(async (req, res) => {
-  const { year } = periodOf(req.query);
+  const period = periodOf(req.query);
+  const { year } = period;
+  const parts = monthParts(period);
   const today = uaeDay();
-  const [rows, options] = await Promise.all([kmRows(year, today), filterOptions()]);
-  const summary = monthsOf(year).map((month, i) => {
-    const days = daysInMonth(month);
+  const [rows, options] = await Promise.all([kmRows(parts, today), filterOptions()]);
+  const summary = parts.map(({ month, first, last }, i) => {
+    const days = [first, last];
     if (days[0] > today) return { month, fleet: null, bands: null, notOperated: null, noReadings: null, fleetKm: null };
     const onFleet = rows.filter((row) => row.firstDay <= days.at(-1));
     const bands = BANDS.map(() => 0);
@@ -345,7 +353,7 @@ export const kmReport = asyncHandler(async (req, res) => {
     return { month, fleet: onFleet.length, bands, notOperated, noReadings, fleetKm: sum(onFleet.map(({ km }) => km[i])) };
   });
 
-  res.json({ success: true, data: { year, months: monthsOf(year), bands: BANDS, rows, summary, total: { fleetKm: sum(summary.map((m) => m.fleetKm)) }, filters: { year }, options } });
+  res.json({ success: true, data: { year, months: period.months, bands: BANDS, rows, summary, total: { fleetKm: sum(summary.map((m) => m.fleetKm)) }, filters: { year, ...rangeOf(period) }, options } });
 });
 
 /**
@@ -371,7 +379,7 @@ export const costsReport = asyncHandler(async (req, res) => {
   const brand = req.query.brand || null;
   const type = req.query.type || null;
   const vendorId = req.query.vendorId || null;
-  const [tickets, buses, km, options] = await Promise.all([ticketsRaised(period, vendorId ? { vendorId } : {}), busLookup(), from ? [] : kmRows(year, uaeDay()), filterOptions()]);
+  const [tickets, buses, km, options] = await Promise.all([ticketsRaised(period, vendorId ? { vendorId } : {}), busLookup(), from ? [] : kmRows(monthParts(period), uaeDay()), filterOptions()]);
   // A year adds up the Km report's months; custom dates take the km run between the two days.
   const kmByBus = from ? await kmBetween([...new Map(tickets.map((ticket) => [String(ticket.busId), ticket.busId])).values()], from, to) : new Map(km.map((row) => [row.busId, row.total]));
 
@@ -413,7 +421,7 @@ export const busStatsReport = asyncHandler(async (req, res) => {
   const brand = req.query.brand || null;
   const today = uaeDay();
   const lastDay = days.at(-1) < today ? days.at(-1) : today;
-  const [tickets, fleet, known, yearKm, options] = await Promise.all([ticketsRaised(period), fleetBuses(lastDay, days[0]), busLookup(), from ? [] : kmRows(year, today), filterOptions()]);
+  const [tickets, fleet, known, yearKm, options] = await Promise.all([ticketsRaised(period), fleetBuses(lastDay, days[0]), busLookup(), from ? [] : kmRows(monthParts(period), today), filterOptions()]);
 
   const rowsByBus = new Map();
   const rowFor = (id, bus) => {
@@ -607,11 +615,12 @@ export const dueServices = async () => {
   return due;
 };
 
-// GET /api/reports/weekly  (the last seven days, and what is due now)
+// GET /api/reports/weekly?from=&to=  (the last seven days or the days asked for, and what is due now)
 export const weeklyReport = asyncHandler(async (req, res) => {
-  const to = new Date();
+  const custom = Boolean(req.query.from && req.query.to);
+  const to = custom ? endOfUaeDay(req.query.to) : new Date();
   // Seven whole UAE days, today being the last of them.
-  const from = startOfUaeDay(uaeDay(new Date(to.getTime() - (REPORT_DAYS - 1) * 24 * 60 * 60 * 1000)));
+  const from = startOfUaeDay(custom ? req.query.from : uaeDay(new Date(to.getTime() - (REPORT_DAYS - 1) * 24 * 60 * 60 * 1000)));
   const measured = [{ serviceType: mongoose.trusted({ $in: ['tyre', 'battery', 'oil'] }) }, { serviceType: 'repair', repairCategory: 'BRAKE PADS' }];
   const tickets = await Ticket.find({ createdAt: mongoose.trusted({ $gte: from, $lte: to }), $or: measured, status: NOT_DECLINED })
     .select('vsrNumber serviceType repairCategory status createdAt busId vendorId intervalUsage')
@@ -631,25 +640,27 @@ export const weeklyReport = asyncHandler(async (req, res) => {
       intervalUsage: ticket.intervalUsage,
     });
   });
-  res.json({ success: true, data: { from, to, raised, due: await dueServices() } });
+  res.json({ success: true, data: { from, to, custom, raised, due: await dueServices() } });
 });
 
 /**
- * GET /api/reports/lpo-balances?vendorId=&kind=&inDate=  (depot)
+ * GET /api/reports/lpo-balances?vendorId=&kind=&inDate=&from=&to=  (depot)
  * The client's LPO sheet (2026-11-10): for each LPO line its value, booked by open VSRs not yet on
  * a GRN, GRN, limit available for the next VSR (value - booked - GRN), remaining after GRN
  * (value - GRN) and VSRs issued, with amount subtotals per LPO and for the whole report. inDate
- * true or false keeps LPOs valid today or not; left out, every LPO.
+ * true or false keeps LPOs valid today or not; left out, every LPO. from and to keep the LPOs
+ * dated within those UAE days.
  */
 export const lpoBalancesReport = asyncHandler(async (req, res) => {
-  const { vendorId, kind } = req.query;
+  const { vendorId, kind, from, to } = req.query;
+  const dated = (lpo) => !(from && to) || (uaeDay(dateOf(lpo)) >= from && uaeDay(dateOf(lpo)) <= to);
   const inDate = req.query.inDate ? req.query.inDate === 'true' : null;
   const lpos = await Lpo.find().populate('vendor', 'name');
   const today = uaeDay();
   const vendorOf = (lpo) => ({ _id: lpo.vendor?._id ?? lpo.vendor, name: lpo.vendor?.name ?? null });
   const dateOf = (lpo) => lpo.date ?? lpo.validFrom;
   const shown = lpos
-    .filter((lpo) => (!vendorId || String(lpo.vendor?._id ?? lpo.vendor) === vendorId) && (inDate === null || isInDate(lpo, today) === inDate))
+    .filter((lpo) => (!vendorId || String(lpo.vendor?._id ?? lpo.vendor) === vendorId) && (inDate === null || isInDate(lpo, today) === inDate) && dated(lpo))
     .sort((a, b) => dateOf(a) - dateOf(b) || a.number.localeCompare(b.number, undefined, { numeric: true }));
   const balances = await balancesFor(shown);
 

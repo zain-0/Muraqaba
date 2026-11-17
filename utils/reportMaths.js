@@ -74,11 +74,16 @@ export const spendPerKm = (fils, km) => (km ? Math.round((fils * 100) / km) / 10
  */
 export const kmInMonth = (readings, month) => {
   const days = daysInMonth(month);
+  return kmInDays(readings, days[0], days.at(-1));
+};
+
+/** The same rule over any run of days, such as the part of a month that custom dates cover. */
+export const kmInDays = (readings, first, last) => {
   const sorted = [...readings].sort((a, b) => a.date.localeCompare(b.date));
-  const inMonth = sorted.filter((r) => r.date >= days[0] && r.date <= days.at(-1));
-  if (!inMonth.length) return null;
-  const before = sorted.filter((r) => r.date < days[0]).at(-1) ?? inMonth[0];
-  return Math.max(inMonth.at(-1).km - before.km, 0);
+  const inDays = sorted.filter((r) => r.date >= first && r.date <= last);
+  if (!inDays.length) return null;
+  const before = sorted.filter((r) => r.date < first).at(-1) ?? inDays[0];
+  return Math.max(inDays.at(-1).km - before.km, 0);
 };
 
 /**

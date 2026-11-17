@@ -28,14 +28,14 @@ export const reportRoutes = express.Router();
 reportRoutes.use(authMiddleware);
 reportRoutes.get('/query', PURCHASING, validateRange, validateReportQuery, runQuery);
 reportRoutes.get('/fleet', roleMiddleware(['serviceCreator', 'supervisor', 'purchaseManager']), validateRange, validateFleetFigures, fleetFigures);
-reportRoutes.get('/weekly', roleMiddleware(['supervisor', 'purchaseManager']), weeklyReport);
+reportRoutes.get('/weekly', roleMiddleware(['supervisor', 'purchaseManager']), validateRange, weeklyReport);
 // The director's statistical report (2026-11-16); purchasing reads it too, as it does the weekly one.
 reportRoutes.get('/bus-stats', roleMiddleware(['supervisor', 'purchaseManager']), validateYearBrand, busStatsReport);
 reportRoutes.get('/availability', PURCHASING, validateYearMonth, availabilityReport);
 reportRoutes.get('/downtime', PURCHASING, validateYearMonthBrand, downtimeReport);
 reportRoutes.get('/costs', PURCHASING, validateCosts, costsReport);
 reportRoutes.get('/vendors', PURCHASING, validateYearMonth, vendorsReport);
-reportRoutes.get('/km', PURCHASING, validateYear, kmReport);
+reportRoutes.get('/km', PURCHASING, validatePeriod, kmReport);
 reportRoutes.get('/categories', PURCHASING, validateYearBrand, categoriesReport);
 reportRoutes.get('/accidents', PURCHASING, validatePeriod, accidentsReport);
 reportRoutes.get('/free-work', PURCHASING, validatePeriod, freeWorkReport);

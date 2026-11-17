@@ -60,4 +60,4 @@ export const validateYearMonthBrand = checks(year, month, ...range, brand);
 export const validateYearBrand = checks(year, ...range, brand);
 export const validateCosts = checks(year, ...range, brand, type, vendorId);
 export const validateInvoiceCheck = checks(year, ...range, all);
-export const validateLpoBalances = checks(vendorId, lpoKind, inDate);
+export const validateLpoBalances = checks(vendorId, lpoKind, inDate, ...range);
